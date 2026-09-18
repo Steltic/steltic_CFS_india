@@ -35,7 +35,7 @@ def main():
         print("[steltic]   uv tool install --python 3.12 steltic")
         raise SystemExit(1)
 
-    ap = argparse.ArgumentParser(prog="steltic-cfs", description="Steltic CFS -- local AISI S100/S240/S400 cold-formed steel design agent")
+    ap = argparse.ArgumentParser(prog="steltic-cfs-india", description="Steltic CFS -- local India IS 801/811 cold-formed steel design agent")
     ap.add_argument("--host", default="127.0.0.1", help="bind address (default 127.0.0.1; do NOT expose publicly)")
     ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8000")))
     ap.add_argument("--no-browser", action="store_true", help="don't open a browser tab")

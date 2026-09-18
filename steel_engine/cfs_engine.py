@@ -68,7 +68,22 @@ def story_weight(cfg, k):
 
 
 def elf(cfg):
-    """ASCE 7-22 12.8 ELF. Returns dict(V, Cs, Ta, T_used, k, Fx={level: kip}, W)."""
+    """ELF / equivalent-static seismic — India override.
+
+    Authoritative design story forces come from cfg['load_plan'] (LIVE IS 1893 RAG).
+    If load_plan.seismic_summary is present, return that. Embedded ASCE 7-22 ELF math
+    is retained only as a non-authoritative modal/period helper.
+    """
+    plan = cfg.get("load_plan") if isinstance(cfg, dict) else None
+    if isinstance(plan, dict) and isinstance(plan.get("seismic_summary"), dict):
+        ss = plan["seismic_summary"]
+        Fx = ss.get("Fx") or ss.get("story_forces") or {}
+        Fx = {int(k): float(v) if not isinstance(v, (list, tuple)) else float(v[0])
+              for k, v in dict(Fx).items()}
+        return dict(V=float(ss.get("V", 0.0)), Cs=float(ss.get("Cs", 0.0)),
+                    Ta=float(ss.get("Ta", 0.0)), T_used=float(ss.get("Tu", ss.get("T_used", 0.0))),
+                    k=float(ss.get("k", 1.0)), W=float(ss.get("W", 0.0)), Fx=Fx,
+                    note="from load_plan.seismic_summary (IS 1893 RAG)")
     s = cfg["seis"]
     N = cfg["stories"]
     W = sum(story_weight(cfg, k) for k in range(1, N + 1))

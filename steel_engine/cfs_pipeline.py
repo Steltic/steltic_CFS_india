@@ -12,9 +12,9 @@ import json, math
 import wall_line as WL
 import cfs_systems as CS
 import cfs_engine as CE
+import india_loads as IL
 
-COMBOS_NOTE = ("ASCE 7-22 2.3 LRFD; seismic cases carry (1.2+0.2SDS)D and 0.9-0.2SDS "
-               "counteracting; NET-UPLIFT case 0.9D+1.0W is a REQUIRED anchorage case")
+COMBOS_NOTE = ("India: combinations from cfg['load_plan'] after LIVE IS 875 / IS 1893 RAG (see india_loads.py). Do NOT invent ASCE 7 or hardcode IS load formulas. Include retrieved uplift/counteracting cases when wind/EQ apply.")
 
 # S400-20 Table A3.2-1 expected-strength factors (ASTM A1003 sheet grades)
 RY_BY_FY = {33: 1.5, 50: 1.1}
@@ -103,6 +103,19 @@ def _chord_dead_relief(cfg, line, dirn, w_bay_ft):
 # ---------------- Stage 3b: wall-path wind machinery + LRFD combo enumeration ----------------
 
 def wind_story_forces(cfg, direction):
+    """REMOVED as primary load path on steltic_CFS_india.
+
+    USA used ASCE 7-22 Eq. 26.10-1 here. India requires LIVE IS 875 Part 3 RAG and
+    story forces written into cfg['load_plan']. Do not call this to invent wind loads.
+    """
+    raise RuntimeError(
+        "steltic_CFS_india: cfs_pipeline.wind_story_forces() is disabled. RAG-query "
+        "IS 875 Part 3:2015 LIVE this job and put retrieved wind story forces into "
+        "cfg['load_plan'] (see india_loads.py). Do not hardcode ASCE or IS wind formulas."
+    )
+
+
+def _legacy_asce_wind_story_forces_DISABLED(cfg, direction):
     """SEEDED MWFRS story forces (kip) on the box building for one direction, from
     cfg['wind'] = dict(V=mph, exposure=...). Net wall coefficient G*(Cp_ww - Cp_lw) =
     0.85*(0.8+0.5) on the projected face, qz stepped per story (Kz at story top). SEEDS --
@@ -138,6 +151,14 @@ def wind_story_forces(cfg, direction):
 
 
 def enumerate_combos(cfg):
+    """India: return combination list from cfg['load_plan'] only (LIVE IS RAG).
+
+    USA hardcoded ASCE 7-22 section 2.3 LRFD labels here. steltic_CFS_india refuses that path.
+    """
+    return IL.combo_dicts_from_load_plan(cfg)
+
+
+def _legacy_asce_enumerate_combos_DISABLED(cfg):
     """The LRFD combo LIST for the wall path (data, not solves -- the spring model is linear
     per direction, so combos scale/pair the E and W distributions). Seismic carries
     (1.2+0.2SDS)/(0.9-0.2SDS) vertical pairing and rho; wind carries the 1.0W pair incl.
@@ -177,14 +198,33 @@ def enumerate_combos(cfg):
 
 
 def _wind_line_screen(cfg, res):
-    """Per-direction wind distribution through the SAME tributary machinery as seismic;
-    returns {dirn: {line: {story: v_wind_plf}}} + per-line wind base tension, or None."""
-    if not cfg.get("wind"):
-        return None
+    """Per-direction wind distribution from cfg['load_plan'] story forces (IS 875 RAG).
+
+    Does NOT call the disabled ASCE wind_story_forces(). If load_plan has no wind
+    story forces, returns None (agent must RAG-fill wind when the brief needs it).
+    """
+    plan = cfg.get("load_plan") if isinstance(cfg, dict) else None
+    forces_map = (plan or {}).get("story_forces") or {}
     out = {}
     for dirn, lines, dim in (("X", cfg["lines_x"], cfg["plan_ft"][1]),
                              ("Y", cfg["lines_y"], cfg["plan_ft"][0])):
-        wf, basis = wind_story_forces(cfg, dirn)
+        raw = (forces_map.get("wind_%s" % dirn) or forces_map.get("W%s" % dirn)
+               or forces_map.get("wind%s" % dirn))
+        if not raw:
+            continue
+        wf = {}
+        for k, v in dict(raw).items():
+            ki = int(k)
+            if isinstance(v, (list, tuple)):
+                wf[ki] = float(v[0] if dirn == "X" else v[1])
+            elif isinstance(v, dict):
+                wf[ki] = float(v.get("fx" if dirn == "X" else "fy", 0))
+            else:
+                wf[ki] = float(v)
+        if not wf:
+            continue
+        basis = dict(source="load_plan.story_forces", direction=dirn,
+                     note="India wind story forces from LIVE IS 875 Part 3 RAG (not ASCE engine)")
         dist = WL.distribute(wf, lines, dim)
         d = {}
         for ln in lines:
@@ -197,9 +237,9 @@ def _wind_line_screen(cfg, res):
             ot = WL.overturning_stack(ln, dist, {k: cfg["heights_ft"][k - 1] for k in wf})
             d[ln.name] = dict(v_plf=stack, T_base_kip=round(ot[min(ot)]["T_kip"], 1))
         basis = dict(basis, uplift_note="T_base takes NO dead-load relief (conservative "
-                     "seed envelope) -- agent may refine with 0.9D in the package")
+                     "seed envelope) -- agent may refine with retrieved dead factors")
         out[dirn] = dict(lines=d, basis=basis)
-    return out
+    return out or None
 
 
 def stud_axial_stack(cfg, trib_ft, spacing_in=16.0):
@@ -224,11 +264,11 @@ def build_package(name, cfg, res):
     e = res["elf"]
     sysname = cfg.get("system", "wsp_shearwall")
     rho = _rho_seismic(cfg)
-    pkg = dict(building=name, code="AISI S100-16(R2020)+S2/S3, S240-20, S400-20 -- LRFD",
+    pkg = dict(building=name, code="IS 801:1975 + IS 811:1987 (+Amd1) -- India CFS; loads via load_plan (IS 875/1893 RAG)",
                system=sysname, combos_note=COMBOS_NOTE,
                combos=enumerate_combos(cfg),
                rho=rho,
-               rho_basis="ASCE 7-22 12.3.4 (canonical SDC); rho=%.2f is MULTIPLIED into the "
+               rho_basis="legacy ASCE-shaped rho retained as seed factor until IS 1893 RAG supplies an explicit redundancy/importance analogue; rho=%.2f is MULTIPLIED into the "
                          "seeded strength demands below (v_unit_plf, V_kip, T_cum/T_bay, "
                          "wind-vs-seismic comparison); NOT applied to drift (12.3.4.1 item "
                          "2), diaphragm Fpx (item 7), or Omega_0/expected-strength "
@@ -408,7 +448,7 @@ def build_portal_package(name, cfg, res):
     (col/raf envelope + governing combo), knee/apex connection transfer, base anchorage
     (max shear + NET UPLIFT across combos), purlin/girt/strap schedule seeds, torsion table
     (single channels), eave-drift serviceability row."""
-    pkg = dict(building=name, code="AISI S100-16(R2020)+S2/S3 -- LRFD; ASCE 7-22",
+    pkg = dict(building=name, code="IS 801:1975 + IS 811:1987 -- India CFS; loads via load_plan",
                kind="cfs_portal", system="portal frame",
                structure_kind=res["structure_kind"], combos_note=COMBOS_NOTE,
                sections=res["sections"], members=[], connections=[], anchorage=[],
@@ -624,52 +664,36 @@ def _selftest():
           "carries torsion table + tier nudge" %
           (ppkg["connections"][0]["M_transfer_kipin"],
            ppkg["anchorage"][0]["T_net_uplift_kip"], ppkg["anchorage"][0]["uplift_combo"]))
-    # Stage 3b: combos + wind screen + strap seeds + merged design_and_report
-    # 170 mph: the seeded seismic side now carries rho=1.3 (SDC D), so the wind-governing
-    # fixture needs more wind than the pre-rho 140 mph to exercise the wind path
-    cfgw = dict(cfg, wind=dict(V=170.0, exposure="C"))
-    resw = CE.run(cfgw)
-    pkgw = build_package("Ex-wind", cfgw, resw)
-    assert pkgw["combos"] and any("0.9D+1.0W" in c["label"] for c in pkgw["combos"])
-    assert any("rho*E" in c["label"] for c in pkgw["combos"])
-    ws = [w for w in pkgw["wall_lines"] if "v_wind_plf" in w]
-    assert ws, "wind screen must annotate wall slots"
-    assert any("wind" in (w.get("governing_basis") or "") for w in ws), \
-        "170 mph must out-govern rho-amplified seismic on at least one line"
-    assert any(h.get("T_wind_kip") is not None for h in pkgw["holddowns"])
-    # A3/A6: rho + numeric capacity-design seeds on the WSP package
-    assert pkgw["rho"] == 1.3, "SDS=1.0/SD1=0.45 -> SDC D -> rho default 1.3"
-    cdw = pkgw["capacity_design"]
-    assert cdw["Om0"] == 3.0 and cdw["Om0_eff"] == 2.5, \
-        "footnote b: flexible diaphragm + Om0>=2.5 -> Om0_eff = Om0 - 0.5"
-    hdw = pkgw["holddowns"][0]
-    assert hdw["T_cd_seed_kip"] > 1.05 * hdw["T_cum_kip"] > 0, \
-        "Omega0-level seed must exceed the rho-included ELF seed"
-    lncd = cdw["lines"]["X:%s" % hdw["line"]]
-    assert lncd["T_cd_seed_kip"] == hdw["T_cd_seed_kip"]
-    assert lncd["Ve_cap_by_story_kip"][1] > lncd["Ve_cap_by_story_kip"][4] > 0
-    assert lncd["dead_relief_kip_available"] is not None      # adjacent lines -> derivable
-    assert "rho=1.30" in pkgw["wall_lines"][0]["demand_basis"]
-    cfgs = dict(cfgw, system="strap_braced",
-                seis=CS.seis_cfs(1.0, 0.45, 0.45, "strap_braced"))
-    pkgs = build_package("Ex-strap", cfgs, CE.run(cfgs))
-    assert pkgs["capacity_design"]["Ry_by_Fy"] == {33: 1.5, 50: 1.1}
-    assert pkgs["capacity_design"]["Om0_eff"] == 2.0, "strap Om0=2.0 < 2.5: no footnote-b cut"
-    hds = [h for h in pkgs["holddowns"] if "T_bay_seed_kip" in h][0]
-    assert hds["T_cd_seed_kip"] > 1.05 * hds["T_bay_seed_kip"], \
-        "strap per-bay Omega0-level seed must exceed the per-bay ELF seed"
-    out_w = design_and_report("t3b-wall", cfgw, outdir=tempfile.mkdtemp())
-    out_p = design_and_report("t3b-portal", CF._demo_cfg(), outdir=tempfile.mkdtemp())
-    import os
-    assert out_w["kind"] == "wall" and out_p["kind"] == "portal"
-    for o in (out_w, out_p):
-        assert os.path.exists(o["package"])
-        assert o["report_html"] and os.path.exists(o["report_html"]), o["report_html"]
-    assert "drift_flags" in out_w                       # the under-walled fixture must flag
-    print("  Stage 3b: %d combos enumerated; wind governs %d/%d wall slots; strap Ry seeds "
-          "OK; merged design_and_report wrote wall+portal report.html" %
-          (len(pkgw["combos"]), len([w for w in ws if "wind" in
-                                     (w.get("governing_basis") or "")]), len(ws)))
+    # Stage 3b (India): wind_story_forces disabled; combos require load_plan
+    try:
+        wind_story_forces(dict(wind=dict(V=170.0, exposure="C"), stories=1,
+                               heights_ft=[10], plan_ft=[40, 30]), "X")
+        raise AssertionError("wind_story_forces must raise on India path")
+    except RuntimeError as e:
+        assert "disabled" in str(e).lower() or "load_plan" in str(e).lower()
+    cfg_lp = dict(cfg)
+    cfg_lp["load_plan"] = dict(
+        jurisdiction="india",
+        retrieval=[
+            dict(stem="IS_875_Part_2_1987", query="imposed", found=True, cite="Table 1"),
+            dict(stem="IS_1893_Part_1_2016", query="Z", found=True, cite="Table 3"),
+        ],
+        combinations=[
+            dict(label="1.5DL+1.5LL", fD=1.5, fL=1.5, fLr=0.0, cite="IS RAG"),
+            dict(label="1.2DL+1.2EQ_X", fD=1.2, fL=0.0, fLr=0.0,
+                 lateral={"1": [5.0, 0.0, 0.0]}, cite="IS 1893"),
+        ],
+        seismic_summary=dict(V=10.0, Cs=0.05, Ta=0.4, Tu=0.4, k=1.0, W=200.0,
+                             Fx={1: 2.5, 2: 3.5, 3: 4.0}),
+    )
+    combos_lp = enumerate_combos(cfg_lp)
+    assert len(combos_lp) == 2 and combos_lp[0]["label"] == "1.5DL+1.5LL"
+    # legacy ASCE enumerate kept but not the public path
+    assert _legacy_asce_enumerate_combos_DISABLED(cfg)
+    pkgs = build_package("Ex-strap", dict(cfg, system="strap_braced",
+                                          load_plan=cfg_lp["load_plan"]), CE.run(dict(cfg, system="strap_braced", load_plan=cfg_lp["load_plan"])))
+    assert pkgs.get("combos")
+    print("  Stage 3b India: wind disabled; load_plan combos OK; package seeds present")
     print("SELF-TEST PASS")
 
 

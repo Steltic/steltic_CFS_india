@@ -73,20 +73,20 @@ TOOL_SPECS = [
           "to NAVIGATE to an id -- in the standard's own printed words, one idea, no sentences. "
           "Good: {type:'exact_section', doc:'AISI_S100', query:'G5'}. "
           "Bad: {query:'AISI S100 web crippling of stiffened flanges under one-flange loading G5'}. "
-          "Documents: AISI_S100 (members, connections -- primary), AISI_S240 (framing rules -- REQUIRED on every "
-          "light-frame brief), AISI_S400_20 (walls/straps/SBMF: capacities incl. WIND columns, capacity-design chains, "
-          "Type II), ASCE7; collection=steel_design_examples for worked examples (query ALONGSIDE the spec for each "
+          "Documents: IS_801_1975 (CFS members -- primary), IS_811_1987 (sections), "
+          "LOAD stems IS_875_Part_* + IS_1893_Part_1_2016 MANDATORY every job into cfg[load_plan]; "
+          "cfs_design_examples for worked examples when available (query ALONGSIDE the spec for each "
           "member/connection and mirror the example's method). Returns a 'disabled' note if no RAG is configured -- "
-          "then rely on your own cited AISI knowledge.",
+          "then rely on your own cited IS 801/811 knowledge. Loads must still go through load_plan.",
           {"query": {"type": "string", "description": "for exact types: the id only. For fts: printed spec terminology, one idea."},
            "type": {"type": "string", "enum": ["exact_section", "exact_equation", "exact_table", "fts"],
                     "description": "exact_section (E2, G5, E3.4.2) / exact_equation (G5-1, A3.1.3-1, E1.3.1.1-1) / exact_table (E1.3-1, 12.2-1) / fts (navigation only)"},
-           "doc": {"type": "string", "description": "canonical document stem: AISI_S100, AISI_S240, AISI_S400_20, ASCE7. One per call."},
+           "doc": {"type": "string", "description": "canonical document stem: IS_801_1975, IS_811_1987, IS_875_Part_3_2015, IS_1893_Part_1_2016. One per call."},
            "purpose": {"type": "string", "description": "why you need it, a few words (goes in the provenance)"},
            "want_commentary": {"type": "boolean", "description": "default false (provisions). true only for intent/background; commentary never supplies a design value."},
            "context_neighbors": {"type": "integer", "description": "0-2: widen when an equation needs its surrounding 'where:' list"},
            "collection": {"type": "string",
-                          "description": "legacy alias of doc (engineering_standards_S100 / _S240 / _S400 ...); steel_design_examples for worked examples"},
+                          "description": "legacy alias of doc (engineering_standards_IS801 / _IS811 / _IS875_P* / _IS1893); cfs_design_examples for worked examples"},
            "clause": {"type": "string", "description": "legacy: an exact id sent with a sentence. Prefer type + query=id."},
            "chapter": {"type": "string", "description": "optional: narrow an fts query to a chapter, e.g. E, G, J"},
            "top_k": {"type": "integer", "description": "chunks to return (default 3, max 5)"}},
@@ -265,7 +265,7 @@ def _completion_gate(ws):
                                  "added wall / heavier mil / rod switch) or waive with justification"
                                  % (label, x.get("id"), max(dcs)))
                 if not cited:
-                    probs.append("%s '%s' has no cited clause (AISI S100/S240/S400)"
+                    probs.append("%s '%s' has no cited clause (IS 801/IS 811)"
                                  % (label, x.get("id")))
         # ---- CFS-specific completeness ----
         for w in walls:
@@ -373,7 +373,7 @@ def dispatch(tool, args, ws, executor):
         return ws.activity_summary()
     if tool == "search_engineering_standards":
         return ws.search_engineering_standards(args.get("query", ""),
-                                               args.get("collection", "engineering_standards_S100"),
+                                               args.get("collection", "engineering_standards_IS801"),
                                                args.get("top_k", config.RAG_TOP_K),
                                                args.get("clause", ""), args.get("chapter", ""),
                                                type=args.get("type", ""), doc=args.get("doc", ""),
@@ -585,7 +585,7 @@ _SEARCH_FILLER = {"strength", "section", "equation", "equations", "design", "fle
 
 def _search_anchor(query):
     """Coarse fingerprint of a RAG query so REWORDED variants of the same lookup collapse to one signature.
-    Prefer the clause code(s) (AISI: E2, G5, F2.1, J4 -> base 'j4'; S400: E1-E4; App-1 dotted
+    Prefer the clause code(s) (IS 801 / AISI-legacy: E2, G5, F2.1, J4 -> base 'j4'; S400: E1-E4; App-1 dotted
     sections like 1.1); else a small set of content words."""
     q = (query or "").lower()
     codes = [re.sub(r"-\d+$", "", c) for c in re.findall(r"\b[a-k]\d+(?:\.\d+)?(?:-\d+)?\b", q)]
@@ -606,7 +606,7 @@ def _sig(nm, args):
         body = str(args.get("content", ""))                                   # SAME bytes trips; editing does NOT
         return ("write_file", args.get("path", ""), hashlib.md5(body.encode()).hexdigest()[:8])
     if nm == "search_engineering_standards":
-        return ("search", args.get("collection", "S100"), _search_anchor(args.get("query", "")))
+        return ("search", args.get("collection", "IS801"), _search_anchor(args.get("query", "")))
     return (nm, json.dumps(args, sort_keys=True)[:120])
 
 
@@ -670,7 +670,7 @@ def run_design(ws, executor, base_url, api_key, model, building, brief, max_tok=
                 messages.append({"role": "user", "content":
                     brief + "\n\n(Apply this change to the existing design: edit jobs/" + building +
                     "/cfg.py, re-run pipeline.design_and_report for fresh demands, re-derive the affected "
-                    "AISI capacities/schedules into calc_package.json, run consistency.check, then re-render with "
+                    "IS 801 capacities/schedules into calc_package.json, run consistency.check, then re-render with "
                     "report.build_report. Keep everything else as-is.)"})
                 yield {"type": "status", "text": f"continuing '{building}' with your new instruction ({len(messages)} messages in context)"}
             else:                           # empty brief -> plain resume of an interrupted run
@@ -734,7 +734,7 @@ def run_design(ws, executor, base_url, api_key, model, building, brief, max_tok=
         if searches >= config.RAG_SEARCH_SOFTCAP and not nudged:
             nudged = True
             messages.append({"role": "user", "content":
-                "You have gathered ample AISI references -- STOP searching now and DERIVE the capacities: apply "
+                "You have gathered ample IS 801/811 references -- STOP searching now and DERIVE the capacities: apply "
                 "the clauses you found to the demands and fill every seeded slot in design/calc_package.json "
                 "(wall_lines with sheathing + fastener_schedule, holddowns, studs, collectors, connections, "
                 "capacity_design), then run consistency.check and report.build_report. "
@@ -780,7 +780,7 @@ def run_design(ws, executor, base_url, api_key, model, building, brief, max_tok=
                     "Your previous turn was " + ("cut off before making a tool call. Use LESS reasoning" if truncated
                     else "EMPTY -- you produced no text and no tool call") + ". Do NOT stop here -- the design is not "
                     "finished. CONTINUE with your NEXT tool call (write cfg.py, run pipeline.design_and_report, derive "
-                    "AISI capacities/schedules into calc_package.json, run consistency.check, build the report). Give a final "
+                    "IS 801 capacities/schedules into calc_package.json, run consistency.check, build the report). Give a final "
                     "written answer ONLY if the design is genuinely complete (report built, consistency.check passes)."})
                 continue
             if not final_text:                                  # exhausted nudges, still empty -> pause, never fake 'done'
@@ -928,7 +928,7 @@ def _tool_title(name, args):
     if name == "run_python":
         return f"run_python · {_code_label(a.get('code',''))}"
     if name == "search_engineering_standards":
-        coll = (a.get("doc") or a.get("collection") or "engineering_standards_S100").replace("engineering_standards_", "")
+        coll = (a.get("doc") or a.get("collection") or "engineering_standards_IS801").replace("engineering_standards_", "")
         flt = "".join(f" [{k}={a[k]}]" for k in ("clause", "chapter") if a.get(k))
         if a.get("type"):                                   # the policy form: `exact_equation G5-1`
             return f"search {coll} {a['type']} ‹{(a.get('query') or '')[:64]}›{flt}"
@@ -961,7 +961,7 @@ def _result_preview(name, result):
     if "error" in result:
         return "error: " + str(result["error"])[:240]
     if name == "search_engineering_standards":
-        if result.get("disabled"): return "RAG disabled — using cited AISI knowledge"
+        if result.get("disabled"): return "RAG disabled — using cited IS 801/811 knowledge"
         res = result.get("results") if isinstance(result.get("results"), list) else None
         bits = [f"{len(res) if res is not None else 0} hits"]
         if result.get("policy"):                             # what actually went to the QFM
