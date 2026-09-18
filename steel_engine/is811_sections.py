@@ -79,20 +79,54 @@ def _load():
     return db
 
 
-def props(name: str) -> dict:
-    """Return kip+inch property dict for an IS 811 label."""
+def props(name: str, unit_system: str | None = None) -> dict:
+    """Return property dict for an IS 811 label (N-mm default; kip-in on request)."""
     lab = str(name).upper().replace(" ", "")
     db = _load()
-    if lab in db:
-        return dict(db[lab])
-    # allow EA20x20x1.25 mixed case already normalized
-    if looks_is811(lab):
-        raise KeyError(
-            f"IS 811 section {name!r} not found in is811_shapes.csv "
-            f"(found:false for this designation — see is811_GAPS.md / RAG IS_811_1987). "
-            f"Do not invent properties or substitute an SFIA stud."
-        )
-    raise KeyError(f"not an IS 811 label: {name!r}")
+    if lab not in db:
+        if looks_is811(lab):
+            raise KeyError(
+                f"IS 811 section {name!r} not found in is811_shapes.csv "
+                f"(found:false for this designation — see is811_GAPS.md / RAG IS_811_1987). "
+                f"Do not invent properties or substitute an SFIA stud."
+            )
+        raise KeyError(f"not an IS 811 label: {name!r}")
+    raw = dict(db[lab])
+    try:
+        from india_units import active_unit_system
+        us = unit_system or active_unit_system()
+    except Exception:
+        us = unit_system or "N-mm"
+    if us != "N-mm":
+        raw["_units"] = "in"
+        return raw
+    mm = 25.4
+    out = dict(raw)
+    if raw.get("A_si_cm2") is not None:
+        out["A"] = raw["A_si_cm2"] * 100.0  # cm² → mm²
+    elif raw.get("A") is not None:
+        out["A"] = raw["A"] * mm**2
+    if raw.get("Ix_si_cm4") is not None:
+        out["Ix"] = raw["Ix_si_cm4"] * 10000.0  # cm⁴ → mm⁴
+    elif raw.get("Ix") is not None:
+        out["Ix"] = raw["Ix"] * mm**4
+    if raw.get("Iy_si_cm4") is not None:
+        out["Iy"] = raw["Iy_si_cm4"] * 10000.0
+    elif raw.get("Iy") is not None:
+        out["Iy"] = raw["Iy"] * mm**4
+    for key, power in (("rx", 1), ("ry", 1), ("d", 1), ("bf", 1), ("tf", 1), ("tw", 1)):
+        if raw.get(key) is not None:
+            out[key] = raw[key] * (mm ** power)
+    # prefer native mm dims when present
+    if raw.get("h_mm") is not None:
+        out["d"] = raw["h_mm"]
+    if raw.get("b_mm") is not None:
+        out["bf"] = raw["b_mm"]
+    if raw.get("t_mm") is not None:
+        out["tf"] = raw["t_mm"]
+        out["tw"] = raw["t_mm"]
+    out["_units"] = "mm"
+    return out
 
 
 def list_is811(prefix: str | None = None) -> list[str]:

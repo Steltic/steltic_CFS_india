@@ -32,6 +32,26 @@ except Exception:                     # no openseespy (dev sandbox): CFS renderi
     ops = E = None
     HAVE_OPS = False
 import sections as S
+
+
+def _si_unit_banner(cfg=None):
+    """Wave 1 SI: document N-mm-sec in report HTML; numeric kip labels remain a kip island."""
+    try:
+        from india_units import is_si, report_unit_labels, ENGINE_UNITS, KIP_ISLANDS
+    except Exception:
+        return ""
+    if not is_si(cfg):
+        return ("<p><b>Unit system:</b> kip-in (legacy / explicit opt-in).</p>")
+    lab = report_unit_labels(cfg)
+    return (
+        "<p><b>Unit system (India SI wave 1):</b> OpenSees / engine = <code>N-mm-sec</code> "
+        f"(force {lab['force']}, length {lab['length']}, stress {lab['stress']}; "
+        f"display often {lab['force_display']} / {lab['moment_display']} / {lab['pressure']}). "
+        "Some HTML table headers below may still say kip/ksi — treat those labels as "
+        f"<em>kip islands</em> pending wave 2 ({len(KIP_ISLANDS)} tracked). "
+        f"E_steel = {ENGINE_UNITS['E_steel_MPa']:.0f} MPa, g = {ENGINE_UNITS['g_mm_s2']:.0f} mm/s².</p>"
+    )
+
 try:
     import design_post as DPOST      # run_case + capacity snippets (operator side; needs E)
 except Exception:
@@ -1923,7 +1943,7 @@ def _design_basis(cfg):
       ["Seismic", "R=%s, Cd=%s, &Omega;<sub>0</sub>=%s, Ie=%s, S<sub>DS</sub>=%s, S<sub>1</sub>=%s"
                     % (s.get("R","?"),s.get("Cd","?"),s.get("Om0","?"),s.get("Ie","?"),s.get("SDS","?"),s.get("S1","?"))],
     ]
-    return ("<h2>Design basis</h2><p class='note'>Model built to the parameters below &mdash; <b>verify these "
+    return (_si_unit_banner(cfg) + "<h2>Design basis</h2><p class='note'>Model built to the parameters below &mdash; <b>verify these "
             "against your brief</b>, especially the bay count and spans.</p>" + _table(["Parameter","Value"], rows))
 
 

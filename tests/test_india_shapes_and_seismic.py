@@ -87,10 +87,13 @@ def test_india_collections_hosted_aliases():
 def test_india_units_helpers():
     import india_units as IU
     assert abs(IU.metric_length_to_in(1.0, "m") - IU.M_TO_IN) < 1e-9
+    assert abs(IU.length_to_mm(1.0, "m") - 1000.0) < 1e-9
     assert IU.kn_per_m_to_plf(1.0) > 0
     cfg = {"units": "metric", "bay_x": 6.0, "story_heights": [3.0, 3.0]}
-    IU.apply_metric_geometry(cfg)
-    assert abs(cfg["SX"] - 6.0 * IU.M_TO_IN) < 1e-6
+    IU.apply_metric_geometry(cfg)  # SI wave 1 → mm
+    assert abs(cfg["SX"] - 6000.0) < 1e-6
+    assert cfg["units"] == "N-mm"
+    assert IU.ENGINE_UNITS["force"] == "N"
 
 
 def test_cfs_systems_india_drift():

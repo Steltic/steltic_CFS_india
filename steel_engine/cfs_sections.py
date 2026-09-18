@@ -23,16 +23,19 @@ Stated geometric assumptions (checked by the validation gate):
 - lip edge stiffener modeled as a simple flat of the standard SFIA length for the flange width
 - flange compressive stress taken at the extreme fiber (conservative) in bending EWM
 
-Units: inch, ksi throughout. E = 29,500 ksi per AISI (NOT the hot-rolled 29,000).
+Units: SFIA geometry path remains inch/ksi. India IS 811 path follows india_units
+(N-mm / MPa when SI-native). E_AISI = 29,500 ksi; E_IS ≈ 2.0e5 MPa.
 
 India dual-path: IS 811 catalog labels (EA/CWS/CLS/LZ/…) resolve via is811_sections /
-is811_shapes.csv first. SFIA designators remain available for twin geometry only —
-do not cite SFIA as IS 811 authority. Capacities remain agent+IS 801 RAG (no invented formulas).
+is811_shapes.csv first (SI props when UNIT_SYSTEM=N-mm). SFIA designators remain for
+twin geometry only — do not cite SFIA as IS 811 authority. Capacities remain agent+IS 801 RAG.
 """
 import math, os, csv
 
 E_KSI = 29500.0
 G_KSI = 11300.0
+E_MPA = 200000.0  # India IS path (wave 1 SI)
+G_MPA = 76923.07692307692
 
 # design thickness (in) by mil designation
 MIL_T = {18: 0.0188, 27: 0.0283, 30: 0.0312, 33: 0.0346, 43: 0.0451, 54: 0.0566,
@@ -185,7 +188,13 @@ def gross_props(name_or_geom, r_in=None):
                 out = dict(p811)
                 out.setdefault("style", "IS811")
                 out.setdefault("name", str(name_or_geom).upper().replace(" ", ""))
-                out.setdefault("Fy", 36.0)  # placeholder ksi — agent sets from IS 801 / material RAG
+                try:
+                    from india_units import active_unit_system
+                    _us = active_unit_system()
+                except Exception:
+                    _us = "N-mm"
+                # placeholder grade — agent sets from IS 801 / material RAG
+                out.setdefault("Fy", 250.0 if _us == "N-mm" else 36.0)
                 out.setdefault("x0", 0.0)
                 out.setdefault("xbar", 0.0)
                 out["_source"] = "IS_811_1987"
