@@ -4,7 +4,7 @@ wall_line.py -- per-wall-line TRIBUTARY VALIDATOR (scope decision #2).
 Independent of OpenSees: distributes story shears to wall lines by tributary area under the
 FLEXIBLE-diaphragm idealization (the CFS light-frame default, ASCE 7-22 12.3.1.1), computes
 per-line unit shears, stacks cumulative chord/hold-down tension story-by-story, and evaluates
-the S400-style four-term wall deflection. In the pipeline this runs alongside the OpenSees
+the S400-style four-term wall deflection (USA twin scaffolding). India note: found:false for an IS 801 four-term Ω-factor wall deflection analogue — agent must RAG-cite IS 801 for deflection/bracing; do not treat this helper as IS law. In the pipeline this runs alongside the OpenSees
 model as a GATE: wall-line shears from the two must agree within tolerance, and divergence
 requires agent justification (open fronts, offsets, mixed diaphragms).
 

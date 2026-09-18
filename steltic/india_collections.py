@@ -110,3 +110,38 @@ def is_india_spec_collection(name: str) -> bool:
     return "engineering_standard" in c or any(
         t in c for t in ("is801", "is811", "is875", "is1893", "aisi", "s100", "s240", "s400", "asce")
     )
+
+
+# Extra hosted-registry aliases (rag_server naming drift + hyphenated / short forms)
+HOSTED_COLLECTION_ALIASES: dict[str, str] = {
+    "IS-801": "IS_801_1975",
+    "IS-811": "IS_811_1987",
+    "IS-811-Amd1": "IS_811_1987_Amd1_2011",
+    "IS801:1975": "IS_801_1975",
+    "IS811:1987": "IS_811_1987",
+    "cold_formed_IS801": "IS_801_1975",
+    "cold_formed_IS811": "IS_811_1987",
+    "engineering_standards_IS-801": "IS_801_1975",
+    "engineering_standards_IS-811": "IS_811_1987",
+    "engineering_standard_IS-801": "IS_801_1975",
+    "engineering_standard_IS-811": "IS_811_1987",
+    "engineering_standards_IS801_1975": "IS_801_1975",
+    "engineering_standards_IS811_1987": "IS_811_1987",
+}
+COLLECTION_TO_STEM.update(HOSTED_COLLECTION_ALIASES)
+
+
+def hosted_alias_payload() -> dict:
+    """Payload Git/ops can merge into rag_server collection registry / aliases.json."""
+    return {
+        "jurisdiction": "india_cfs",
+        "corpus": INDIA_CORPUS_ROOT,
+        "collection_to_stem": dict(COLLECTION_TO_STEM),
+        "stem_to_collection": dict(STEM_TO_COLLECTION),
+        "load_collections": list(LOAD_COLLECTIONS),
+        "design_collections": list(DESIGN_COLLECTIONS),
+        "note": (
+            "CFS design stems IS_801_1975 / IS_811_1987 (+Amd1) must be registered on hosted "
+            "rag_server; corpus indexes/aliases.json historically omitted them (loads-only)."
+        ),
+    }

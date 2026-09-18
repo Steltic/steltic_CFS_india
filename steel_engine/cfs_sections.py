@@ -24,6 +24,10 @@ Stated geometric assumptions (checked by the validation gate):
 - flange compressive stress taken at the extreme fiber (conservative) in bending EWM
 
 Units: inch, ksi throughout. E = 29,500 ksi per AISI (NOT the hot-rolled 29,000).
+
+India dual-path: IS 811 catalog labels (EA/CWS/CLS/LZ/…) resolve via is811_sections /
+is811_shapes.csv first. SFIA designators remain available for twin geometry only —
+do not cite SFIA as IS 811 authority. Capacities remain agent+IS 801 RAG (no invented formulas).
 """
 import math, os, csv
 
@@ -172,6 +176,25 @@ def gross_props(name_or_geom, r_in=None):
     """GROSS properties dict for a designator string or a geometry dict from parse_designator().
     Keys: A, Ix, Iy, rx, ry, J, Cw, xbar (centroid from web midline), x0 (shear center from
     centroid, signed), depth, flange, lip, t, style, flats {web, flange, lip} (EWM inputs)."""
+    # India: IS 811 catalog first for EA/CWS/CLS/LZ/… labels
+    if isinstance(name_or_geom, str):
+        try:
+            import is811_sections as _IS811
+            if _IS811.looks_is811(name_or_geom):
+                p811 = _IS811.props(name_or_geom)
+                out = dict(p811)
+                out.setdefault("style", "IS811")
+                out.setdefault("name", str(name_or_geom).upper().replace(" ", ""))
+                out.setdefault("Fy", 36.0)  # placeholder ksi — agent sets from IS 801 / material RAG
+                out.setdefault("x0", 0.0)
+                out.setdefault("xbar", 0.0)
+                out["_source"] = "IS_811_1987"
+                return out
+        except KeyError:
+            raise
+        except Exception:
+            pass
+
     g = parse_designator(name_or_geom) if isinstance(name_or_geom, str) else dict(name_or_geom)
     if g["style"] in ("T", "U"):
         g = dict(g, lip=0.0)
@@ -549,3 +572,8 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+
+
+def props(name):
+    """Dual-path section properties: IS 811 catalog labels, else SFIA/geometry gross_props."""
+    return gross_props(name)

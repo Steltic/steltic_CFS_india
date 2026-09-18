@@ -167,3 +167,28 @@ def conversion_cheatsheet() -> str:
         "Call india_units.apply_metric_geometry(cfg) when cfg['units'] is metric/SI. "
         "Engine internals remain kip+inch (full SI rewrite deferred)."
     )
+
+
+def kn_per_m_to_plf(value) -> float:
+    """kN/m → kip/ft (plf when thought as force/length on members)."""
+    # 1 kN/m = (1/4.44822) kip / (39.3701/12 ft) ≈ 0.06852 kip/ft
+    return float(value) * KN_TO_KIP / (M_TO_IN / 12.0)
+
+
+def mpa_to_ksi(value) -> float:
+    return metric_stress_to_ksi(value, "MPa")
+
+
+def apply_metric_pressures(cfg: dict) -> dict:
+    """Convert cfg pressure fields in kN/m² to psf when metric flag set."""
+    units = str(cfg.get("units") or "").lower()
+    metric = bool(cfg.get("metric")) or units in ("metric", "si", "m", "mm", "india_metric")
+    if not metric or cfg.get("_pressures_converted"):
+        return cfg
+    for k in ("D_floor", "D_roof", "L_floor", "Lr", "S", "clad", "q_wind", "pz", "pd"):
+        if k in cfg and cfg[k] is not None and isinstance(cfg[k], (int, float)):
+            # Heuristic: values < 20 likely already psf-ish for India kN/m2 typically 0.5–5
+            # Only convert when units/metric declared — caller responsibility.
+            cfg[k] = metric_pressure_to_psf(cfg[k], "kN/m2")
+    cfg["_pressures_converted"] = True
+    return cfg

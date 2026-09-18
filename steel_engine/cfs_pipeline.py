@@ -16,7 +16,10 @@ import india_loads as IL
 
 COMBOS_NOTE = ("India: combinations from cfg['load_plan'] after LIVE IS 875 / IS 1893 RAG (see india_loads.py). Do NOT invent ASCE 7 or hardcode IS load formulas. Include retrieved uplift/counteracting cases when wind/EQ apply.")
 
-# S400-20 Table A3.2-1 expected-strength factors (ASTM A1003 sheet grades)
+# USA twin: S400-20 Table A3.2-1 expected-strength factors (ASTM A1003).
+# India: found:false for S400 Ω0 / expected-strength capacity-design stack in IS 801 —
+# agent must RAG-cite IS 801 (connections cl.7, bracing cl.8, wall studs) for capacities.
+# Retained numeric seeds below are NON-AUTHORITATIVE scaffolding only when load_plan lacks IS values.
 RY_BY_FY = {33: 1.5, 50: 1.1}
 RT_BY_FY = {33: 1.2, 50: 1.1}
 
@@ -283,7 +286,7 @@ def build_package(name, cfg, res):
         pkg["wind_basis"] = wind["X"]["basis"]
     if sysname in ("strap_braced", "sbmf"):
         pkg["capacity_design"] = dict(
-            basis="S400 %s: connections, chord studs and anchorage on every braced line are "
+            basis="IS 801 RAG (India): connections cl.7 / bracing cl.8 / wall studs — S400 %s twin note only; found:false for Ω0 expected-strength capacity-design in IS 801. Connections/chords/anchorage are "
                   "designed for the EXPECTED strength of the selected strap/beam -- "
                   "Ry*Fy*Ag (never the ELF force alone)"
                   % ("E3.3" if sysname == "strap_braced" else "E4.3"),
@@ -292,7 +295,7 @@ def build_package(name, cfg, res):
                  "the connection, chord-stud and hold-down slots as the demand basis")
     elif sysname in ("wsp_shearwall", "steelsheet_wall"):
         pkg["capacity_design"] = dict(
-            basis="%s: chord studs, hold-downs and anchorage on every shear-wall line are "
+            basis="IS 801 RAG (India) %s: chord studs / hold-downs / anchorage — found:false for S400 Ω0 capacity-design; twin scaffolding only. Lines are "
                   "designed for the EXPECTED strength of the SELECTED sheathing/fastener "
                   "assembly, capped at the Omega_0-level force -- never the ELF force alone"
                   % CS.SYSTEMS[sysname]["std"],
@@ -305,7 +308,7 @@ def build_package(name, cfg, res):
             Om0=Om0_tab, Om0_eff=Om0e, Om0_eff_basis=om0_note,
             lines={},
             seed_basis="T_cd_seed = Omega0-level stack, no dead relief; final demand = "
-                       "min(Omega0-level, Omega_E*Vn_selected stack) per S400 capacity "
+                       "found:false: no IS 801 analogue of min(Omega0, Omega_E*Vn) S400 stack — agent RAG-cites IS 801; legacy twin note: min(Omega0-level, Omega_E*Vn_selected) S400 "
                        "design -- relief only as documented",
             instruction="NUMERIC: per line, Ve_cap_by_story_kip = Om0_eff x V_ELF,story "
                         "(pure ELF, NO rho -- 12.3.4.1 item 5) and T_cd_seed_kip = the "
@@ -329,12 +332,12 @@ def build_package(name, cfg, res):
                     V_kip=round(r["V"] * rho, 1),
                     demand_basis="tributary (%s diaphragm) + 5%% shift; includes rho=%.2f"
                                  % (dd.get("diaphragm", "flexible"), rho),
-                    sheathing=None, fastener_schedule=None,       # AGENT (S400 table, cited)
+                    sheathing=None, fastener_schedule=None,       # AGENT (IS 801 / IS 811 RAG cited — not S400)
                     limit_state=None, cited=None, capacity=None, DC=None)
                 if v_w is not None:
                     slot["v_wind_plf"] = v_w
                     slot["governing_basis"] = (
-                        "wind (1.0W > rho*E at this line -- use the S400 WIND capacity "
+                        "wind (1.0W > seismic at this line -- IS 875 wind vs IS 1893 EQ; do not use S400 WIND capacity "
                         "columns)" if v_w > r["v_unit_plf"] * rho
                         else "seismic (rho=%.2f included in the comparison)" % rho)
                 pkg["wall_lines"].append(slot)
@@ -372,7 +375,7 @@ def build_package(name, cfg, res):
                 hd["basis"] += ("; STRAP LINE: design anchorage for the PER-BAY tension "
                                 "seed T_bay_seed_kip (includes rho; the line-level T_cum "
                                 "spreads overturning over the whole line), then apply the "
-                                "S400 E3.3 capacity-design amplification from the SELECTED "
+                                "found:false: no IS 801 E3.3 Ω capacity-design amplification; twin note S400 E3.3 from SELECTED "
                                 "strap Ry*Fy*Ag")
             if T_wind is not None:
                 hd["T_wind_kip"] = T_wind
@@ -395,7 +398,7 @@ def build_package(name, cfg, res):
                     Ve_cap_by_story_kip=Ve_cap, T_cd_seed_kip=T_cd,
                     dead_relief_kip_available=relief, dead_relief_basis=relief_note,
                     basis="T_cd_seed = Omega0-level stack, no dead relief; final demand = "
-                          "min(Omega0-level, Omega_E*Vn_selected stack) per S400 capacity "
+                          "found:false: no IS 801 analogue of min(Omega0, Omega_E*Vn) S400 stack — agent RAG-cites IS 801; legacy twin note: min(Omega0-level, Omega_E*Vn_selected) S400 "
                           "design -- relief only as documented")
                 if sysname == "strap_braced" and _segs:
                     _n = len(_segs)

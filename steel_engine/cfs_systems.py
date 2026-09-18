@@ -2,10 +2,11 @@
 cfs_systems.py -- CFS seismic-system table, drift limits, materials, and the analysis-fidelity
 tier definitions + preflight (scope decision #8). Reference data + screening only; no capacities.
 
-Sources the agent must still GROUND in the RAG: ASCE 7-22 Table 12.2-1 (light-frame CFS rows)
-and AISI S400 (system provisions). This module exists so cfg construction and the
-preflight screens have one authoritative in-repo table, exactly like engine3d.seis() did for
-hot-rolled.
+USA twin sources (NON-AUTHORITATIVE on India branch): ASCE 7-22 Table 12.2-1 + AISI S400.
+India: seismic response reduction R / Ah come from LIVE IS 1893 Part 1 RAG via load_plan —
+do NOT invent R/Cd/Ω0 from this SYSTEMS table for India jobs. Drift gate → india_seismic
+(IS 1893 7.11.1.1 = 0.004 h; no Cd/Ie). Member/wall capacity → IS 801 RAG (found:false for
+S400 Ω0 capacity-design stack). SYSTEMS retained only as twin scaffolding / fidelity tiers.
 """
 
 E_KSI = 29500.0
@@ -108,7 +109,7 @@ def height_check(system, SDC, hn_ft):
 
 TIERS = {
     0: dict(name="Standard", elements="elasticBeamColumn + Ae/I_eff iteration",
-            for_="wall-framed buildings (walls are S400-calibrated springs)"),
+            for_="wall-framed buildings (India: wall springs — calibrate from IS 801 RAG, not S400 tables)"),
     1: dict(name="Thin-walled members", elements="dispBeamColumnAsym/mixedBeamColumnAsym + Ae/I_eff",
             for_="portal frames, canopies, single-channel members"),
     2: dict(name="High fidelity", elements="Du&Hajjar elements + EWM effective fiber laws, incremental",
@@ -142,6 +143,38 @@ def preflight_fidelity(structure_kind, tier):
         out.append("single-channel portals: shear-center torsion at every load point -- Tier 2 "
                    "recommended; justify Tier %d explicitly (see Ex27)." % tier)
     return out
+
+
+# ---------------- India path (IS 1893) ----------------
+
+INDIA_SEISMIC_NOTES = {
+    "found": True,
+    "stem": "IS_1893_Part_1_2016",
+    "drift_limit_ratio": 0.004,
+    "cite": "cl.7.11.1.1",
+    "no_Cd_Ie_amplification": True,
+    "s400_omega_capacity_design": {
+        "found": False,
+        "note": "IS 801 has no S400 Ω0 / expected-strength capacity-design stack for CFS walls.",
+    },
+    "systems_table_R_Cd_Om0": {
+        "found": False,
+        "note": (
+            "Do not use cfs_systems.SYSTEMS R/Cd/Om0 for India. "
+            "Retrieve R (and related factors) from IS 1893 via load_plan.seismic_summary."
+        ),
+    },
+}
+
+
+def india_drift_limit(cfg=None):
+    """Allowable storey drift ratio for India CFS — delegates to india_seismic."""
+    try:
+        import india_seismic as IS1893
+        return IS1893.drift_allowable(cfg or {})[0]
+    except Exception:
+        return INDIA_SEISMIC_NOTES["drift_limit_ratio"]
+
 
 
 def _selftest():
