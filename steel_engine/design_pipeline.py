@@ -47,6 +47,16 @@ def design(name, outdir=None):
     outdir = outdir or os.path.join(base, "buildings", name, "design")
     os.makedirs(outdir, exist_ok=True)
     cases = combos(cfg)
+    try:
+        from india_units import is_si, display_scale, demand_field_names
+        _SI = is_si(cfg)
+        _SC = display_scale(cfg)
+        _FN = demand_field_names(cfg)
+    except Exception:
+        _SI = str(cfg.get("units") or "").upper().startswith("N-MM")
+        _SC = {"si": _SI, "force_div": 1000.0 if _SI else 1.0, "moment_div": 1e6 if _SI else 12.0,
+               "E_default": 200000.0 if _SI else 29000.0, "Fy_default": 250.0 if _SI else 50.0}
+        _FN = None
 
     info0 = E.build(cfg, "PDelta")
     reg = {t: (kind, sec, n1, n2) for (t, kind, sec, n1, n2) in info0["ele"]}
@@ -89,15 +99,25 @@ def design(name, outdir=None):
             env[t] = dict(comp=se["comp"], tens=se["tens"], Mz=se["Mz"], My=se["My"], V=se["V"], combo=se["combo"])
         score[t] = (max(env[t]["comp"], env[t]["tens"]) if reg[t][0] in ("col", "brace") else env[t]["Mz"])
 
-    # ---- member_schedule.csv (every element: DEMANDS only) ----
+    # ---- member_schedule.csv (every element: DEMANDS only; SI headers when N-mm) ----
+    _mdiv = _SC["moment_div"]
     with open(os.path.join(outdir, "member_schedule.csv"), "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["ele_tag", "member", "section", "length_in", "P_comp_kip", "P_tens_kip",
-                    "Mx_kipft", "My_kipft", "V_kip", "governing_combo"])
-        for t in sorted(reg):
-            kind, sec, n1, n2 = reg[t]; e = env[t]
-            w.writerow([t, kind, sec, round(length[t], 1), round(e["comp"], 1), round(e["tens"], 1),
-                        round(e["Mz"]/12, 1), round(e["My"]/12, 1), round(e["V"], 1), e["combo"]])
+        if _SI:
+            w.writerow(["ele_tag", "member", "section", "length_mm", "P_comp_N", "P_tens_N",
+                        "Mx_kNm", "My_kNm", "V_N", "governing_combo", "unit_system"])
+            for t in sorted(reg):
+                kind, sec, n1, n2 = reg[t]; e = env[t]
+                w.writerow([t, kind, sec, round(length[t], 1), round(e["comp"], 1), round(e["tens"], 1),
+                            round(e["Mz"]/_mdiv, 3), round(e["My"]/_mdiv, 3), round(e["V"], 1),
+                            e["combo"], "N-mm"])
+        else:
+            w.writerow(["ele_tag", "member", "section", "length_in", "P_comp_kip", "P_tens_kip",
+                        "Mx_kipft", "My_kipft", "V_kip", "governing_combo"])
+            for t in sorted(reg):
+                kind, sec, n1, n2 = reg[t]; e = env[t]
+                w.writerow([t, kind, sec, round(length[t], 1), round(e["comp"], 1), round(e["tens"], 1),
+                            round(e["Mz"]/12, 1), round(e["My"]/12, 1), round(e["V"], 1), e["combo"]])
 
     # ---- member_demands.md (summary by type; capacities are the AGENT's job) ----
     # group by (kind, section, ROLE), with the group demand = max of EVERY component over ALL members

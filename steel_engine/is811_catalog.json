@@ -1,0 +1,56 @@
+{
+  "standard": "IS_811_1987",
+  "collection": "engineering_standards_IS811",
+  "stem": "IS_811_1987",
+  "amd1_stem": "IS_811_1987_Amd1_2011",
+  "amd1_tables_indexed": 0,
+  "amd1_note": "found:false for Amd1 property deltas",
+  "n_shapes": 390,
+  "n_skipped": 32,
+  "types": [
+    "CLR",
+    "CLS",
+    "CWR",
+    "CWS",
+    "EA",
+    "HRB",
+    "HRH",
+    "HS",
+    "LZ",
+    "UA"
+  ],
+  "rag_table_extracts": 28,
+  "labels_sample": [
+    "EA20X20X1.25",
+    "EA20X20X2",
+    "EA30X30X2",
+    "EA30X30X3.15",
+    "EA40X40X1.6",
+    "EA50X50X2.55",
+    "EA50X50X3.15",
+    "EA50X50X4",
+    "EA60X60X3.15",
+    "EA60X60X4",
+    "EA70X70X3.15",
+    "EA70X70X4"
+  ],
+  "clause_anchors": {
+    "dimensions": {
+      "found": true,
+      "clause": "7.1"
+    },
+    "properties": {
+      "found": true,
+      "clause": "7.2"
+    },
+    "Ri_assumption": {
+      "found": true,
+      "clause": "7.2.3",
+      "text": "Ri as 1.5 t"
+    },
+    "corner_table": {
+      "found": true,
+      "clause": "Table 11"
+    }
+  }
+}

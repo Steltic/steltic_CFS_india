@@ -23,12 +23,20 @@ Stated geometric assumptions (checked by the validation gate):
 - lip edge stiffener modeled as a simple flat of the standard SFIA length for the flange width
 - flange compressive stress taken at the extreme fiber (conservative) in bending EWM
 
-Units: inch, ksi throughout. E = 29,500 ksi per AISI (NOT the hot-rolled 29,000).
+Units: India default is IS 811 (N-mm via india_units). SFIA geometry path remains inch/ksi
+twin-only — do not use as IS 811 authority. Wave 2 reduces silent SFIA fallbacks.
+(N-mm / MPa when SI-native). E_AISI = 29,500 ksi; E_IS ≈ 2.0e5 MPa.
+
+India dual-path: IS 811 catalog labels (EA/CWS/CLS/LZ/…) resolve via is811_sections /
+is811_shapes.csv first (SI props when UNIT_SYSTEM=N-mm). SFIA designators remain for
+twin geometry only — do not cite SFIA as IS 811 authority. Capacities remain agent+IS 801 RAG.
 """
 import math, os, csv
 
 E_KSI = 29500.0
 G_KSI = 11300.0
+E_MPA = 200000.0  # India IS path (wave 1 SI)
+G_MPA = 76923.07692307692
 
 # design thickness (in) by mil designation
 MIL_T = {18: 0.0188, 27: 0.0283, 30: 0.0312, 33: 0.0346, 43: 0.0451, 54: 0.0566,
@@ -172,6 +180,45 @@ def gross_props(name_or_geom, r_in=None):
     """GROSS properties dict for a designator string or a geometry dict from parse_designator().
     Keys: A, Ix, Iy, rx, ry, J, Cw, xbar (centroid from web midline), x0 (shear center from
     centroid, signed), depth, flange, lip, t, style, flats {web, flange, lip} (EWM inputs)."""
+    # India: IS 811 catalog first for EA/CWS/CLS/LZ/… labels
+    if isinstance(name_or_geom, str):
+        try:
+            import is811_sections as _IS811
+            if _IS811.looks_is811(name_or_geom):
+                p811 = _IS811.props(name_or_geom)
+                out = dict(p811)
+                out.setdefault("style", "IS811")
+                out.setdefault("name", str(name_or_geom).upper().replace(" ", ""))
+                try:
+                    from india_units import active_unit_system
+                    _us = active_unit_system()
+                except Exception:
+                    _us = "N-mm"
+                # placeholder grade — agent sets from IS 801 / material RAG
+                out.setdefault("Fy", 250.0 if _us == "N-mm" else 36.0)
+                out.setdefault("x0", 0.0)
+                out.setdefault("xbar", 0.0)
+                out["_source"] = "IS_811_1987"
+                return out
+        except KeyError:
+            raise
+        except Exception:
+            pass
+
+    # Wave 2: when SI/India is active, SFIA designators are twin-geometry only.
+    # Prefer IS 811 catalog coverage; do not silently treat SFIA props as IS law.
+    if isinstance(name_or_geom, str):
+        try:
+            from india_units import active_unit_system
+            _us = active_unit_system()
+        except Exception:
+            _us = "N-mm"
+        _name_u = str(name_or_geom).upper().replace(" ", "")
+        _looks_sfia = bool(__import__("re").match(r"^\d{3}[STUCZFH]\d{3}-\d{2,3}$", _name_u))
+        if _us == "N-mm" and _looks_sfia:
+            # Keep twin path but mark provenance so agents do not cite as IS 811.
+            pass  # fall through to SFIA geometry with _source tag below
+
     g = parse_designator(name_or_geom) if isinstance(name_or_geom, str) else dict(name_or_geom)
     if g["style"] in ("T", "U"):
         g = dict(g, lip=0.0)
@@ -195,10 +242,11 @@ def gross_props(name_or_geom, r_in=None):
                  flange=g["flange"] - 2 * (R + t / 2.0) if g["lip"] > 0
                         else g["flange"] - (R + t / 2.0) - t / 2.0,
                  lip=max(g["lip"] - (R + t / 2.0), 0.0))
-    return dict(A=A, Ix=Ix, Iy=Iy, rx=math.sqrt(Ix / A), ry=math.sqrt(Iy / A), J=J, Cw=Cw,
-                xbar=xc, x0=-xs, Ixy=Ixy, depth=g["depth"], flange=g["flange"], lip=g["lip"],
-                t=t, style=g["style"], mil=g.get("mil"), Fy=FY_BY_MIL.get(g.get("mil"), 50.0),
-                flats=flats)
+    out = dict(A=A, Ix=Ix, Iy=Iy, rx=math.sqrt(Ix / A), ry=math.sqrt(Iy / A), J=J, Cw=Cw,
+               xbar=xc, x0=-xs, Ixy=Ixy, depth=g["depth"], flange=g["flange"], lip=g["lip"],
+               t=t, style=g["style"], mil=g.get("mil"), Fy=FY_BY_MIL.get(g.get("mil"), 50.0),
+               flats=flats, _source="SFIA_twin_geometry", _authority="not_IS811")
+    return out
 
 
 def built_up_back_to_back(name):
@@ -549,3 +597,8 @@ def _selftest():
 
 if __name__ == "__main__":
     _selftest()
+
+
+def props(name):
+    """Dual-path: IS 811 catalog first (authoritative for India). SFIA only as inch twin geometry."""
+    return gross_props(name)

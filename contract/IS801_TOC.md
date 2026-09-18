@@ -14,3 +14,10 @@ Do **not** cite AISI S100/S240/S400 or AISC 360/341 for India CFS member design.
 Loads (separate, **mandatory every job**): `IS_875_Part_*`, `IS_1893_Part_1_2016` → write into `cfg['load_plan']`.
 
 The former `AISI_TOC.md` from USA `steltic_cfs` is **non-authoritative** on this branch (kept only as a USA twin reference).
+
+
+## Section catalog (this repo)
+
+- `steel_engine/is811_shapes.csv` + `is811_catalog.json` — Tables 1–10 properties (dual-path via `is811_sections` / `cfs_sections.gross_props`)
+- Gaps / Amd1: `steel_engine/is811_GAPS.md` (`found:false` where OCR/Amd1 missing)
+- Rebuild: `python3 steel_engine/tools/build_is811_shapes.py`
