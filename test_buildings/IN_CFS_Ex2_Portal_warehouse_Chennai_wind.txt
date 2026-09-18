@@ -1,0 +1,9 @@
+IN_CFS_Ex2 — single-span CFS portal warehouse, Chennai wind (India)
+
+Location: Chennai. Wind governs — RETRIEVE IS 875 Part 3:2015 (Vb, terrain, Cp, internal pressure).
+Seismic: still RAG IS 1893 Part 1 for Zone / spectrum and prove wind vs EQ.
+
+Geometry: single-span portal ~18 m clear × 6 m eave; CFS channel rafters/columns (IS 811 sections).
+Loads: dead/imposed from IS 875 Parts 1–2; snow N/A for Chennai (state found:false / N/A honestly).
+
+Design: IS 801:1975 member checks + IS 811 section properties. Fill cfg['load_plan'] before pipeline.

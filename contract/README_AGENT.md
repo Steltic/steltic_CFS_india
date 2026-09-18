@@ -1,3 +1,7 @@
+> **Jurisdiction: India (steltic_CFS_india).** Design: IS 801:1975 + IS 811:1987 (+Amd1).
+> Loads: LIVE RAG IS 875 Parts 1–5 + IS 1893 Part 1:2016 → `cfg['load_plan']` every job.
+> Never hardcode ASCE 7 or permanent IS load formulas. Corpus: `/workspace/engineering_rag_india` only.
+
 # CFS Building Design Agent — Guide & Workflow
 
 **Audience: the LLM agent.** This file tells you what you have, and the exact order in which to
@@ -15,11 +19,10 @@ connection schedules). You do this by (a) driving the framework pipeline for all
 (b) **grounding every code check in the specification RAG** rather than recalled values.
 
 Two hard rules:
-- **Ground code checks in the RAG.** Apply provisions/equations exactly as returned from the AISI
-  S100/S240/S400 collections. Cite section and equation numbers. Never invent
-  code numbers from memory. Citing AISC 360/341 — or retired S110/S213/S214 — for CFS is an error.
-- **Loads (ASCE 7) are computed, not retrieved.** ASCE 7 is not in the RAG (copyright). Compute
-  wind/seismic with the engine's load routines and spot-check them.
+- **Ground code checks in the RAG.** Apply provisions/equations exactly as returned from the IS 801 / IS 811 collections. Cite section and equation numbers. Never invent
+  code numbers from memory. Citing AISI S100/S240/S400 or AISC 360/341 for India CFS is an error.
+- **Loads (IS 875 / IS 1893) are RETRIEVED live every job, not hardcoded.** Write retrieved
+  factors into cfg['load_plan'] (see india_loads.py). The engine will NOT invent ASCE or permanent IS formulas.
 
 ---
 
@@ -30,9 +33,9 @@ sentences; pass `clause=`/`chapter=` for pinpoint lookups when you know the prov
 
 | Collection | Contains | Use it for |
 |---|---|---|
-| **`engineering_standards_S100`** | AISI S100-16 (R2020) w/S2,S3 *Specification* | **Primary grounding** for every member/connection limit state (E2/E3/E4, F2–F4, G2, G5 web crippling, H1, Ch. J screws/welds/bolts, App. 1 EWM) |
-| **`engineering_standards_S240`** | AISI S240-20 framing standard | Stud/track/joist rules, built-up interconnection, bracing, headers, trusses — REQUIRED on every light-frame brief |
-| **`engineering_standards_S400`** | AISI S400-20 seismic standard | Wall/strap/SBMF capacities (WIND and seismic columns), E1–E4 capacity-design chains, Type II, drift expression |
+| **`engineering_standards_IS801`** | IS 801:1975 CFS practice | **Primary grounding** for every member/connection limit state |
+| **`engineering_standards_IS811`** | IS 811:1987 (+ Amd1) cold-formed sections | Section dimensions/properties — REQUIRED alongside IS 801 |
+| **`engineering_standards_IS875_P*` / `IS1893`** | IS 875 Parts 1–5 + IS 1893 Part 1:2016 | **MANDATORY every job** → cfg['load_plan'] |
 | **`cfs_design_examples`** | Worked CFS problems + answers | MAY BE EMPTY (not yet authored) — probe at most once; empty is normal, never retry; the spec text is sufficient |
 | **`cfs_opensees_models`** | Validated CFS reference models (wall-line stacks, portals) | Retrieve the nearest model before building a frame path; diff constraints/mass/eigen recipes on failures |
 | `openseespy_documentation`, `opensees_documentation` | OpenSees command reference | Correct API on any OpenSees error (R21 gate) |
@@ -98,12 +101,12 @@ reasonable periods, modal mass ≥ 90%, P-Δ included.
 - **Sections/schedules are DESIGNED here** from S100/S240/S400 via the RAG; the engine never
   supplies a capacity. Effective properties come from the in-repo App. 1 EWM engine
   (`cfs_sections`), validated against SFIA tabulated values.
-- **Loads = ASCE 7, computed not retrieved**; spot-check Cs, V, distribution.
+- **Loads = IS 875/1893, retrieved live into cfg['load_plan']**; spot-check Cs, V, distribution.
 
 ---
 
 ## 6. Deliverables — the design package (minimum set)
-1. **Design basis sheet** — codes/editions (AISI S100-16(R2020), S240-20, S400-20; ASCE 7-22), RC & Ie, SDC, system + R/Cd/Ω0 per direction, height-limit statement, site
+1. **Design basis sheet** — codes/editions (IS 801:1975, IS 811:1987 (+Amd1); IS 875; IS 1893 Part 1:2016), RC & Ie, SDC, system + R/Cd/Ω0 per direction, height-limit statement, site
    values, gravity loads, drift limit, diaphragm idealization, fidelity tier, units.
 2. **Wall plan / model summary** — lines, segments per story, Type I/II, bracing assumption per
    line, anchorage scheme; (frame paths: geometry, joints, base fixity, connector M-θ).
@@ -126,7 +129,7 @@ reasonable periods, modal mass ≥ 90%, P-Δ included.
 ## 7. Definition of DONE (acceptance criteria)
 ALL hold: (1) preflight + gates pass or justified; (2) both hazards run, governing stated
 per direction, net-uplift path complete; (3) every seeded slot filled (or waived with
-justification) with cited AISI clauses — S100 + S240 + S400 together on wall briefs; (4) no D/C > 1.0; drift table clean; (5) cumulative stacks designed (never lighter below);
+justification) with cited IS 801 / IS 811 clauses on wall/portal briefs; load_plan retrieval evidence present; (4) no D/C > 1.0; drift table clean; (5) cumulative stacks designed (never lighter below);
 (6) capacity-design chain complete for R>3 systems; (7) `consistency.check` clean; (8) report
 built. If any item fails, the package is **NOT DONE** — list the open items.
 

@@ -183,11 +183,17 @@ class JobWorkspace:
     # narrowed to chapter F, and the saved hits say exactly that.
     POLICY_TYPES = ("exact_section", "exact_equation", "exact_table", "id", "fts", "keyword")
     DOC_COLLECTIONS = {              # canonical doc stem -> the collection tag the report counts by
-        "AISC_360_22": "engineering_standards_A360", "AISC_341_22": "engineering_standards_A341",
-        "AISC_358_22": "engineering_standards_A358", "AISC_342_22": "engineering_standards_A342",
-        "ASCE_41_23": "engineering_standards_ASCE41", "ASCE7": "engineering_standards_ASCE7",
+        "IS_801_1975": "engineering_standards_IS801", "IS801": "engineering_standards_IS801",
+        "IS_811_1987": "engineering_standards_IS811", "IS811": "engineering_standards_IS811",
+        "IS_811_1987_Amd1_2011": "engineering_standards_IS811_Amd1",
+        "IS_875_Part_1_2026": "engineering_standards_IS875_P1",
+        "IS_875_Part_2_1987": "engineering_standards_IS875_P2",
+        "IS_875_Part_3_2015": "engineering_standards_IS875_P3",
+        "IS_875_Part_4_1987": "engineering_standards_IS875_P4",
+        "IS_875_Part_5_1987": "engineering_standards_IS875_P5",
+        "IS_1893_Part_1_2016": "engineering_standards_IS1893", "IS1893": "engineering_standards_IS1893",
         "AISI_S100": "engineering_standards_S100", "AISI_S240": "engineering_standards_S240",
-        "AISI_S400_20": "engineering_standards_S400",
+        "AISI_S400_20": "engineering_standards_S400", "ASCE7": "engineering_standards_ASCE7",
     }
 
     def _policy_plan(self, query: str, clause: str, chapter: str, qtype: str) -> dict:
@@ -221,7 +227,7 @@ class JobWorkspace:
             steps.append(f"fts «{nav[:60]}»" + (f" chapter {ch}" if ch else ""))
         return {"exact": exact, "nav": nav, "chapter": ch, "label": " · ".join(steps) or "as-asked"}
 
-    def search_engineering_standards(self, query: str, collection: str = "engineering_standards_S100",
+    def search_engineering_standards(self, query: str, collection: str = "engineering_standards_IS801",
                                      top_k: int = 5, clause: str = "", chapter: str = "",
                                      type: str = "", doc: str = "", want_commentary: bool = False,
                                      context_neighbors=None, purpose: str = "") -> dict:
@@ -261,7 +267,7 @@ class JobWorkspace:
             self.log("search_engineering_standards", detail, "RAG disabled (not configured)")
             return {"disabled": True,
                     "message": "No engineering-standards RAG is configured (RAG_API_URL is empty). Do NOT "
-                               "search again -- rely on your own knowledge of AISI S100/S240/S400 and cite "
+                               "search again -- rely on your own knowledge of IS 801 / IS 811 / IS 875 / IS 1893 and cite "
                                "clauses from memory, flagging any value you are unsure of for verification."}
 
         spec = self._is_spec_collection(collection)   # decided from what the AGENT asked for, not from the
@@ -725,7 +731,22 @@ class JobWorkspace:
         c = (collection or "").lower()
         if "opensees" in c:
             return False
-        return "engineering_standard" in c or any(t in c for t in ("s100", "s240", "s400", "aisi", "asce"))
+        try:
+            from .india_collections import is_india_spec_collection
+            if is_india_spec_collection(collection):
+                return True
+        except Exception:
+            pass
+        return "engineering_standard" in c or any(
+            t in c for t in ("is801", "is811", "is875", "is1893", "s100", "s240", "s400", "aisi", "asce")
+        )
+
+    def _collection_stem(self, collection: str):
+        try:
+            from .india_collections import stem_for_collection
+            return stem_for_collection(collection)
+        except Exception:
+            return None
 
     def _render_rag(self, query: str, collection: str, out, via: str = "", sent_query: str = "") -> str:
         res = out.get("results") if isinstance(out, dict) else out

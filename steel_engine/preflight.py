@@ -3,9 +3,10 @@ OpenSees solve so a mis-declared cfg is caught in seconds, not after a full pipe
 Returns a list of (severity, message); severity in {"ERROR","WARN"}. Non-blocking by design --
 pipeline.design_and_report prints the findings and puts them in its return dict.
 
-Also hosts the CANONICAL Seismic Design Category function asce_sdc() (ASCE 7-22 sec.11.6) --
+Legacy asce_sdc() is USA ASCE 7-22 (not authoritative on steltic_CFS_india; India zone/SD from IS 1893 RAG). Also --
 engine-free so engine3d.py and report.py both import THIS implementation instead of keeping
 divergent copies."""
+import india_loads as _IL
 
 
 def asce_sdc(SDS, SD1, S1=0.0, risk_cat="II"):
@@ -50,10 +51,20 @@ _SYS = {
 
 
 def check(cfg):
+    # India metric briefs → kip+inch when helpers present (full SI rewrite deferred)
+    try:
+        from india_units import apply_metric_geometry
+        apply_metric_geometry(cfg)
+    except Exception:
+        pass
+
     out = []
     say = lambda sev, msg: out.append((sev, msg))
     if not isinstance(cfg, dict):
         return [("ERROR", "cfg is not a dict")]
+    # ---- India load_plan (LIVE IS 875 / IS 1893 RAG) — mandatory ----
+    for sev, msg in _IL.validate_load_plan(cfg):
+        say(sev, msg)
     # ---- units ----
     H = [float(h) for h in (cfg.get("heights") or []) if isinstance(h, (int, float))]
     if not H:

@@ -1,5 +1,5 @@
 """Builds the agent's system prompt = headless driver preamble + the copied designer contract
-(AGENT_START + README_AGENT + the AISI tables of contents + the CFS worked reference)."""
+(AGENT_START + README_AGENT + the IS 801/811 tables of contents + the CFS worked reference)."""
 from . import config
 
 DRIVER_PREAMBLE = """You are an autonomous cold-formed steel (CFS) design engineer, running HEADLESS behind a web app. \
@@ -12,6 +12,7 @@ If the brief references a figure, use the dimensions stated in the text. Do NOT 
   * The activity log has already been started for this building -- this also set jobs/<name>/ as your JOB FOLDER.
   * run_python runs with its cwd = jobs/<name>/ inside an ISOLATED SANDBOX (no network, no credentials). \
 write_file and bare relative file writes land in jobs/<name>/ automatically. NEVER write project files to the work root.
+  * LIVE-retrieve IS 875 / IS 1893 into cfg["load_plan"] EVERY job before the pipeline (see india_loads.py).
   * WRITE jobs/<name>/cfg.py FIRST (a top-level `cfg = dict(...)`), then build from it, and KEEP it.
   * FOLLOW THE BRIEF EXACTLY -- the wall layout, segment lengths, story heights, sheathing type and system (or the \
 portal geometry). Do not swap strap bracing for shear walls, one-side for two-side sheathing, or Type II for \
@@ -21,9 +22,9 @@ schedules, per-line per-story sheathing + fastener schedules, chord studs, hold-
 drift table. W-shapes, A992, "moment frames", SCWB or any AISC 341/360 citation on a CFS system = failed brief.
   * Build via run_python:  import pipeline; pipeline.design_and_report(name, cfg)  -- it computes the loads, the \
 flexible-diaphragm tributary distribution, per-line unit shears, cumulative chord/hold-down/stud stacks, the S400 \
-four-term drift, the model-vs-tributary gate and the HTML report. It computes NO AISI capacity.
+four-term drift, the model-vs-tributary gate and the HTML report. It computes NO IS 801 capacity.
   * YOU derive every capacity and D/C: query the RAG with search_engineering_standards UNDER THE RETRIEVAL POLICY \
-below (one document per call -- AISI_S100 / AISI_S240 / AISI_S400_20 / ASCE7; an exact id when you know the provision; \
+below (one document per call -- IS_801_1975 / IS_811_1987 / IS_875_* / IS_1893; an exact id when you know the provision; \
 full text only to navigate), apply the cited clause to the demands, and fill every seeded slot in jobs/<name>/design/calc_package.json \
 (wall_lines: sheathing + fastener_schedule + capacity + DC; holddowns: tension device/rod; studs; collectors; \
 connections; capacity_design). PAIR each spec query with a `cfs_design_examples` query and mirror the worked method. \
@@ -48,10 +49,9 @@ RETRIEVAL_POLICY = """
 This is the query policy the Query file manager is built for (steltic_grokbot skills/Skill_querying_PACKAGED.md).
 The tool applies it to whatever you send and records the form it sent; write it that way yourself.
 
-1. ONE document per call, by canonical stem: doc="AISI_S100" | "AISI_S240" | "AISI_S400_20" | "ASCE7".
+1. ONE document per call, by canonical stem: doc="IS_801_1975" | "IS_811_1987" | "IS_875_Part_3_2015" | "IS_1893_Part_1_2016".
    Never search all documents blindly. Material -> system -> member -> loading -> method -> the one
-   document that governs (S100 members/connections; S240 framing rules -- required on every
-   light-frame brief; S400 walls/straps/SBMF and capacity design; ASCE7 loads/R/Cd/Omega0).
+   document that governs (IS 801 members; IS 811 sections; IS 875 / IS 1893 loads every job into cfg["load_plan"]).
 2. EXACT ID WHEN KNOWN. type="exact_section" | "exact_equation" | "exact_table", query = the id ALONE:
      {"type":"exact_section","doc":"AISI_S100","query":"G5","purpose":"web crippling"}
      {"type":"exact_equation","doc":"AISI_S100","query":"A3.1.3-1","purpose":"tensile yielding"}
@@ -89,9 +89,9 @@ def system_contract() -> str:
     return (_read("AGENT_START.md")
             + "\n\n" + RETRIEVAL_POLICY
             + "\n\n===== WORKFLOW GUIDE (README_AGENT) =====\n" + _read("README_AGENT.md")
-            + "\n\n===== AISI S100 / S240 / S400 TABLES OF CONTENTS "
+            + "\n\n===== IS 801 / IS 811 TABLES OF CONTENTS "
               "(use for clause-anchored RAG queries) =====\n"
-            + _read("AISI_TOC.md")
+            + _read("IS801_TOC.md") + "\n\n" + _read("IS_COLLECTIONS.md")
             + "\n\n===== WORKED-METHOD REFERENCE: four-story CFS WSP building (condensed, "
               "engine-reproducible) =====\n"
             + _read("CFS_REFERENCE.md")
@@ -108,7 +108,7 @@ def system_prompt(has_images: bool = False) -> str:
             "INTAKE IS TEXT + IMAGE(S). Reference image(s) are attached to the first user message "
             "(e.g. a wall-line plan or sketch) -- use them together with the text brief. If your model "
             "cannot read images, rely on the dimensions stated in the text and say so in the report.")
-    pre += ("\n  * SPEC RAG IS SAVED TO FILE: every AISI search_engineering_standards result is also written to "
+    pre += ("\n  * SPEC RAG IS SAVED TO FILE: every IS 801/811/875/1893 search_engineering_standards result is also written to "
             "jobs/<name>/rag/<slug>.txt. Use the returned hits normally while you design. When a design completes, those "
             "results are replaced in your context by a short pointer to the file -- so on a later Continue/optimisation, if "
             "you need a clause from an earlier search, read_file the rag/<slug>.txt it names instead of re-querying. "

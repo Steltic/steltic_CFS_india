@@ -501,7 +501,21 @@ def sa(cfg,T):
     return SD1*TL/T**2
 
 def elf(cfg, T1):
-    """Memoized ELF (pure function of cfg + fundamental period); same values, no numeric change."""
+    """ELF / equivalent-static seismic — India override.
+
+    Authoritative design story forces come from cfg['load_plan'] (LIVE IS 1893 RAG).
+    If load_plan.seismic_summary is present, return that. Embedded ASCE 7-22 ELF math
+    is retained only as a non-authoritative modal/period helper.
+    """
+    plan = cfg.get("load_plan") if isinstance(cfg, dict) else None
+    if isinstance(plan, dict) and isinstance(plan.get("seismic_summary"), dict):
+        ss = plan["seismic_summary"]
+        Fx = ss.get("Fx") or ss.get("story_forces") or {}
+        Fx = {int(k): float(v) if not isinstance(v, (list, tuple)) else float(v[0])
+              for k, v in dict(Fx).items()}
+        return (float(ss.get("Cs", 0.0)), float(ss.get("V", 0.0)),
+                float(ss.get("Tu", T1 or 0.0)), float(ss.get("Ta", T1 or 0.0)),
+                float(ss.get("k", 1.0)), Fx, float(ss.get("W", 0.0)))
     key = (_model_key(cfg), round(float(T1), 6))
     r = _ELF_CACHE.get(key)
     if r is None:
@@ -1023,6 +1037,18 @@ def kz_exposure(zft,exp):
     else: zg,al=2460.0,9.8
     return 2.41*(z/zg)**(2.0/al)
 def wind_forces(cfg,direction):
+    """REMOVED as primary load path on steltic_CFS_india.
+
+    USA used ASCE 7-22 Eq. 26.10-1 here. India requires LIVE IS 875 Part 3 RAG and
+    story forces written into cfg['load_plan']. Do not call this to invent wind loads.
+    """
+    raise RuntimeError(
+        "steltic_CFS_india: engine3d.wind_forces() is disabled. RAG-query IS 875 Part 3:2015 "
+        "LIVE this job and put retrieved wind story forces into cfg['load_plan'] "
+        "(see india_loads.py). Do not hardcode ASCE or IS wind formulas in the engine."
+    )
+
+def _legacy_asce_wind_forces_DISABLED(cfg,direction):
     w=cfg["wind"]; exp=w.get("exposure","C"); NF=len(cfg["heights"]); zlev=zlevels(cfg)
     F={}
     for k in range(1,NF+1):
