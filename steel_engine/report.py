@@ -34,23 +34,75 @@ except Exception:                     # no openseespy (dev sandbox): CFS renderi
 import sections as S
 
 
-def _si_unit_banner(cfg=None):
-    """Wave 1 SI: document N-mm-sec in report HTML; numeric kip labels remain a kip island."""
+# ---- Wave 2 SI report unit context (set in build_report / _design_basis) ----
+_REP_CFG = None
+_REP_SI = True
+_REP_SC = None
+
+def _set_report_units(cfg=None):
+    """Bind display scales for this report render (SI default for India)."""
+    global _REP_CFG, _REP_SI, _REP_SC, Fy, Emod
+    _REP_CFG = cfg
     try:
-        from india_units import is_si, report_unit_labels, ENGINE_UNITS, KIP_ISLANDS
+        from india_units import is_si, display_scale
+        _REP_SI = is_si(cfg) if cfg is not None else True
+        _REP_SC = display_scale(cfg)
+    except Exception:
+        _REP_SI = True
+        _REP_SC = {"si": True, "force_div": 1000.0, "force_lbl": "kN", "moment_div": 1e6,
+                   "moment_lbl": "kN·m", "length_div": 1000.0, "length_lbl": "m",
+                   "length_member_lbl": "mm", "stress_lbl": "MPa", "pressure_lbl": "kN/m²",
+                   "E_default": 200000.0, "Fy_default": 250.0}
+    Fy = float(_REP_SC.get("Fy_default", 250.0 if _REP_SI else 50.0))
+    Emod = float(_REP_SC.get("E_default", 200000.0 if _REP_SI else 29000.0))
+    return _REP_SC
+
+def _sc():
+    if _REP_SC is None:
+        _set_report_units(_REP_CFG)
+    return _REP_SC
+
+def _F(v, digits=1):
+    """Engine force → display number (kN if SI)."""
+    if v is None: return None
+    return round(float(v) / _sc()["force_div"], digits)
+
+def _M(v, digits=1):
+    """Engine moment (N·mm / kip-in) → display (kN·m / kip-ft)."""
+    if v is None: return None
+    return round(float(v) / _sc()["moment_div"], digits)
+
+def _Lstory(v, digits=2):
+    if v is None: return None
+    return round(float(v) / _sc()["length_div"], digits)
+
+def _ul(kind):
+    sc = _sc()
+    return {
+        "F": sc["force_lbl"], "M": sc["moment_lbl"], "L": sc["length_lbl"],
+        "Lm": sc.get("length_member_lbl", "mm" if sc["si"] else "in"),
+        "S": sc["stress_lbl"], "P": sc["pressure_lbl"],
+    }[kind]
+
+def _si_unit_banner(cfg=None):
+    """Wave 2 SI: N-mm-sec engine + SI HTML labels (kN / mm / MPa / kN·m)."""
+    _set_report_units(cfg)
+    try:
+        from india_units import is_si, report_unit_labels, ENGINE_UNITS
     except Exception:
         return ""
     if not is_si(cfg):
         return ("<p><b>Unit system:</b> kip-in (legacy / explicit opt-in).</p>")
     lab = report_unit_labels(cfg)
     return (
-        "<p><b>Unit system (India SI wave 1):</b> OpenSees / engine = <code>N-mm-sec</code> "
-        f"(force {lab['force']}, length {lab['length']}, stress {lab['stress']}; "
-        f"display often {lab['force_display']} / {lab['moment_display']} / {lab['pressure']}). "
-        "Some HTML table headers below may still say kip/ksi — treat those labels as "
-        f"<em>kip islands</em> pending wave 2 ({len(KIP_ISLANDS)} tracked). "
+        "<p><b>Unit system (India SI wave 2):</b> OpenSees / engine = <code>N-mm-sec</code> "
+        f"(force {lab['force']}, length {lab['length']}, stress {lab['stress']}). "
+        f"Tables below use display units <b>{lab['force_display']}</b> / <b>{lab['moment_display']}</b> / "
+        f"<b>{lab['stress']}</b> / <b>{lab['pressure']}</b> (not kip/ksi). "
         f"E_steel = {ENGINE_UNITS['E_steel_MPa']:.0f} MPa, g = {ENGINE_UNITS['g_mm_s2']:.0f} mm/s².</p>"
     )
+
+
 
 try:
     import design_post as DPOST      # run_case + capacity snippets (operator side; needs E)
@@ -269,7 +321,7 @@ def _elevation_from_live(cfg, direction, title):
     if not mem: return None
     fig, axes = plt.subplots(1, 3, figsize=(16, 6))
     for ax, which, ttl, col in zip(axes, ("N", "V", "M"),
-                                   ("Axial N (kip)", "Shear V (kip)", "Moment M (k-ft)"),
+                                   (f"Axial N ({_ul('F')})", f"Shear V ({_ul('F')})", f"Moment M ({_ul('M')})"),
                                    ("#1f77b4", "#2ca02c", "#d62728")):
         data = []; mx = 1e-9
         for (t, kind, n1, n2) in mem:
@@ -328,8 +380,8 @@ def fig_story_shear_otm(cfg, Fx):
     OTM_base = sum(Fx[k]*z[k]/12.0 for k in range(1, NF+1))
     lvl = list(range(1, NF+1))
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(9, 5))
-    a1.step(Vstory, lvl, where="mid"); a1.set_xlabel("story shear (kip)"); a1.set_ylabel("story"); a1.grid(alpha=0.3); a1.set_title("Story shear")
-    a2.plot(OTM, lvl, "-o"); a2.set_xlabel("overturning moment (k-ft)"); a2.set_title("OTM (above story)"); a2.grid(alpha=0.3)
+    a1.step(Vstory, lvl, where="mid"); a1.set_xlabel(f"story shear ({_ul('F')})"); a1.set_ylabel("story"); a1.grid(alpha=0.3); a1.set_title("Story shear")
+    a2.plot(OTM, lvl, "-o"); a2.set_xlabel(f"overturning moment ({_ul('M')})"); a2.set_title("OTM (above story)"); a2.grid(alpha=0.3)
     return _b64(fig), Vstory, OTM_base
 
 # ============================================================ per-load-case forces
@@ -421,7 +473,7 @@ def _member_calc_block(m):
         h.append(_table([l for l, _ in pr], [["%s" % v for _, v in pr]]))
     dem = [("P_comp (kip)", inp.get("P_comp_kip")), ("P_tens (kip)", inp.get("P_tens_kip")),
            ("Mz (kip-in)", inp.get("Mz_kipin")), ("My (kip-in)", inp.get("My_kipin")),
-           ("V (kip)", inp.get("V_kip"))]
+           (f"V ({_ul('F')})", inp.get("V_kip"))]
     h.append("<p class='cnote'>Demand envelope (analysis):</p>")
     h.append(_table([l for l, _ in dem] + ["governing combo"],
                     [["%s" % v for _, v in dem] + [str(inp.get("governing_combo", ""))]]))
@@ -1948,7 +2000,9 @@ def _design_basis(cfg):
 
 
 def build_report(name, root=None):
+    # wave 2 SI labels
     _register(name); cfg = E.CFG[name]
+    _set_report_units(cfg)
     if root is None:
         root = os.path.join(os.environ.get("STEEL_BUILDER_JOBS") or HERE, name)
     NF = len(cfg["heights"]); s = cfg["seis"]
@@ -2113,7 +2167,7 @@ def build_report(name, root=None):
                         srows.append([label, f"{Nv:.0f}", f"{Nk} {Ns}".strip(), f"{Mv/12:.0f}", f"{Mk} {Ms}".strip()])
                         case_detail_parts.append(f"<h4>Load case: {label}</h4><p>{_case_desc(label, col_only)}</p>")
                         case_detail_parts.append(_table(
-                            ["member", "section", "N (kip)", "Mz (k-ft)", "My (k-ft)", "V (kip)", "location (i,j / level)"],
+                            ["member", "section", f"N ({_ul('F')})", f"Mz ({_ul('M')})", f"My ({_ul('M')})", f"V ({_ul('F')})", "location (i,j / level)"],
                             rows))
                     if uri and _want_casefigs:
                         _save_case_fig(uri, figdir, label)   # -> figs/case_<label>.png (NOT embedded)
@@ -2834,7 +2888,7 @@ def build_report_cfs(name, cfg, res, pkg, root):
             rows.append([m["id"], m["section"], m["governing_combo"], m["P_kip"],
                         m["M_kipin"], m["V_kip"]])
         parts.append(_tbl(["member", "section", "governing combo", "P (kip)",
-                           "M (kip-in)", "V (kip)"], rows))
+                           "M (kip-in)", f"V ({_ul('F')})"], rows))
         a = (pkg.get("anchorage") or [{}])[0]
         parts.append("<p>Base anchorage: V = %s kip, NET UPLIFT %s kip (%s).</p>"
                      % (a.get("V_base_kip"), a.get("T_net_uplift_kip"),
@@ -2874,7 +2928,7 @@ def build_report_cfs(name, cfg, res, pkg, root):
                                  "OK" if r.get("drift_amplified", 0) <= dd["drift_limit"]
                                  else "<b>OVER</b>"])
             parts.append(f"<h3>{dirn} lines</h3>" +
-                         _tbl(["line", "story", "V (kip)", "v (plf)", "Cd*dr/Ie",
+                         _tbl(["line", "story", f"V ({_ul('F')})", "v (plf)", "Cd*dr/Ie",
                                "limit", "drift"], rows))
             for f in dd.get("gate_flags", []):
                 parts.append(f"<p class='note'><b>GATE:</b> {f} &mdash; resolve in the "

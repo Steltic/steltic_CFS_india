@@ -219,8 +219,10 @@ def _viewer_data(cfg, name, root):
                 rec["wd"] = wd
         d = dem.get(tag)
         if d:
-            Pc = float(d.get("P_comp_kip") or 0); Pt = float(d.get("P_tens_kip") or 0)
-            Mx = float(d.get("Mx_kipft") or 0);   My = float(d.get("My_kipft") or 0)
+            Pc = float(d.get("P_comp_N") or d.get("P_comp_kip") or 0)
+            Pt = float(d.get("P_tens_N") or d.get("P_tens_kip") or 0)
+            Mx = float(d.get("Mx_kNm") or d.get("Mx_kipft") or 0)
+            My = float(d.get("My_kNm") or d.get("My_kipft") or 0)
             u = _dc("col" if rec["type"] == "column" else rec["type"],
                     sec, L, Pc, Pt, Mx * 12.0, My * 12.0, Fy)
             if u is not None:
@@ -230,7 +232,7 @@ def _viewer_data(cfg, name, root):
                 rec["f"] = {"N": round(-Pc if Pc >= Pt else Pt, 1)}
             else:
                 rec["f"] = {"P": round(max(Pc, Pt), 1), "Mx": round(Mx, 1),
-                            "My": round(My, 1), "V": round(float(d.get("V_kip") or 0), 1)}
+                            "My": round(My, 1), "V": round(float(d.get("V_N") or d.get("V_kip") or 0), 1)}
         elements.append(rec)
 
     zs = sorted({round(coords[t][2], 1) for t in used})
@@ -294,8 +296,9 @@ def _viewer_data(cfg, name, root):
     return {
         "meta": {
             "title": "%s — %s" % (name, cfg.get("arch", "")),
-            "subtitle": "%d nodes · %d elements · T₁=%.3f s · units: kip, in" %
-                        (len(used), len(elements), ms["T"][0]),
+            "subtitle": "%d nodes · %d elements · T₁=%.3f s · units: %s" %
+                        (len(used), len(elements), ms["T"][0],
+                         ("N, mm (N-mm-sec)" if _viewer_si(cfg) else "kip, in")),
             "model_line": ("designed with model: %s" % model_used) if model_used else "",
             "support_label": support_label,
             "levels": levels, "stats": stats,

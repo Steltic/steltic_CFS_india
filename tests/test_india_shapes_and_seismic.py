@@ -100,3 +100,15 @@ def test_cfs_systems_india_drift():
     import cfs_systems as SYS
     assert abs(SYS.india_drift_limit({}) - 0.004) < 1e-9
     assert SYS.INDIA_SEISMIC_NOTES["s400_omega_capacity_design"]["found"] is False
+
+
+def test_sfia_twin_tagged_not_is811_authority():
+    import cfs_sections as CS
+    import india_units as IU
+    IU.activate_si()
+    p = CS.gross_props("600S162-54")
+    assert p.get("_source") == "SFIA_twin_geometry"
+    assert p.get("_authority") == "not_IS811"
+    # IS 811 path must remain authoritative
+    p2 = CS.gross_props("CWS80X80X3.15")
+    assert p2.get("_source") == "IS_811_1987"

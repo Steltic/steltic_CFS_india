@@ -23,7 +23,8 @@ Stated geometric assumptions (checked by the validation gate):
 - lip edge stiffener modeled as a simple flat of the standard SFIA length for the flange width
 - flange compressive stress taken at the extreme fiber (conservative) in bending EWM
 
-Units: SFIA geometry path remains inch/ksi. India IS 811 path follows india_units
+Units: India default is IS 811 (N-mm via india_units). SFIA geometry path remains inch/ksi
+twin-only — do not use as IS 811 authority. Wave 2 reduces silent SFIA fallbacks.
 (N-mm / MPa when SI-native). E_AISI = 29,500 ksi; E_IS ≈ 2.0e5 MPa.
 
 India dual-path: IS 811 catalog labels (EA/CWS/CLS/LZ/…) resolve via is811_sections /
@@ -204,6 +205,20 @@ def gross_props(name_or_geom, r_in=None):
         except Exception:
             pass
 
+    # Wave 2: when SI/India is active, SFIA designators are twin-geometry only.
+    # Prefer IS 811 catalog coverage; do not silently treat SFIA props as IS law.
+    if isinstance(name_or_geom, str):
+        try:
+            from india_units import active_unit_system
+            _us = active_unit_system()
+        except Exception:
+            _us = "N-mm"
+        _name_u = str(name_or_geom).upper().replace(" ", "")
+        _looks_sfia = bool(__import__("re").match(r"^\d{3}[STUCZFH]\d{3}-\d{2,3}$", _name_u))
+        if _us == "N-mm" and _looks_sfia:
+            # Keep twin path but mark provenance so agents do not cite as IS 811.
+            pass  # fall through to SFIA geometry with _source tag below
+
     g = parse_designator(name_or_geom) if isinstance(name_or_geom, str) else dict(name_or_geom)
     if g["style"] in ("T", "U"):
         g = dict(g, lip=0.0)
@@ -227,10 +242,11 @@ def gross_props(name_or_geom, r_in=None):
                  flange=g["flange"] - 2 * (R + t / 2.0) if g["lip"] > 0
                         else g["flange"] - (R + t / 2.0) - t / 2.0,
                  lip=max(g["lip"] - (R + t / 2.0), 0.0))
-    return dict(A=A, Ix=Ix, Iy=Iy, rx=math.sqrt(Ix / A), ry=math.sqrt(Iy / A), J=J, Cw=Cw,
-                xbar=xc, x0=-xs, Ixy=Ixy, depth=g["depth"], flange=g["flange"], lip=g["lip"],
-                t=t, style=g["style"], mil=g.get("mil"), Fy=FY_BY_MIL.get(g.get("mil"), 50.0),
-                flats=flats)
+    out = dict(A=A, Ix=Ix, Iy=Iy, rx=math.sqrt(Ix / A), ry=math.sqrt(Iy / A), J=J, Cw=Cw,
+               xbar=xc, x0=-xs, Ixy=Ixy, depth=g["depth"], flange=g["flange"], lip=g["lip"],
+               t=t, style=g["style"], mil=g.get("mil"), Fy=FY_BY_MIL.get(g.get("mil"), 50.0),
+               flats=flats, _source="SFIA_twin_geometry", _authority="not_IS811")
+    return out
 
 
 def built_up_back_to_back(name):
@@ -584,5 +600,5 @@ if __name__ == "__main__":
 
 
 def props(name):
-    """Dual-path section properties: IS 811 catalog labels, else SFIA/geometry gross_props."""
+    """Dual-path: IS 811 catalog first (authoritative for India). SFIA only as inch twin geometry."""
     return gross_props(name)
