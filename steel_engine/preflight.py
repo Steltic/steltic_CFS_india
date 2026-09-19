@@ -7,6 +7,7 @@ Legacy asce_sdc() is USA ASCE 7-22 (not authoritative on steltic_CFS_india; Indi
 engine-free so engine3d.py and report.py both import THIS implementation instead of keeping
 divergent copies."""
 import india_loads as _IL
+import india_cfs_gates as _ICG
 
 
 def asce_sdc(SDS, SD1, S1=0.0, risk_cat="II"):
@@ -64,6 +65,9 @@ def check(cfg):
         return [("ERROR", "cfg is not a dict")]
     # ---- India load_plan (LIVE IS 875 / IS 1893 RAG) — mandatory ----
     for sev, msg in _IL.validate_load_plan(cfg):
+        say(sev, msg)
+    # ---- India CFS P0: wall vn (C1) + R provenance (C2) ----
+    for sev, msg in _ICG.validate_india_cfs_p0(cfg):
         say(sev, msg)
     # ---- units ----
     H = [float(h) for h in (cfg.get("heights") or []) if isinstance(h, (int, float))]

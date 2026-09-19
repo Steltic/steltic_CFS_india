@@ -267,6 +267,37 @@ def _completion_gate(ws):
                 if not cited:
                     probs.append("%s '%s' has no cited clause (IS 801/IS 811)"
                                  % (label, x.get("id")))
+        # ---- India C7: refuse COMPLETE if vn provisional OR R proxy ----
+        try:
+            import sys as _sys
+            _se = str(pathlib.Path(__file__).resolve().parents[1] / "steel_engine")
+            if _se not in _sys.path:
+                _sys.path.insert(0, _se)
+            import india_cfs_gates as _ICG
+            _cfg_path = pathlib.Path(jd) / "cfg.py"
+            _cfg = {}
+            if _cfg_path.exists():
+                import runpy
+                try:
+                    _ns = runpy.run_path(str(_cfg_path))
+                    _cfg = _ns.get("cfg") or {}
+                except Exception:
+                    _cfg = {}
+            # Also accept provenance mirrored into the package
+            if isinstance(pkg.get("cfg_snapshot"), dict):
+                _cfg = {**_cfg, **pkg["cfg_snapshot"]}
+            for k in ("wall_vn_plf_asd", "wall_vn_source", "wall_vn_cite", "wall_vn",
+                      "R", "R_source", "R_cite", "R_cfs_table9_found", "seis", "load_plan"):
+                if k in pkg and k not in _cfg:
+                    _cfg[k] = pkg[k]
+            _ok, _reasons = _ICG.complete_allowed(_cfg, pkg)
+            if not _ok:
+                for r in _reasons:
+                    probs.append("COMPLETE refused (India C7): " + r)
+                probs.append("Admin label must stay PARTIAL until wall vn source is "
+                             "manufacturer/test/documented AND R source is non-proxy")
+        except Exception as _c7e:
+            probs.append("India C7 complete gate error: %s" % _c7e)
         # ---- CFS-specific completeness ----
         for w in walls:
             if isinstance(w, dict) and not w.get("waived") and \

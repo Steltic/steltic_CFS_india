@@ -359,15 +359,14 @@ def _design_basis_issues(cfg, name=None, pkg=None):
                        "NOT apply (no capacity-design chain); design to S100 (+S240 framing) only, and "
                        "CONFIRM whether wind or seismic governs each direction (record a "
                        "'governing_hazard' statement in the package to clear this note)"%float(R))
-    # drift limit vs risk category (Table 12.12-1, light-frame 0.025 row where it applies)
+    # India drift: IS 1893 cl.7.11.1.1 = 0.004 h (strip USA Table 12.12-1 0.025 scaffold)
     if _CS is not None and wall_path and sysname in _WALL_SYSTEMS:
-        n_st = int(cfg.get("stories") or len(cfg.get("heights_ft") or []) or 0)
-        rc = str(cfg.get("risk_cat","II"))
-        want = _CS.drift_limit(sysname, n_st, rc)
+        want = _CS.india_drift_limit(cfg)
         have = cfg.get("drift_limit")
         if have is not None and _isnum(have) and float(have) > want + 1e-6:
-            out.append("cfg['drift_limit']=%.3f exceeds the Table 12.12-1 value %.3f for %s, %d "
-                       "stories, RC %s -- tighten it" % (float(have), want, sysname, n_st, rc))
+            out.append("cfg['drift_limit']=%.3f exceeds IS 1893 cl.7.11.1.1 limit %.3f "
+                       "(0.004 h; soft-storey 0.002 where applicable) -- tighten it"
+                       % (float(have), want))
     # diaphragm: FLEXIBLE is the light-frame default; a RIGID declaration must be justified
     _dia = str(cfg.get("diaphragm","flexible" if wall_path else "rigid")).lower()
     if wall_path and _dia == "rigid" and isinstance(pkg,dict):
