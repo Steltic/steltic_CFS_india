@@ -406,3 +406,213 @@ def as_tool_calls(plan: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "clause": row.get("clause") or "",
         })
     return calls
+
+
+# ---------------------------------------------------------------------------
+# IS 811 Ix OCR → QFM correction path (wave2 polish2)
+# Catalog OCR sometimes concatenates Ix|Iy or drops digits. Agents must correct
+# Ix from LIVE RAG / engineering_rag_india (QFM) — never invent numbers.
+# ---------------------------------------------------------------------------
+
+IX_QFM_PURPOSE = "is811_ix_qfm_correction"
+
+
+def seed_ix_qfm_correction_plan(section: str) -> list[dict[str, Any]]:
+    """Retrieval-plan hooks to re-read Ix from LIVE IS 811 RAG / QFM tables.
+
+    Execute every required step against engineering_rag_india; if OCR/catalog Ix
+    is noisy, apply a cited QFM value via ``ix_qfm_correction_status`` /
+    ``apply_ix_from_qfm`` — do not invent Ix.
+    """
+    info = parse_is811_label(section)
+    typ = (info.get("type") or "").upper() or None
+    table = info.get("table")
+    desig = info.get("designation_is") or info.get("label") or section
+    plan: list[dict[str, Any]] = []
+
+    if table:
+        plan.append(_q(
+            collection=COLL_IS811, stem=STEM_IS811,
+            qtype="exact_table", query=str(table),
+            purpose=IX_QFM_PURPOSE,
+            notes=(
+                "Re-read Ix (cm4) for designation %s from IS 811 Table %s via QFM/LIVE RAG. "
+                "Prefer table cell over OCR-concatenated catalog Ix when they disagree."
+                % (desig, table)
+            ),
+        ))
+    plan.append(_q(
+        collection=COLL_IS811, stem=STEM_IS811,
+        qtype="fts",
+        query="%s Ix moment of inertia" % desig,
+        purpose=IX_QFM_PURPOSE,
+        required=bool(not table),
+        notes="Pin the designation row and extract Ix (cm4) from the LIVE table extract.",
+    ))
+    if typ:
+        plan.append(_q(
+            collection=COLL_IS811, stem=STEM_IS811,
+            qtype="fts",
+            query="Table %s %s sectional properties" % (table or "?", typ),
+            purpose="is811_ix_table_navigate",
+            required=False,
+            notes="Navigate property columns (A, Ix, Iy) for Type %s" % typ,
+        ))
+    # Always include the standard table/clause richness anchors for C5.
+    plan = expand_thin_plan(plan, section, include_amd1=False)
+    return plan
+
+
+def catalog_ix_snapshot(section: str) -> dict[str, Any]:
+    """Read catalog Ix (if present) without inventing. found:false when missing."""
+    info = parse_is811_label(section)
+    out: dict[str, Any] = {
+        "section": section,
+        "label": info.get("label"),
+        "in_catalog": bool(info.get("in_catalog")),
+        "found": False,
+        "Ix_si_cm4": None,
+        "source": "is811_shapes.csv",
+    }
+    if not info.get("in_catalog"):
+        out["note"] = (
+            "Section not in is811_shapes.csv (found:false). Retrieve Ix via "
+            "seed_ix_qfm_correction_plan + LIVE RAG; do not invent."
+        )
+        return out
+    try:
+        import is811_sections as S
+        props = S.props(info["label"] or section, unit_system="N-mm")
+        ix = props.get("Ix_si_cm4")
+        if ix is None and props.get("Ix") is not None:
+            # Already converted path — report mm4 only
+            out["Ix_mm4"] = props.get("Ix")
+            out["found"] = True
+            out["note"] = "Catalog has Ix (mm4); Ix_si_cm4 column absent — verify via QFM."
+            return out
+        if ix is None:
+            out["note"] = "Catalog row present but Ix_si_cm4 missing (found:false) — use QFM."
+            return out
+        out["found"] = True
+        out["Ix_si_cm4"] = float(ix)
+        out["Ix_mm4"] = props.get("Ix")
+        out["type"] = props.get("Type")
+        out["table"] = props.get("Table")
+        out["note"] = (
+            "Catalog OCR Ix snapshot only. If LIVE QFM disagrees, prefer QFM with cite "
+            "(apply_ix_from_qfm); do not average or invent."
+        )
+        return out
+    except Exception as ex:
+        out["note"] = "catalog Ix read failed: %s (found:false)" % ex
+        return out
+
+
+def ix_qfm_correction_status(
+    section: str,
+    *,
+    qfm_ix_si_cm4: float | None = None,
+    cite: str | None = None,
+    rag_hit: dict | None = None,
+) -> dict[str, Any]:
+    """Status helper: compare catalog OCR Ix vs optional LIVE QFM value.
+
+    Does **not** invent numbers. Without a cited QFM Ix, returns a correction
+    plan + catalog snapshot and ``correction_applied=false``.
+    """
+    snap = catalog_ix_snapshot(section)
+    plan = seed_ix_qfm_correction_plan(section)
+    out: dict[str, Any] = {
+        "purpose": IX_QFM_PURPOSE,
+        "section": section,
+        "catalog": snap,
+        "retrieval_plan": plan,
+        "retrieval_plan_tool_calls": as_tool_calls(plan),
+        "correction_applied": False,
+        "found": False,
+    }
+    # Optional rag_hit normalization (empty → found:false)
+    if rag_hit is not None:
+        hits = rag_hit.get("results") or rag_hit.get("hits") or []
+        if not hits or rag_hit.get("found") is False:
+            out["rag"] = dict(found=False, note="LIVE RAG/QFM returned no Ix row (found:false).")
+        else:
+            out["rag"] = dict(found=True, n_hits=len(hits), cite=rag_hit.get("cite") or cite)
+
+    if qfm_ix_si_cm4 is None:
+        out["note"] = (
+            "No QFM Ix supplied yet. Run seed_ix_qfm_correction_plan against "
+            "engineering_rag_india; when a cited Ix (cm4) is retrieved, call "
+            "apply_ix_from_qfm / ix_qfm_correction_status with qfm_ix_si_cm4 + cite. "
+            "Do not invent Ix or patch OCR by guesswork."
+        )
+        return out
+
+    if not cite:
+        out["note"] = (
+            "qfm_ix_si_cm4 provided without cite (found:false). Refuse silent correction; "
+            "attach LIVE RAG/QFM clause or table cell cite."
+        )
+        out["qfm_ix_si_cm4"] = float(qfm_ix_si_cm4)
+        return out
+
+    cat_ix = snap.get("Ix_si_cm4")
+    out.update(
+        found=True,
+        correction_applied=True,
+        qfm_ix_si_cm4=float(qfm_ix_si_cm4),
+        cite=cite,
+        catalog_ix_si_cm4=cat_ix,
+        delta_cm4=(None if cat_ix is None else float(qfm_ix_si_cm4) - float(cat_ix)),
+        note=(
+            "Ix corrected from LIVE RAG/QFM cite=%r. Prefer this over OCR catalog when "
+            "they disagree. Provenance required for COMPLETE."
+            % cite
+        ),
+    )
+    return out
+
+
+def apply_ix_from_qfm(
+    section: str,
+    ix_si_cm4: float,
+    *,
+    cite: str,
+    source: str = "LIVE_RAG_QFM",
+) -> dict[str, Any]:
+    """Record a cited QFM Ix correction (does not mutate the CSV).
+
+    Returns a props overlay agents can merge into cfg / package notes.
+    Refuses without cite; never invents Ix.
+    """
+    if cite is None or str(cite).strip() == "":
+        return dict(
+            found=False,
+            section=section,
+            note="apply_ix_from_qfm refused: cite required (found:false). Do not invent Ix.",
+        )
+    try:
+        ix = float(ix_si_cm4)
+    except (TypeError, ValueError):
+        return dict(
+            found=False,
+            section=section,
+            note="apply_ix_from_qfm refused: ix_si_cm4 not numeric (found:false).",
+        )
+    if ix <= 0:
+        return dict(
+            found=False,
+            section=section,
+            note="apply_ix_from_qfm refused: Ix must be positive (found:false).",
+        )
+    status = ix_qfm_correction_status(section, qfm_ix_si_cm4=ix, cite=cite)
+    mm4 = ix * 10000.0  # cm4 → mm4
+    status["overlay"] = dict(
+        label=str(section).upper().replace(" ", ""),
+        Ix_si_cm4=ix,
+        Ix=mm4,
+        _Ix_source=source,
+        _Ix_cite=cite,
+        _Ix_ocr_corrected=True,
+    )
+    return status

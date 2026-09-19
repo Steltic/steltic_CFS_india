@@ -25,11 +25,31 @@ Each India example has a matching `IN_CFS_ExN_EOR_inputs_EXAMPLE.json` fixture:
 Labelled EXAMPLE / not-for-construction; real jobs still LIVE-retrieve load_plan and use
 project-specific cites. Proxy/`is800_omrf` R still refuses COMPLETE.
 
-## Portal combo-path status
+## Portal combo-path status (wave2 polish2)
 
-`steel_engine/cfs_frame.py` still contains the legacy portal solver and USA-shaped combo
-labels for compatibility with portal demos. For `jurisdiction=india`, results carry an
-explicit `india_combo_path: {"found": false}` status: native portal combinations must
-come from LIVE IS 875 / IS 1893 RAG in `cfg['load_plan']`. No IS factors are inferred in
-`cfs_frame`; practical section selection, IS 811 `Ix` OCR-to-QFM correction, and
-connection/base D/Cs remain agent/EOR work.
+`steel_engine/cfs_frame.py` retains the legacy portal solver for compatibility. For
+`jurisdiction=india`:
+
+- When `cfg['load_plan'].combinations` already carries LIVE IS 875 / IS 1893 RAG factors,
+  `run()` consumes those rows (`india_combo_path.found=true`). No IS factors are invented
+  inside `cfs_frame`.
+- When load_plan lacks combinations, `india_combo_path` stays `found:false` and legacy
+  ASCE-shaped labels remain scaffolding only.
+
+## Practical IS 811 sections
+
+`steel_engine/india_practical_sections.py` prefers stocked CLR/CLS/CWR/CWS/LZ sizes from
+`is811_shapes.csv`. Missing designations → `found:false` (do not invent or silently
+substitute SFIA as IS law).
+
+## IS 811 Ix OCR → QFM
+
+`steel_engine/india_is811_retrieval.py` exposes `seed_ix_qfm_correction_plan`,
+`ix_qfm_correction_status`, and `apply_ix_from_qfm` so agents can correct noisy OCR Ix
+from LIVE RAG/QFM with a cite. No invented numbers.
+
+## Connection / anchor D/Cs
+
+`steel_engine/india_connection_dc.py` stubs portal knee/apex and base-anchor D/C reporting.
+Silent USA AISI S100/S240 defaults are refused for India; supply IS 801 / manufacturer
+EOR capacity + cite (or leave `found:false`).
