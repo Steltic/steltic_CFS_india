@@ -99,6 +99,18 @@ def props(name: str, unit_system: str | None = None) -> dict:
         us = unit_system or "N-mm"
     if us != "N-mm":
         raw["_units"] = "in"
+        if raw.get("depth") is None and raw.get("d") is not None:
+            raw["depth"] = raw["d"]
+        if raw.get("J") is None:
+            raw["J"] = None
+            raw["_J_found"] = False
+        else:
+            raw["_J_found"] = True
+        if raw.get("Cw") is None:
+            raw["Cw"] = None
+            raw["_Cw_found"] = False
+        else:
+            raw["_Cw_found"] = True
         return raw
     mm = 25.4
     out = dict(raw)
@@ -125,6 +137,20 @@ def props(name: str, unit_system: str | None = None) -> dict:
     if raw.get("t_mm") is not None:
         out["tf"] = raw["t_mm"]
         out["tw"] = raw["t_mm"]
+    # Portal / cfs_frame.frame_section expects `depth` (SFIA name); IS 811 uses `d`.
+    if out.get("depth") is None and out.get("d") is not None:
+        out["depth"] = out["d"]
+    # J / Cw: pass through when catalog has them; otherwise mark found:false (do not invent).
+    if out.get("J") is None:
+        out["J"] = None
+        out["_J_found"] = False
+    else:
+        out["_J_found"] = True
+    if out.get("Cw") is None:
+        out["Cw"] = None
+        out["_Cw_found"] = False
+    else:
+        out["_Cw_found"] = True
     out["_units"] = "mm"
     return out
 

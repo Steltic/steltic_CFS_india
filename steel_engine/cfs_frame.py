@@ -48,16 +48,35 @@ def frame_section(name):
     """'800S250-97' (single channel) or '2x800S250-97' (back-to-back built-up) ->
     dict(A, Ix, depth, single, e0_in, designator). e0_in = load-plane-to-shear-center
     eccentricity for the torsion companion (loads through the web plane): |x0| + xbar-to-web
-    is conservative; we use |x0| measured from the web midline (gross_props convention)."""
+    is conservative; we use |x0| measured from the web midline (gross_props convention).
+
+    India: IS 811 labels (CLR/CWS/…) resolve via gross_props; catalog `d` is aliased to
+    `depth`. J/Cw pass through when present on the catalog row (else None / found:false)."""
     single = not name.lower().startswith("2x")
     base = name[2:] if not single else name
     if single:
         p = SEC.gross_props(base)
-        return dict(A=p["A"], Ix=p["Ix"], depth=p["depth"], single=True,
-                    e0_in=abs(p["x0"]) + abs(p["xbar"]), designator=name, base=base)
+        depth = p.get("depth", p.get("d"))
+        if depth is None:
+            raise KeyError(
+                "frame_section(%r): missing depth/d on gross_props (IS 811 alias failed)"
+                % (name,))
+        return dict(A=p["A"], Ix=p["Ix"], depth=depth, single=True,
+                    e0_in=abs(p.get("x0") or 0.0) + abs(p.get("xbar") or 0.0),
+                    designator=name, base=base,
+                    J=p.get("J"), Cw=p.get("Cw"),
+                    _J_found=p.get("_J_found", p.get("J") is not None),
+                    _Cw_found=p.get("_Cw_found", p.get("Cw") is not None),
+                    _source=p.get("_source"))
     b = SEC.built_up_back_to_back(base)
-    return dict(A=b["A"], Ix=b["Ix"], depth=b["depth"], single=False,
-                e0_in=0.0, designator=name, base=base)
+    depth = b.get("depth", b.get("d"))
+    if depth is None:
+        raise KeyError("frame_section(%r): built-up missing depth/d" % (name,))
+    return dict(A=b["A"], Ix=b["Ix"], depth=depth, single=False,
+                e0_in=0.0, designator=name, base=base,
+                J=b.get("J"), Cw=b.get("Cw"),
+                _J_found=b.get("_J_found"), _Cw_found=b.get("_Cw_found"),
+                _source=b.get("_source"))
 
 
 # ---------------- planar direct-stiffness core (kip, inch) ----------------
