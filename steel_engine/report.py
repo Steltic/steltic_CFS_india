@@ -117,21 +117,86 @@ def _is_india_report(cfg=None):
 
 
 def _chapters(cfg=None):
-    """Checklist chapters; India strips USA 0.025h drift scaffold (S2/C4)."""
+    """Checklist chapters; India replaces AISI/ASCE/LRFD USA boilerplate with IS language."""
     ch = {k: (v[0], list(v[1])) for k, v in CHAPTERS.items()}
-    if _is_india_report(cfg):
-        ch[8] = (ch[8][0], [
-            "Storey drift &le; 0.004 h per IS 1893 Part 1:2016 cl.7.11.1.1 "
-            "(design seismic forces; no C<sub>d</sub>/I<sub>e</sub> amplification). "
-            "Soft-storey / URM-infill: 0.002 h where Table 6 notes apply.",
-            "Wind drift &le; project limit; joist/header deflections LL &le; L/360, TL &le; L/240.",
-            "Building separation where structures adjoin (wings, host + mezzanine).",
-            "Differential movement at podium/split-level steps; thermal movement where raised.",
-        ])
-        # Drop USA 0.025 wording if any residual
-        for i, item in enumerate(ch[8][1]):
-            if "0.025" in item or "Table 12.12-1" in item:
-                ch[8][1][i] = ch[8][1][0]  # already replaced wholesale
+    if not _is_india_report(cfg):
+        return ch
+    # --- India jurisdiction: strip AISI S100/S240/S400 + ASCE 7 / LRFD USA labels ---
+    ch[1] = ("Design basis & codes", [
+        "Governing codes stated (NBC / IS 875 Parts 1–5, IS 1893 Part 1:2016, IS 801:1975, "
+        "IS 811:1987 [+Amd1 when RAG-confirmed]); importance / risk as retrieved — "
+        "not IBC/ASCE 7 / AISI S100/S240/S400 as design authority.",
+        "Project criteria match brief + geotech (site class, bearing); units SI (N-mm / MPa) "
+        "or declared display units; IS 811 designations (CLR/CLS/…) preferred over SFIA.",
+        "Scope / design-responsibility boundaries defined; hold-down hardware as class "
+        "envelopes with EOR product substitution; concrete anchorage detailing deferred.",
+    ])
+    ch[2] = ("Structural system & load path", [
+        "Gravity path continuous; lateral path diaphragm → wall lines/frames → anchorage, "
+        "both orthogonal directions.",
+        "Lateral system per direction identified (WSP / steel-sheet / gypsum / strap / SBMF / "
+        "portal) with R from IS 1893 Table 9 RAG or eor_documented (never silent IS 800 OMRF "
+        "proxy). Dual/mixed SFRS: least-R status via india_least_r (IS clause found:false → "
+        "require eor_documented; refuse ASCE 12.2.3 as India law).",
+        "Diaphragm idealization justified; collectors at re-entrants; irregularities + "
+        "podium/two-stage: IS 1893 stubs (found:false honest — refuse silent ASCE 12.2.3.2).",
+    ])
+    ch[3] = ("Loads", [
+        "Dead / imposed per IS 875 Parts 1–2 (LIVE RAG).",
+        "Wind per IS 875 Part 3 (Annex A Vb, k1–k4, terrain); cyclonic k4 from cl.6.3.4 "
+        "corpus/LIVE RAG by structure class (post-cyclone 1.30 / industrial 1.15 / other 1.00) "
+        "— do not force 1.0 when class is industrial/post-cyclone; Noida Annex A found:false "
+        "→ Delhi 47 proxy (do not invent town row).",
+        "Seismic per IS 1893 Part 1:2016 (Z, I, R, Ah, VB) via load_plan — both wind and EQ run.",
+        "Governing case (wind vs seismic) identified per line/direction.",
+    ])
+    ch[4] = ("Load combinations", [
+        "Combinations from cfg['load_plan'] after LIVE IS 875 Part 5 / IS 1893 RAG — "
+        "not ASCE 7-22 §2.3 LRFD labels.",
+        "Net-uplift / counteracting cases included when wind applies; EQ combos when seismic applies.",
+        "Second-order effects handled per-combination on frame paths where used.",
+    ])
+    ch[5] = (ch[5][0], [
+        "Wall lines / frame geometry match the brief; openings stated.",
+        "Wall-line springs / stiffness basis stated (IS 801 agent+RAG — not S400 four-term as India law).",
+        "Diaphragm flexibility modelled appropriately; fidelity tier stated.",
+        "Boundary / anchorage assumptions consistent; equilibrium verified.",
+    ])
+    ch[6] = ("Member & wall strength design (IS 801 / IS 811)", [
+        "Every wall line / story: sheathing + fastener schedule with vn from manufacturer/test/"
+        "IS-table source (C1) — IS 801 tabulated WSP/steel-sheet vn often found:false (honest).",
+        "Studs/chords/tracks per IS 801 + IS 811 section properties; built-up interconnection "
+        "agent-cited; prefer stocked IS 811 / 2x built-up (Nx packs N>2 → found:false + candidates).",
+        "Perforated / Type II: IS 801 rules stub found:false unless LIVE RAG fill; practice/EOR "
+        "Ca disclosure allowed — refuse AISI S400 Type II as India authority.",
+        "Governing D/C ≤ 1.0 with citations to IS 801/811 (or manufacturer) — not AISI clauses.",
+    ])
+    ch[8] = ("Serviceability", [
+        "Storey drift ≤ 0.004 h per IS 1893 Part 1:2016 cl.7.11.1.1 "
+        "(design seismic forces; no Cd/Ie amplification). Soft-storey / URM-infill: 0.002 h "
+        "where Table 6 notes apply.",
+        "Wind drift ≤ project limit; joist/header deflections LL ≤ L/360, TL ≤ L/240.",
+        "Building separation where structures adjoin (wings, host + mezzanine).",
+        "Differential movement at podium/split-level steps; thermal movement where raised.",
+    ])
+    ch[9] = ("Lateral-system detailing (IS 801 / IS 1893)", [
+        "System detailing matches the R used; CFS Table 9 row often found:false → eor_documented.",
+        "Capacity-design / Ω0 S400 stack: found:false / N/A under IS 801 — do not invent.",
+        "Type II perforated: ends-only hold-downs + distributed track (practice); IS rules found:false.",
+        "Hold-downs/rods for overturning tension; net-uplift path under wind combos.",
+    ])
+    ch[10] = ("Connections", [
+        "Connection demands stated; design per IS 801 cl.7 (RAG) — not AISI S100 Ch. J as authority.",
+        "Strap / uplift / track-to-foundation / Type II distributed anchorage as applicable.",
+        "Anchorage to concrete handed off; constructability of fasteners stated.",
+    ])
+    ch[13] = ("QA / professional acceptance", [
+        "Independent check; tributary vs model reconciled where used.",
+        "Analysis assumptions vs detailing reconciled; fidelity tier appropriate.",
+        "Calc package complete and traceable to IS 801/811 + IS 875/1893 cites "
+        "(not AISI S100+S240+S400 grounded as India law).",
+        "Open items / RFIs closed; EOR seal when applicable.",
+    ])
     return ch
 
 
@@ -885,17 +950,28 @@ CHAPTERS = {
    "EOR satisfied the design meets the governing codes and the standard of care &mdash; apply seal/signature."]),
 }
 
-def _toc():
-    rows = "".join(f"<li><b>Chapter {n}</b> &mdash; {CHAPTERS[n][0]}</li>" for n in range(1, 14))
+def _toc(cfg=None):
+    ch = _chapters(cfg)
+    rows = "".join(f"<li><b>Chapter {n}</b> &mdash; {ch[n][0]}</li>" for n in range(1, 14))
+    if _is_india_report(cfg):
+        app_note = (
+            "Appendix A is the fully-referenced <b>IS 801 / IS 811</b> design calc "
+            "(not AISI S100/S240/S400 as India authority), Appendix B the demands for every "
+            "load case, Appendix C the activity log."
+        )
+    else:
+        app_note = (
+            "Appendix A is the fully-referenced AISI S100/S240/S400 design calc, "
+            "Appendix B the demands for every load case, Appendix C the activity "
+            "log of the tool calls that produced the design."
+        )
     return ("<h2>Report structure &mdash; EOR review checklist</h2>"
             "<p>This report is organised as the senior-engineer (EOR) acceptance checklist: one chapter per "
             "checklist section. Each chapter opens with the items a reviewer must accept, followed by the "
-            "supporting analysis and design evidence. Appendix A is the fully-referenced AISI S100/S240/S400 "
-            "design calc, Appendix B the demands for every load case, Appendix C the activity "
-            "log of the tool calls that produced the design.</p><ol class='toc'>" + rows + "</ol>")
+            "supporting analysis and design evidence. " + app_note + "</p><ol class='toc'>" + rows + "</ol>")
 
-def _chapter(n, status=None):
-    title, items = CHAPTERS[n]
+def _chapter(n, status=None, cfg=None):
+    title, items = _chapters(cfg)[n]
     li = "".join(f"<li>{t}</li>" for t in items)
     extra = f" &mdash; <span class='chk-status'>{status}</span>" if status else ""
     return (f"<h2>Chapter {n} &mdash; {title}</h2>"
@@ -936,14 +1012,28 @@ def _rho_default(cfg):
 
 def _design_basis_codes(cfg, s):
     seismic = bool(s.get("R"))
-    rows = [["International Building Code (IBC)", "adopting code &mdash; confirm locally adopted edition &amp; amendments"],
-            ["ASCE/SEI 7-22", "loads &amp; load combinations (gravity, wind Ch.26-31, seismic Ch.11-12, &sect;2.3 LRFD)"],
-            ["AISI S100-16 (R2020) w/S2,S3", "CFS member &amp; connection design (LRFD, EWM)"],
-            ["AISI S240-20", "CFS structural framing (studs/track/built-up/bracing/trusses)"]]
-    if seismic:
-        rows += [["AISI S400-20", "seismic design of CFS systems (wall/strap/SBMF capacities incl. wind columns, capacity design)"],
-                 ]
-    rows += [["AWS D1.1", "structural welding"], ["ACI 318 (Ch. 17)", "cast-in anchorage at column bases"]]
+    if _is_india_report(cfg):
+        rows = [
+            ["NBC / local adopting amendments", "confirm project jurisdiction &amp; amendments"],
+            ["IS 875 Parts 1–5", "dead / imposed / wind / snow / combinations via LIVE RAG load_plan"],
+            ["IS 1893 Part 1:2016", "seismic (Z, I, R, Ah, VB, drift 0.004h) — Table 9 CFS often found:false"],
+            ["IS 801:1975", "CFS member &amp; connection design (RAG; no silent AISI defaults)"],
+            ["IS 811:1987 (+Amd1 when confirmed)", "CFS section properties (prefer stocked CLR/CLS/…; Nx packs honest found:false)"],
+        ]
+        if seismic:
+            rows.append(["IS 1893 dual/least-R / podium two-stage",
+                         "stubs: found:false unless LIVE RAG fill; refuse ASCE 12.2.3 / 12.2.3.2 as India law"])
+        rows += [["IS 800:2007", "hard-banned as silent CFS R proxy (C6) — allowlisted found:false documentation only"],
+                 ["Concrete anchorage", "handed to foundation engineer (IS 456 / project) — demands transmitted"]]
+    else:
+        rows = [["International Building Code (IBC)", "adopting code &mdash; confirm locally adopted edition &amp; amendments"],
+                ["ASCE/SEI 7-22", "loads &amp; load combinations (gravity, wind Ch.26-31, seismic Ch.11-12, &sect;2.3 LRFD)"],
+                ["AISI S100-16 (R2020) w/S2,S3", "CFS member &amp; connection design (LRFD, EWM)"],
+                ["AISI S240-20", "CFS structural framing (studs/track/built-up/bracing/trusses)"]]
+        if seismic:
+            rows += [["AISI S400-20", "seismic design of CFS systems (wall/strap/SBMF capacities incl. wind columns, capacity design)"],
+                     ]
+        rows += [["AWS D1.1", "structural welding"], ["ACI 318 (Ch. 17)", "cast-in anchorage at column bases"]]
     out = ["<h3>Governing standards</h3>",
            _table(["Reference", "Used for"], rows)]
     Ie = s.get("Ie", 1.0); RC = _risk_category(Ie)
@@ -2044,7 +2134,7 @@ def build_report(name, root=None):
     mat = "ASTM A1003/A653 SS: \\(F_y=33\\) or \\(50\\) ksi by mil, \\(E=29{,}500\\) ksi (AISI)."
     parts = [f"<h1>{name} &mdash; structural analysis &amp; design report</h1>",
              f"<p><b>{cfg.get('arch','')}</b> &middot; generated {datetime.date.today()}</p>",
-             _toc(), _design_basis(cfg)]
+             _toc(cfg), _design_basis(cfg)]
     figdir = os.path.join(root, "figs"); os.makedirs(figdir, exist_ok=True)
     global _FIGDIR; _FIGDIR = figdir; _FIGSEQ[0] = 0
     try:
@@ -2073,7 +2163,7 @@ def build_report(name, root=None):
         except Exception as ex: parts.append(f"<p class='note'>[drift/equilibrium run failed: {ex}]</p>")
 
     # ============================== Chapter 1 — Design basis & codes ==============================
-    parts.append(_chapter(1))
+    parts.append(_chapter(1, cfg=cfg))
     parts.append(_design_basis_codes(cfg, s))
     parts.append("<h3>Building description</h3>")
     parts.append(_table(["Item", "Value"], [
@@ -2093,7 +2183,7 @@ def build_report(name, root=None):
                       "Section orientation (web/depth ticks &mdash; beam strong axis must be vertical)"))
 
     # ====================== Chapter 2 — Structural system & load path =======================
-    parts.append(_chapter(2))
+    parts.append(_chapter(2, cfg=cfg))
     parts.append(_system_loadpath(cfg))
     parts.append("<h3>Seismic force-resisting system (each principal direction)</h3>")
     parts.append(_lfrs_table(cfg))
@@ -2128,7 +2218,7 @@ def build_report(name, root=None):
                      "analysis (Chapter 3).</p>")
 
     # ================================= Chapter 3 — Loads ==================================
-    parts.append(_chapter(3))
+    parts.append(_chapter(3, cfg=cfg))
     parts.append("<h3>Gravity loads</h3>"); parts.append(_gravity_loads_table(cfg))
     parts.append(_gravity_loads_note())
     parts.append("<h3>Wind load determination (ASCE 7-22 Ch. 26-31)</h3>"); parts.append(windhtml)
@@ -2142,7 +2232,7 @@ def build_report(name, root=None):
     parts.append(_governing_lateral(cfg, V, VwX, VwY))
 
     # ========================== Chapter 4 — Load combinations ============================
-    parts.append(_chapter(4))
+    parts.append(_chapter(4, cfg=cfg))
     case_detail_parts = []
     try:
         cases = load_cases(cfg)
@@ -2224,7 +2314,7 @@ def build_report(name, root=None):
 
     # ======================= Chapter 5 — Analysis model fidelity =========================
     print("[%s] report: chapter 5 (analysis-model fidelity) ..." % name)
-    parts.append(_chapter(5))
+    parts.append(_chapter(5, cfg=cfg))
     rel = cfg.get("releases"); cb = cfg.get("custom_build")
     jt = ("custom (defined in custom_build)" if cb else
           "rigid / continuous except where moment releases are set" if rel else "all rigid / continuous (no releases)")
@@ -2317,7 +2407,7 @@ def build_report(name, root=None):
         parts.append(f"<p class='note'>[static-model diagrams unavailable: {ex}]</p>")
 
     # ========== Chapter 6 — Member & wall strength design (AISI S100/S240/S400) ==========
-    parts.append(_chapter(6))
+    parts.append(_chapter(6, cfg=cfg))
     _cfs_scheds = _cfs_schedules_section(pkg)
     if _cfs_scheds:
         parts.append(_cfs_scheds)
@@ -2373,7 +2463,7 @@ def build_report(name, root=None):
         parts.append("<p class='note'>[no calc_package.json found &mdash; run the design first]</p>")
 
     # ====================== Chapter 7 — Stability & second-order =========================
-    parts.append(_chapter(7))
+    parts.append(_chapter(7, cfg=cfg))
     if Fx is not None and drX is not None:
         try:
             parts.append(_stability_section(cfg, Fx, drX, pkg))
@@ -2395,7 +2485,7 @@ def build_report(name, root=None):
         parts.append(f"<h2>Chapter 8 &mdash; {title8}</h2>"
                      f"<div class='chk'><div class='chk-h'>Reviewer acceptance items</div><ul>{li8}</ul></div>")
     else:
-        parts.append(_chapter(8))
+        parts.append(_chapter(8, cfg=cfg))
     if Fx is not None and drX is not None:
         Cd = s.get("Cd", 5.0); Ie = s["Ie"]
         if _is_india_report(cfg):
@@ -2431,11 +2521,11 @@ def build_report(name, root=None):
                  "building separation/pounding are detail-level serviceability checks confirmed against the framing drawings.</p>")
 
     # ========== Chapter 9 — Lateral-system detailing & capacity design (AISI S400) ==========
-    parts.append(_chapter(9))
+    parts.append(_chapter(9, cfg=cfg))
     parts.append(_s400_capacity_chapter(cfg, pkg))
 
     # ========================= Chapter 10 — Connections ==================================
-    parts.append(_chapter(10))
+    parts.append(_chapter(10, cfg=cfg))
     _ctbl = _connection_demands(cfg, pkg, reX)
     if _ctbl:
         parts.append("<p>Connection design demands transmitted to the fabricator / connection engineer (member end "
@@ -2451,7 +2541,7 @@ def build_report(name, root=None):
                  "fabricator's submittal.</p>")
 
     # ===================== Chapter 11 — Foundations interface ============================
-    parts.append(_chapter(11))
+    parts.append(_chapter(11, cfg=cfg))
     if reX is not None:
         Rz = sum(r[2][2] for r in reX); Rx = sum(r[2][0] for r in reX)
         pmax = max((r[2][2] for r in reX), default=0.0); pmin = min((r[2][2] for r in reX), default=0.0)
@@ -2475,7 +2565,7 @@ def build_report(name, root=None):
                  "list are produced and checked on the contract documents, not in this analysis report.</p>")
 
     # ===================== Chapter 13 — QA / professional acceptance =====================
-    parts.append(_chapter(13))
+    parts.append(_chapter(13, cfg=cfg))
     parts.append(_qa_scorecard(cfg, Fx, reX, eX, eY, drX, drY))
     parts.append(_grounding_check(cfg, name, pkg))
     parts.append(_consistency_section(name, root, pkg))
@@ -2488,7 +2578,11 @@ def build_report(name, root=None):
                  "are professional-responsibility steps completed outside the automated package.</p>")
 
     # ============================== Appendices ==========================================
-    parts.append("<h2>Appendix A &mdash; Referenced AISI S100/S240/S400 calculations</h2>")
+    parts.append(
+        "<h2>Appendix A &mdash; Referenced IS 801 / IS 811 calculations</h2>"
+        if _is_india_report(cfg) else
+        "<h2>Appendix A &mdash; Referenced AISI S100/S240/S400 calculations</h2>"
+    )
     if pkg:
         try: parts.append(appendix(cfg, name, pkg))
         except Exception as ex: parts.append(f"<p class='note'>[Appendix A failed: {ex}]</p>")
@@ -2898,9 +2992,14 @@ def build_report_cfs(name, cfg, res, pkg, root):
     filling capacities so the deliverable tables carry D/C + citations."""
     portal = "span_ft" in cfg
     s = cfg.get("seis") or {}
+    if _is_india_report(cfg):
+        code_line = ("IS 801:1975 + IS 811:1987; IS 875 / IS 1893 via load_plan "
+                     "(not AISI S100/S240/S400 or ASCE 7 LRFD as India authority)")
+    else:
+        code_line = "AISI S100-16(R2020)+S2/S3, S240-20, S400-20; ASCE 7-22 LRFD"
     parts = [f"<h1>{name} &mdash; CFS structural design report</h1>",
              f"<p><b>{'Portal-frame path' if portal else 'Wall path'}</b> &middot; "
-             f"AISI S100-16(R2020)+S2/S3, S240-20, S400-20; ASCE 7-22 LRFD &middot; "
+             f"{code_line} &middot; "
              f"generated {datetime.date.today()}</p>"]
     # interactive 3D viewer (CFS analog of the hot-rolled 'View model' button)
     try:
