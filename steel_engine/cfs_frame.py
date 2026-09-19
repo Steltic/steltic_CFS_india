@@ -22,11 +22,12 @@ cfg = dict(
   analysis_fidelity=1, direct_analysis=True,                       # 0.8E + notional + P-Delta
 )
 
-India portal note: this module retains the legacy USA-shaped portal solver and LRFD
-combo labels for compatibility with the existing portal demos.  It does not invent
-IS 875/IS 1893 factors.  When ``jurisdiction=india`` is present, ``run()`` emits an
-explicit ``india_combo_path`` status with ``found:false``; native India portal
-combinations remain a separate ``cfg['load_plan']``/RAG integration task.
+India portal note: this module retains the legacy USA-shaped portal solver for
+compatibility.  It does not invent IS 875/IS 1893 factors.  When ``jurisdiction=india``
+and ``cfg['load_plan']`` already carries LIVE-RAG combination factors, ``run()`` uses
+those as the portal combo set (``india_combo_path.found=true``).  If load_plan lacks
+combinations, ``india_combo_path`` stays ``found:false`` and legacy ASCE-shaped labels
+remain scaffolding only — never synthesized IS 875 Part 5 / IS 1893 factors.
 
 Wind machinery note: wind_surface_pressures() seeds directional-procedure MWFRS pressures
 (Kz Exposure table, G=0.85, seeded Cp set, +/-GCpi) so combos ENUMERATE correctly. The seeds
@@ -58,21 +59,109 @@ def _india_jurisdiction(cfg):
         ("india", "in", "is", "is_bis", "bis")
 
 
-def india_combo_path_status(cfg=None):
-    """Return an honest stub for the not-yet-native India portal combo path.
+def _load_plan_combo_rows(cfg):
+    """Return load_plan.combinations list when present and non-empty; else None."""
+    plan = (cfg or {}).get("load_plan")
+    if not isinstance(plan, dict):
+        return None
+    combos = plan.get("combinations")
+    if not isinstance(combos, list) or len(combos) < 1:
+        return None
+    return combos
 
-    The legacy portal solver must not be mistaken for an IS 875/IS 1893 combo
-    implementation. Native factors and lateral cases belong in the LIVE-RAG-backed
-    ``cfg['load_plan']`` and are intentionally not synthesized here.
+
+def portal_combos_from_load_plan(cfg):
+    """Map LIVE-RAG ``cfg['load_plan'].combinations`` → portal (label, {case: factor}) rows.
+
+    Only factors present on each combination dict are used (fD/D, fLr/Lr, fL, W, E, S…).
+    Returns None when combinations are missing — callers must NOT invent IS factors.
+    Does not validate retrieval richness (that is india_loads.validate_load_plan).
     """
+    rows = _load_plan_combo_rows(cfg)
+    if not rows:
+        return None
+    out = []
+    for c in rows:
+        if not isinstance(c, dict):
+            continue
+        label = str(c.get("label") or "").strip()
+        if not label:
+            continue
+        factors = {}
+        # Dead
+        if "fD" in c:
+            factors["D"] = float(c["fD"])
+        elif "D" in c:
+            factors["D"] = float(c["D"])
+        # Roof live / imposed on roof
+        if "fLr" in c:
+            factors["Lr"] = float(c["fLr"])
+        elif "Lr" in c:
+            factors["Lr"] = float(c["Lr"])
+        # Floor live: portal elementary cases lack a dedicated L; fold into Lr when no fLr
+        if "fL" in c and "Lr" not in factors:
+            fl = float(c["fL"])
+            if fl:
+                factors["Lr"] = fl
+        elif "L" in c and "Lr" not in factors:
+            fl = float(c["L"])
+            if fl:
+                factors["Lr"] = fl
+        # Wind
+        if c.get("W") is not None:
+            factors["W"] = float(c["W"])
+        if c.get("W2") is not None:
+            factors["W2"] = float(c["W2"])
+        # Seismic
+        if c.get("E") is not None:
+            factors["E"] = float(c["E"])
+        # Snow (balanced); unbalanced must be explicit S_unb_* keys if agent supplies them
+        if c.get("S") is not None:
+            factors["S_bal"] = float(c["S"])
+        if c.get("S_bal") is not None:
+            factors["S_bal"] = float(c["S_bal"])
+        for k in ("S_unb_L", "S_unb_R"):
+            if c.get(k) is not None:
+                factors[k] = float(c[k])
+        if not factors:
+            continue
+        out.append((label, factors))
+    return out or None
+
+
+def india_combo_path_status(cfg=None):
+    """India portal combo-path status: use load_plan when present; else found:false.
+
+    Never invents IS 875 Part 5 / IS 1893 combination factors. When
+    ``cfg['load_plan'].combinations`` already carries LIVE-RAG factors, reports
+    ``found:true`` so ``run()`` can consume them instead of ASCE-shaped LRFD labels.
+    """
+    rows = portal_combos_from_load_plan(cfg)
+    if rows:
+        cites = []
+        raw = _load_plan_combo_rows(cfg) or []
+        for c in raw:
+            if isinstance(c, dict) and c.get("cite"):
+                cites.append(str(c["cite"]))
+        return dict(
+            found=True,
+            jurisdiction="india",
+            source="cfg['load_plan'].combinations",
+            n_combos=len(rows),
+            cites=cites[:12],
+            note=("Native India portal combinations taken from cfg['load_plan'] "
+                  "(%d LIVE-RAG combo rows). Legacy ASCE-shaped LRFD labels are NOT used."
+                  % len(rows)),
+        )
     return dict(
         found=False,
         jurisdiction="india",
         source="cfg['load_plan']",
-        note=("Native India portal combinations are not implemented in cfs_frame; "
-              "use LIVE IS 875/IS 1893 RAG to populate cfg['load_plan']. The legacy "
-              "ASCE-shaped combo labels below are compatibility scaffolding only; "
-              "no IS factors are inferred here."),
+        n_combos=0,
+        note=("Native India portal combinations not available: cfg['load_plan'].combinations "
+              "missing or empty (found:false). Use LIVE IS 875/IS 1893 RAG to populate "
+              "load_plan — do NOT invent IS 875 Part 5 / IS 1893 factors. The legacy "
+              "ASCE-shaped combo labels below are compatibility scaffolding only."),
     )
 
 
@@ -649,7 +738,8 @@ def run(cfg):
          else "portal")
     res = dict(structure_kind=kind, sections={k: s["designator"] for k, s in secs.items()},
                notes=[])
-    if _india_jurisdiction(cfg):
+    india = _india_jurisdiction(cfg)
+    if india:
         res["india_combo_path"] = india_combo_path_status(cfg)
         res["notes"].append(res["india_combo_path"]["note"])
     warn = CS.preflight_fidelity(kind, cfg.get("analysis_fidelity", 1))
@@ -659,7 +749,10 @@ def run(cfg):
     cases = {}
     for case in ("D", "Lr", "S_bal", "S_unb_L", "S_unb_R", "W", "W2", "E"):
         cases[case] = _case_loads(fr0, members0, meta0, cfg, case)
-    combos = lrfd_combos(cfg)
+    if india and res.get("india_combo_path", {}).get("found"):
+        combos = portal_combos_from_load_plan(cfg) or lrfd_combos(cfg)
+    else:
+        combos = lrfd_combos(cfg)
     da = cfg.get("direct_analysis", True)
     scale = 0.8 if da else 1.0
     notional = 0.002 if da else 0.0

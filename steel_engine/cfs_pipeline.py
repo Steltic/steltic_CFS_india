@@ -281,6 +281,25 @@ def build_package(name, cfg, res):
                         note="pure ELF (no rho); per-slot seeds below already include rho"),
                wall_lines=[], holddowns=[], studs=[], collectors=[], drift_table=[],
                preflight_warnings=res.get("preflight_warnings", []))
+    # India: refuse silent AISI connection defaults on wall packages too
+    try:
+        import india_connection_dc as ICD
+        if ICD._india_jurisdiction(cfg):
+            pkg.setdefault("notes", [])
+            # Wall packages use holddowns/collectors rather than portal connections;
+            # publish path status so agents do not fall back to AISI S100 J silently.
+            pkg["india_connection_path"] = dict(
+                found=False,
+                jurisdiction="india",
+                note=ICD.AISI_REFUSE_NOTE + (
+                    " Wall hold-downs/collectors: cite IS 801 cl.7 / manufacturer EOR; "
+                    "fill holddowns[].cited + DC from LIVE RAG (found:false until filled)."
+                ),
+            )
+            import india_practical_sections as IPS
+            pkg["india_practical_sections"] = IPS.section_selection_for_cfg(cfg)
+    except Exception as ex:
+        pkg.setdefault("notes", []).append("india wall connection stub failed: %s" % ex)
     wind = _wind_line_screen(cfg, res)
     if wind:
         pkg["wind_basis"] = wind["X"]["basis"]
@@ -521,6 +540,18 @@ def build_portal_package(name, cfg, res):
                                              "w/brittle finishes) and verdicts"))
     pkg["drift_table"].append(dict(check="apex_deflection", value_in=sv["apex_defl_in"],
                                    ok=None, criterion="AGENT states span criterion"))
+    # India wave2 polish2: connection/anchor D/C stubs (refuse silent AISI defaults)
+    try:
+        import india_connection_dc as ICD
+        ICD.apply_india_connection_stubs(pkg, cfg)
+    except Exception as ex:
+        pkg.setdefault("notes", []).append("india_connection_dc failed: %s" % ex)
+    # Practical IS 811 section selection status (catalog only; no invented sizes)
+    try:
+        import india_practical_sections as IPS
+        pkg["india_practical_sections"] = IPS.section_selection_for_cfg(cfg)
+    except Exception as ex:
+        pkg.setdefault("notes", []).append("india_practical_sections failed: %s" % ex)
     return pkg
 
 
