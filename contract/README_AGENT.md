@@ -1,6 +1,8 @@
 > **Jurisdiction: India (steltic_CFS_india).** Design: IS 801:1975 + IS 811:1987 (+Amd1).
 > Loads: LIVE RAG IS 875 Parts 1–5 + IS 1893 Part 1:2016 → `cfg['load_plan']` every job.
 > Never hardcode ASCE 7 or permanent IS load formulas. Corpus: `/workspace/engineering_rag_india` only.
+>
+> **P1:** Use `india_is811_retrieval.seed_is811_retrieval_plan(CLR…)` for multi-query IS 811 exact_table/exact_section grounding (C5); Amd1 empty → found:false. IS_800_2007 hard-banned unless purpose allowlisted (C6). Drift = 0.004 h (S2).
 
 # CFS Building Design Agent — Guide & Workflow
 

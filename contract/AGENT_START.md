@@ -92,6 +92,24 @@ path or "look like FEET" on the frame path, fix the cfg BEFORE chasing numbers.
   provisional **or** R source is proxy. Stay **PARTIAL** until both sources are non-provisional /
   non-proxy. `load_plan` RAG gate remains mandatory.
 
+## India P1 (IS 811 grounding + IS 800 ban + drift UI) — hard rules
+- **C5 richer IS 811 grounding:** Do **not** stop at one vague FTS hit to IS 811 / Amd1. After
+  choosing a CLR (or other IS 811 Type), call
+  `india_is811_retrieval.seed_is811_retrieval_plan("CLR100X50X15X2")` (or your label) and execute
+  the seeded **exact_table** (Table 6 for CLR) + **exact_section** (7 / 7.1.1 / 7.2.2 / 7.2.3)
+  queries. Optional related Types (CLS/CWR) are marked `required=false`. Attach the plan as
+  `cfg['is811_retrieval']` when useful. **Amd1:** corpus has 0 indexed property tables — log
+  `found:false` honestly (`amd1_honest_result`); a cover-page FTS hit is **not** a Table 1–10
+  amendment (see `is811_GAPS.md`).
+- **C6 IS 800 ban:** `IS_800_2007` is **hard-banned** on CFS India jobs. The search tool refuses
+  IS 800 unless `purpose` is allowlisted:
+  `sfrs_gap_found_false` | `document_absence` | `found_false_log` | `eor_documented_exception`.
+  Default refuse the silent HR OMRF R proxy path (reinforces C2). Load combos come from
+  IS 875 / IS 1893 into `cfg['load_plan']` — never from IS 800 Table 4.
+- **S2 drift UI:** India storey drift is **0.004 h** (IS 1893 Part 1 cl.7.11.1.1); soft-storey /
+  URM-infill **0.002 h** where Table 6 notes apply. Set `cfg['drift_limit']=0.004`. Report /
+  checklist strip USA **0.025 h** / Table 12.12-1 scaffold. Do not cite ASCE drift rows on India jobs.
+
 ## Gotchas that fail SILENTLY (read once — they will not error loudly)
 - **Diaphragm default is FLEXIBLE** (state the IS 1893 / brief idealization; do not invent ASCE). Shear goes to wall lines
   by **tributary area**; accidental torsion is a **5% tributary shift**, not master-node rotation.
@@ -220,8 +238,8 @@ OpenSees — read the schema in this file and `cfs_engine.py`'s docstring instea
   `steelsheet_wall`, `gypsum_wall`, `strap_braced`, `sbmf`, `not_detailed`). NEVER rely on
   inference from R. `consistency.check` FAILS if unset. Mixed
   directions: declare per direction.
-- **Risk Category:** Ie and `drift_limit` together. Light-frame ≤4 stories gets the 0.025 row
-  (RC I/II); otherwise 0.020, tightened for RC III/IV.
+- **Risk Category / drift:** India — `drift_limit=0.004` (IS 1893 cl.7.11.1.1); do **not** use
+  the USA light-frame 0.025 row. Importance factor `I` from IS 1893 Table 8 (via RAG), not ASCE Ie→RC.
 - **Height limits:** 65 ft in SDC D/E/F for WSP/steel-sheet/strap; 35 ft for SBMF; gypsum NP in
   E/F. On the knife edge (hn near the limit), show the number.
 - **Wind-governed briefs:** S400 still supplies wall capacities (its WIND columns); C&C on

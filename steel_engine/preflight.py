@@ -69,6 +69,9 @@ def check(cfg):
     # ---- India CFS P0: wall vn (C1) + R provenance (C2) ----
     for sev, msg in _ICG.validate_india_cfs_p0(cfg):
         say(sev, msg)
+    # ---- India CFS P1: IS 800 ban (C6) + optional IS 811 plan richness (C5) ----
+    for sev, msg in _ICG.validate_india_cfs_p1(cfg):
+        say(sev, msg)
     # ---- units ----
     H = [float(h) for h in (cfg.get("heights") or []) if isinstance(h, (int, float))]
     if not H:
@@ -134,22 +137,52 @@ def check(cfg):
                                 "FLAG and resolve (12.2.5.4 increase / dual system / 12.2.1.1)"
                                 % (hn, hlim, key.upper()))
             break
-    # ---- Risk-Category drift limit ----
+    # ---- Drift limit (S2): India IS 1893 0.004h; USA ASCE Table 12.12-1 ----
     Ie = float(s.get("Ie", 1.0) or 1.0)
-    dl = float(cfg.get("drift_limit", 0.020) or 0.020)
-    if Ie >= 1.5 and dl > 0.0101:
-        say("ERROR", "Ie=%.2f (RC IV) but drift_limit=%.3f -- Table 12.12-1 requires 0.010" % (Ie, dl))
-    elif 1.2 <= Ie < 1.5 and dl > 0.0151:
-        say("ERROR", "Ie=%.2f (RC III) but drift_limit=%.3f -- Table 12.12-1 requires 0.015" % (Ie, dl))
-    # moment-frame-only SFRS in SDC D-F: allowable drift is Delta_a/rho (ASCE 7-22 sec.12.12.1.1);
-    # the engine applies the division in its drift gates -- flag it so the reduced target is expected
-    _mf_only = (any(k in sysname for k in ("smf", "imf", "omf")) or "moment" in sysname) \
-               and "dual" not in sysname
-    if _mf_only and sdc_of_cfg(cfg) in ("D", "E", "F"):
-        _rho = float(cfg.get("rho", 1.3) or 1.3)
-        say("WARN", "moment-frame-only SFRS in SDC %s: allowable story drift is drift_limit/rho = "
-                    "%.4f/%.2f = %.4f (12.12.1.1) -- the engine drift gates apply this division"
-                    % (sdc_of_cfg(cfg), dl, _rho, dl / _rho))
+    _india_job = (
+        str(cfg.get("jurisdiction") or "").strip().lower() == "india"
+        or str((cfg.get("load_plan") or {}).get("jurisdiction") or "").strip().lower() == "india"
+        or str(cfg.get("units") or "").upper() in ("N-MM", "SI", "METRIC")
+    )
+    if _india_job:
+        # Code ceiling is always 0.004 (cl.7.11.1.1); do not trust cfg override as the limit.
+        _want = 0.004
+        try:
+            import india_seismic as _IS1893
+            _want = float(_IS1893.CLAUSES["storey_drift_limit"]["limit_ratio"])
+        except Exception:
+            pass
+        if cfg.get("drift_limit") is None:
+            say("WARN", "cfg['drift_limit'] unset — India default is %.3f h (IS 1893 Part 1 "
+                        "cl.7.11.1.1); set it explicitly (S2). Soft-storey / URM-infill: 0.002 h "
+                        "where Table 6 notes apply." % _want)
+            dl = _want
+        else:
+            try:
+                dl = float(cfg.get("drift_limit"))
+            except (TypeError, ValueError):
+                dl = _want
+                say("ERROR", "cfg['drift_limit']=%r is not numeric — India requires ≤ %.3f "
+                             "(IS 1893 cl.7.11.1.1)" % (cfg.get("drift_limit"), _want))
+        if dl > _want + 1e-9:
+            say("ERROR", "India drift_limit=%.4f exceeds IS 1893 cl.7.11.1.1 limit %.4f "
+                         "(S2 — do not use USA Table 12.12-1 0.025h scaffold)" % (dl, _want))
+        # Skip ASCE 12.12-1 RC / rho drift checks on India jobs
+    else:
+        dl = float(cfg.get("drift_limit", 0.020) or 0.020)
+        if Ie >= 1.5 and dl > 0.0101:
+            say("ERROR", "Ie=%.2f (RC IV) but drift_limit=%.3f -- Table 12.12-1 requires 0.010" % (Ie, dl))
+        elif 1.2 <= Ie < 1.5 and dl > 0.0151:
+            say("ERROR", "Ie=%.2f (RC III) but drift_limit=%.3f -- Table 12.12-1 requires 0.015" % (Ie, dl))
+        # moment-frame-only SFRS in SDC D-F: allowable drift is Delta_a/rho (ASCE 7-22 sec.12.12.1.1);
+        # the engine applies the division in its drift gates -- flag it so the reduced target is expected
+        _mf_only = (any(k in sysname for k in ("smf", "imf", "omf")) or "moment" in sysname) \
+                   and "dual" not in sysname
+        if _mf_only and sdc_of_cfg(cfg) in ("D", "E", "F"):
+            _rho = float(cfg.get("rho", 1.3) or 1.3)
+            say("WARN", "moment-frame-only SFRS in SDC %s: allowable story drift is drift_limit/rho = "
+                        "%.4f/%.2f = %.4f (12.12.1.1) -- the engine drift gates apply this division"
+                        % (sdc_of_cfg(cfg), dl, _rho, dl / _rho))
     # ---- analyses vs R=3 ----
     if R and R <= 3.0 and "341" in str(cfg.get("system", "")):
         say("WARN", "R<=3: AISC 341 does NOT apply -- design to AISC 360 only and prove wind-vs-seismic")

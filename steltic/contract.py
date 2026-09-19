@@ -52,12 +52,17 @@ The tool applies it to whatever you send and records the form it sent; write it 
 1. ONE document per call, by canonical stem: doc="IS_801_1975" | "IS_811_1987" | "IS_875_Part_3_2015" | "IS_1893_Part_1_2016".
    Never search all documents blindly. Material -> system -> member -> loading -> method -> the one
    document that governs (IS 801 members; IS 811 sections; IS 875 / IS 1893 loads every job into cfg["load_plan"]).
+   **C6:** doc="IS_800_2007" is hard-banned unless purpose is allowlisted
+   (sfrs_gap_found_false / document_absence / found_false_log / eor_documented_exception).
+   Never use IS 800 as a silent OMRF R=3 CFS proxy.
 2. EXACT ID WHEN KNOWN. type="exact_section" | "exact_equation" | "exact_table", query = the id ALONE:
-     {"type":"exact_section","doc":"AISI_S100","query":"G5","purpose":"web crippling"}
-     {"type":"exact_equation","doc":"AISI_S100","query":"A3.1.3-1","purpose":"tensile yielding"}
-     {"type":"exact_table","doc":"AISI_S400_20","query":"E1.3-1","purpose":"shear wall nominal strength"}
-     {"type":"exact_table","doc":"ASCE7","query":"12.2-1","purpose":"R / Omega0 / Cd"}
-   Not a sentence. Not the document name. Not "AISI S100 web crippling one-flange loading G5".
+     {"type":"exact_section","doc":"IS_801_1975","query":"5.2.1","purpose":"compression member"}
+     {"type":"exact_table","doc":"IS_811_1987","query":"6","purpose":"CLR section properties"}
+     {"type":"exact_section","doc":"IS_811_1987","query":"7.2.3","purpose":"Ri=1.5t property assumption"}
+     {"type":"exact_table","doc":"IS_1893_Part_1_2016","query":"9","purpose":"response reduction R"}
+   **C5:** after choosing a CLR, run india_is811_retrieval.seed_is811_retrieval_plan(label) — do not
+   stop at one FTS hit. Amd1 empty → found:false (honest).
+   Not a sentence. Not the document name. Not "IS 811 cold formed light gauge steel sections".
 3. FULL TEXT ONLY TO NAVIGATE: type="fts", query = the standard's own printed words, one idea, no
    sentence, no ids mixed in ("web crippling stiffened flanges one-flange loading", not "the stud web
    crushes at the track"). Read the ids it returns, then ask for them EXACTLY in the next call.
