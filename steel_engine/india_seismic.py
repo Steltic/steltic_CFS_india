@@ -242,13 +242,22 @@ def drift_allowable(cfg) -> tuple[float, bool]:
     """Return (allowable storey drift ratio, rho_applied).
 
     Default 0.004 per IS 1893 Part 1:2016 cl.7.11.1.1. cfg['drift_limit'] may override
-    when the agent has RAG-justified a stricter project/special limit (e.g. 0.002 for
-    URM-infill storeys per Table 6 notes). rho_applied is always False (no ASCE ρ rule).
+    only when STRICTER (≤ 0.004) — e.g. 0.002 for URM-infill soft-storey per Table 6 notes.
+    Looser USA scaffold values (0.020 / 0.025) are ignored; callers/preflight ERROR those.
+    rho_applied is always False (no ASCE ρ rule).
     """
-    dl = cfg.get("drift_limit")
+    code = float(CLAUSES["storey_drift_limit"]["limit_ratio"])
+    dl = (cfg or {}).get("drift_limit")
     if dl is None or dl == "":
-        dl = CLAUSES["storey_drift_limit"]["limit_ratio"]
-    return float(dl), False
+        return code, False
+    try:
+        dl_f = float(dl)
+    except (TypeError, ValueError):
+        return code, False
+    # Stricter project limit OK; looser than code → fall back to code (S2)
+    if dl_f <= code + 1e-12:
+        return dl_f, False
+    return code, False
 
 
 def design_story_drifts(elastic_drifts, cfg) -> list[float]:

@@ -82,7 +82,7 @@ TOOL_SPECS = [
            "type": {"type": "string", "enum": ["exact_section", "exact_equation", "exact_table", "fts"],
                     "description": "exact_section (E2, G5, E3.4.2) / exact_equation (G5-1, A3.1.3-1, E1.3.1.1-1) / exact_table (E1.3-1, 12.2-1) / fts (navigation only)"},
            "doc": {"type": "string", "description": "canonical document stem: IS_801_1975, IS_811_1987, IS_875_Part_3_2015, IS_1893_Part_1_2016. One per call."},
-           "purpose": {"type": "string", "description": "why you need it, a few words (goes in the provenance)"},
+           "purpose": {"type": "string", "description": "why you need it (provenance). Required allowlisted value if doc/collection is IS_800_2007: sfrs_gap_found_false | document_absence | found_false_log | eor_documented_exception (C6 hard-ban otherwise)."},
            "want_commentary": {"type": "boolean", "description": "default false (provisions). true only for intent/background; commentary never supplies a design value."},
            "context_neighbors": {"type": "integer", "description": "0-2: widen when an equation needs its surrounding 'where:' list"},
            "collection": {"type": "string",

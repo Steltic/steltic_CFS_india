@@ -253,6 +253,23 @@ class JobWorkspace:
         if doc and str(doc).strip():                  # the policy names ONE document by its canonical stem
             d = str(doc).strip()
             collection = self.DOC_COLLECTIONS.get(d.upper(), self.DOC_COLLECTIONS.get(d, collection if d.lower().startswith("engineering_standards") else f"engineering_standards_{d}"))
+        # ---- C6: hard-ban IS_800_2007 on CFS India unless allowlisted purpose ----
+        try:
+            import sys as _sys
+            from pathlib import Path as _P
+            _se = str(_P(__file__).resolve().parents[1] / "steel_engine")
+            if _se not in _sys.path:
+                _sys.path.insert(0, _se)
+            import india_cfs_gates as _ICG
+            _ok800, _msg800 = _ICG.gate_is800_query(
+                collection=collection, doc=doc or "", stem=doc or "", purpose=purpose or "")
+            if not _ok800:
+                self.log("search_engineering_standards",
+                         f"[{collection}] C6 refused IS 800 purpose={purpose!r}: {query}",
+                         "refused")
+                return _ICG.is800_refusal_payload(collection=collection, purpose=purpose, query=query)
+        except Exception as _c6e:
+            pass  # never block non-IS800 searches if gate import fails
         qtype = (type or "").strip().lower()
         plan = self._policy_plan(query, clause, chapter, qtype)
         flt = (f" clause={clause}" if clause else "") + (f" chapter={chapter}" if chapter else "")
@@ -304,6 +321,10 @@ class JobWorkspace:
 
         def finish(out: dict, eff_coll: str, label: str, sent_q: str = "") -> dict:
             """A rung hit. Hand back the hits, plus what it took to get them."""
+            out = self._maybe_honest_amd1(eff_coll or collection, out, purpose=purpose)
+            if isinstance(out, dict) and out.get("found") is False and not (out.get("results") or []):
+                # Amd1 honesty emptied the hits — treat as not-found rather than saving empty "success"
+                return self._not_found(query, collection, trail)
             if len(trail) > base["n"]:
                 out["escalation"] = trail
                 out["escalated"] = (f"Your query as written found nothing; these hits come from attempt "
@@ -668,6 +689,24 @@ class JobWorkspace:
         self._status_cache = (time.time(), st)
         return st
 
+
+    def _maybe_honest_amd1(self, collection: str, out: dict, purpose: str = "") -> dict:
+        """C5: Amd1 empty / non-property hits stay found:false (no cover-page upgrade)."""
+        coll = (collection or "").lower()
+        if "amd1" not in coll and "amd_1" not in coll:
+            return out if isinstance(out, dict) else out
+        try:
+            import sys as _sys
+            from pathlib import Path as _P
+            _se = str(_P(__file__).resolve().parents[1] / "steel_engine")
+            if _se not in _sys.path:
+                _sys.path.insert(0, _se)
+            import india_is811_retrieval as _R811
+            return _R811.amd1_honest_result(out if isinstance(out, dict) else {"results": []},
+                                            purpose=purpose)
+        except Exception:
+            return out
+
     def _not_found(self, query: str, collection: str, trail: list) -> dict:
         """The ladder is exhausted. Report WHICH of the three kinds of nothing this is.
 
@@ -697,7 +736,7 @@ class JobWorkspace:
                            "specifications. If you go on to design from your own knowledge of the standard, "
                            "you MUST say so in the report, in those words, and flag every value you could "
                            "not verify -- do not let the report imply the corpus was consulted.")
-            return out
+            return self._maybe_honest_amd1(collection, out)
         m = re.match(r"\s*(\S+)\s+is not in the corpus", notes)
         if m or "is not in the corpus" in low:
             doc = m.group(1) if m else collection
@@ -711,7 +750,7 @@ class JobWorkspace:
                            + (", ".join(docs) if docs else "(the server did not say)")
                            + ". If one of those governs this check instead, query it. Otherwise name the "
                              "unavailable document in the report and flag every value you take from memory.")
-            return out
+            return self._maybe_honest_amd1(collection, out)
         out["not_found_kind"] = "term_absent_from_document"
         out["note"] = (f"NOT FOUND (iii) -- {len(trail)} escalating attempts against a corpus that DOES hold "
                        f"this document all came back empty ({tried}), so the term as you phrased it is "
@@ -720,7 +759,7 @@ class JobWorkspace:
                        "the phrasing the specification prints, or ask for the parent section; if that misses "
                        "too, treat the provision as absent, say so in the report, and do not invent a clause "
                        "number, equation id or resistance factor to fill the gap.")
-        return out
+        return self._maybe_honest_amd1(collection, out)
 
     # ---------------- RAG-to-file: keep raw chunks on disk, out of the agent's context ----------------
     _CLAUSE_RE = re.compile(r"\b[A-N]\d+(?:\.\d+)*(?:-\d+[a-z]?)?\b")   # AISI-style clause/eq codes: E2, F2.1, G5-1, H1-1, J4.3 (S100 mirrors AISC lettering)

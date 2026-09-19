@@ -1,4 +1,4 @@
-"""India CFS P0 gates: wall vn + R provenance + complete-label policy.
+"""India CFS P0/P1 gates: wall vn + R provenance + complete-label + IS 800 ban.
 
 C1 — No silent provisional 700 plf ASD wall shear default.
      Require cfg['wall_vn_plf_asd'] (or nested wall_vn) with a non-provisional
@@ -9,8 +9,15 @@ C2 — No silent IS 800 OMRF R=3.0 proxy when CFS is missing from IS 1893 Table 
      Require explicit cfg['R'] (or seis['R']) + R_source. Preflight ERROR if the
      silent-proxy path would have been used.
 
+C6 — Hard-ban IS_800_2007 on CFS India jobs except allowlisted purposes
+     (sfrs_gap_found_false / document_absence / found_false_log / …).
+     Default refuse silent HR R proxy path (reinforces C2).
+
 C7 — Refuse labeling COMPLETE when vn source is provisional OR R source is proxy.
      PARTIAL is the correct admin label until both sources are authoritative.
+
+C5 (helper): india_is811_retrieval.seed_is811_retrieval_plan — richer IS 811
+     exact_table/exact_section plans; Amd1 found:false when empty.
 
 load_plan RAG gate (india_loads) remains mandatory and is not replaced here.
 """
@@ -319,3 +326,160 @@ def design_status(cfg, pkg=None) -> dict:
 def validate_india_cfs_p0(cfg) -> list:
     """Combined C1+C2 findings for preflight."""
     return list(validate_wall_vn(cfg)) + list(validate_R(cfg))
+
+
+# =============================================================================
+# C6 — IS_800_2007 hard-ban / allowlist on CFS India jobs
+# =============================================================================
+# Hot-rolled IS 800 must not be the silent path for CFS R, load combos, or
+# member checks. Allowed only for documented SFRS-gap / absence logging with
+# found:false — never as a silent OMRF R=3 proxy (reinforce C2).
+
+IS800_STEMS = frozenset({
+    "IS_800_2007", "IS_800", "IS800", "IS800_2007", "IS-800", "IS-800-2007",
+})
+IS800_COLLECTION_MARKERS = (
+    "is800", "is_800", "engineering_standards_is800", "engineering_standard_is800",
+)
+
+# purpose= values that MAY touch IS 800 (still must log found:false when used for gap).
+IS800_ALLOWLIST_PURPOSES = frozenset({
+    "sfrs_gap_found_false",
+    "sfrs_gap",
+    "document_absence",
+    "document_absence_check",
+    "found_false_log",
+    "cfs_row_absent_log",
+    "eor_documented_exception",
+})
+
+IS800_BAN_MSG = (
+    "C6: IS_800_2007 is hard-banned on CFS India jobs except allowlisted purposes "
+    "(sfrs_gap_found_false / document_absence / found_false_log / eor_documented_exception). "
+    "Use IS 801 + IS 811 for CFS design and IS 875/1893 for loads. "
+    "Silent HR OMRF R=3 proxy via IS 800 is forbidden (C2/C6) — set explicit R + R_source."
+)
+
+
+def _norm_purpose(p) -> str:
+    return str(p or "").strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def is_is800_target(collection: str = "", doc: str = "", stem: str = "") -> bool:
+    """True if the RAG target is hot-rolled IS 800."""
+    blob = " ".join(str(x or "") for x in (collection, doc, stem)).strip().lower()
+    if not blob:
+        return False
+    compact = blob.replace("-", "_").replace(" ", "")
+    if any(m in compact for m in ("is_800", "is800")):
+        # Avoid false positive on IS_801 / IS_808 / IS_811
+        if "is_801" in compact or "is801" in compact:
+            return False
+        if "is_808" in compact or "is808" in compact:
+            return False
+        if "is_811" in compact or "is811" in compact:
+            return False
+        return True
+    for s in IS800_STEMS:
+        if s.lower().replace("-", "_") in compact:
+            return True
+    return False
+
+
+def is800_purpose_allowed(purpose: str = "") -> bool:
+    p = _norm_purpose(purpose)
+    if not p:
+        return False
+    if p in IS800_ALLOWLIST_PURPOSES:
+        return True
+    # substring allow for longer agent prose purposes
+    return any(a in p for a in IS800_ALLOWLIST_PURPOSES)
+
+
+def gate_is800_query(collection: str = "", doc: str = "", stem: str = "",
+                     purpose: str = "") -> tuple:
+    """Return (allowed: bool, message: str). Refused queries must not hit the RAG."""
+    if not is_is800_target(collection=collection, doc=doc, stem=stem):
+        return True, ""
+    if is800_purpose_allowed(purpose):
+        return True, (
+            "C6 allowlisted IS 800 purpose=%r — log found:false when documenting a gap; "
+            "do NOT adopt IS 800 OMRF R as a silent CFS proxy." % (purpose,)
+        )
+    return False, IS800_BAN_MSG
+
+
+def is800_refusal_payload(collection: str = "", purpose: str = "", query: str = "") -> dict:
+    """Standard refused-search payload (found:false, no hits)."""
+    return {
+        "results": [],
+        "hits": [],
+        "found": False,
+        "refused": True,
+        "collection": collection or "engineering_standards_IS800",
+        "query": query or "",
+        "purpose": purpose or "",
+        "note": IS800_BAN_MSG,
+        "c6": True,
+    }
+
+
+def validate_is800_retrieval(cfg_or_plan) -> list:
+    """Scan cfg['load_plan'].retrieval (and optional design_retrieval) for banned IS 800 hits.
+
+    ERROR if an IS 800 stem appears without an allowlisted purpose.
+    """
+    out = []
+    if isinstance(cfg_or_plan, dict) and "retrieval" not in cfg_or_plan \
+            and "load_plan" in (cfg_or_plan or {}):
+        plan = cfg_or_plan.get("load_plan") or {}
+        rows = list(plan.get("retrieval") or [])
+        rows += list((cfg_or_plan.get("design_retrieval") or
+                      cfg_or_plan.get("is811_retrieval") or []))
+    elif isinstance(cfg_or_plan, dict):
+        rows = list(cfg_or_plan.get("retrieval") or [])
+    elif isinstance(cfg_or_plan, list):
+        rows = cfg_or_plan
+    else:
+        return out
+
+    for i, hit in enumerate(rows):
+        if not isinstance(hit, dict):
+            continue
+        stem = hit.get("stem") or hit.get("doc") or ""
+        coll = hit.get("collection") or ""
+        purpose = hit.get("purpose") or hit.get("why") or ""
+        ok, msg = gate_is800_query(collection=coll, doc=stem, stem=stem, purpose=purpose)
+        if not ok:
+            out.append(("ERROR",
+                        "load_plan/design retrieval[%d] targets IS 800 without allowlisted "
+                        "purpose (got purpose=%r). %s" % (i, purpose, msg)))
+        elif is_is800_target(collection=coll, doc=stem, stem=stem):
+            # Allowlisted: still require found:false disclosure for gap logging
+            if hit.get("found") is True and "gap" in _norm_purpose(purpose):
+                out.append(("WARN",
+                            "retrieval[%d] IS 800 allowlisted purpose=%r but found=true — "
+                            "gap logs should usually be found:false" % (i, purpose)))
+            out.append(("WARN",
+                        "retrieval[%d] touches IS 800 under allowlisted purpose=%r (C6) — "
+                        "confirm this is gap documentation, not an HR R proxy"
+                        % (i, purpose)))
+    return out
+
+
+def validate_india_cfs_p1(cfg) -> list:
+    """C6 (+ optional C5 richness WARN when is811_retrieval is present and thin)."""
+    out = list(validate_is800_retrieval(cfg))
+    # Optional C5: if agent attached an is811_retrieval / design_retrieval plan, score it
+    plan = None
+    if isinstance(cfg, dict):
+        plan = cfg.get("is811_retrieval") or cfg.get("design_retrieval")
+    if plan:
+        try:
+            import india_is811_retrieval as R811
+            ok, advice = R811.plan_is_rich_enough(plan)
+            if not ok:
+                out.append(("WARN", advice))
+        except Exception:
+            pass
+    return out
