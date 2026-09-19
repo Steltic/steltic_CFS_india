@@ -1,0 +1,18 @@
+IN_CFS_Ex15 — CFS portal cold-storage / freezer warehouse + snow, Srinagar (India)
+
+Location: Srinagar. Snow governs gravity — RETRIEVE IS 875 Part 4 snow (do not invent pg / Ct /
+drift). Wind: RETRIEVE IS 875 Part 3:2015. Seismic: RETRIEVE IS 1893 Part 1 Zone / spectrum
+(Zone V region — prove snow/wind/EQ governing map). Cold roof over freezer: state thermal factor
+honestly (no warm-roof melt credit).
+
+Geometry:
+- Single-storey portal warehouse; eave ~8 m, apex ~9 m; span ~21 m; length ~76 m; frame spacing agent-selected
+- Transverse: CFS channel portals (IS 811); longitudinal: flat-strap X-bracing in roof plane + side walls
+- Insulated metal panel envelope on thermal-isolation clips — panels provide NO diaphragm credit
+- Vestibule/airlock lean-to at one end; rooftop condenser platform (drift source)
+- Interior members in freezer service (~−23 °C): toughness / fastener cold-service statement required
+
+Loads: dead/imposed IS 875 Parts 1–2; snow Part 4 LIVE RAG; evaporator point loads on purlins/rafters.
+Wall vn N/A (portal). Design: IS 801:1975 + IS 811. Do NOT cite AISI S100/S240/S400.
+R: eor_documented if CFS portal SFRS absent from Table 9 — never IS 800 OMRF proxy.
+Deliverable: report.html + viewer_3d.html. Fill cfg['load_plan'] from LIVE RAG before pipeline.

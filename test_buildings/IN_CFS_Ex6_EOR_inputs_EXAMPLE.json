@@ -1,0 +1,33 @@
+{
+  "_label": "EXAMPLE / not-for-construction",
+  "_purpose": "CI / COMPLETE-gate exercise for IN_CFS_Ex6 — manufacturer vn + EOR-documented R. Do NOT treat values as project law or IS 801/1893 table lookups.",
+  "_building": "IN_CFS_Ex6_WSP_5levels_Lplan_Pune",
+  "_disclaimer": "EXAMPLE only. Real jobs require LIVE RAG for IS 875/1893 load_plan and project-specific manufacturer/test vn + EOR R cite. Never auto-fill R from IS 800.",
+  "system": "wsp_shearwall",
+  "jurisdiction": "india",
+  "units": "N-mm",
+  "R": 2.5,
+  "R_source": "eor_documented",
+  "R_cite": "EXAMPLE EOR memo: CFS WSP SFRS absent from IS 1893 Part 1 Table 9 (found:false); project adopts R=2.5 with EOR concurrence — NOT an IS 800 OMRF proxy.",
+  "R_cfs_table9_found": false,
+  "wall_vn_plf_asd": 520.0,
+  "wall_vn_source": "manufacturer",
+  "wall_vn_cite": "EXAMPLE Acme CFS WSP Table B — 12 mm two-sided OSB, #8@100 mm o.c. (not-for-construction; substitute real manufacturer/test data)",
+  "wall_vn_found": true,
+  "seis": {
+    "R": 2.5,
+    "R_source": "eor_documented",
+    "R_cite": "EXAMPLE EOR memo (see top-level R_cite)",
+    "R_cfs_table9_found": false,
+    "Cd": 1.0,
+    "Ie": 1.0,
+    "Om0_found": false,
+    "Om0_note": "S400 Ω0 N/A under IS 801 (found:false) — do not invent."
+  },
+  "notes": {
+    "amd1": "IS_811_1987_Amd1_2011 property deltas found:false when empty — does not alone block COMPLETE",
+    "s400_omega0": "found:false / N/A — does not alone block COMPLETE",
+    "table9": "CFS WSP / light-gauge R row found:false in LIVE RAG",
+    "plan": "L-plan re-entrant corner collectors — EXAMPLE only"
+  }
+}

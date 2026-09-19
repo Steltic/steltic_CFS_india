@@ -1,0 +1,20 @@
+IN_CFS_Ex13 — 4-storey Type II (perforated) WSP CFS shear-wall apartments, Lucknow (India)
+
+Location: Lucknow. Seismic: RETRIEVE Z, I, R, spectrum from IS 1893 Part 1:2016 (do not invent).
+Soil: retrieve from IS 1893. Wind: RETRIEVE IS 875 Part 3:2015 and compare to EQ.
+
+Geometry:
+- 4 storeys; L1 @ 3.2 m, typical @ 2.9 m; notched rectangle ~52 m × 20 m with entry recess + roof step
+- East ~12 m mass only 3 storeys (flat roof); west mass 4 storeys (truss roof) — vertical irregularity
+- Exterior long walls: Type II perforated WSP (full-height segments at ends; openings between;
+  hold-downs at wall-line ends only) — state perforated vs segmented rules under IS 801 practice
+- N-S: Type I segmented party / end walls; flexible diaphragm
+
+Gravity (RETRIEVE IS 875 Part 1 / Part 2 — do not invent):
+- Senior / independent-living apartment imposed loads, corridor / dining live, roof live
+- Snow N/A for Lucknow (found:false / N/A) — still design roof-step diaphragm transfer
+
+Design: IS 801:1975 + IS 811. Do NOT cite AISI S100/S240/S400 (no S400 Type II copy-paste).
+Wall vn: manufacturer/EOR EXAMPLE with perforated adjustment stated. R: eor_documented if
+Table 9 found:false — never IS 800 OMRF proxy.
+Deliverable: report.html + viewer_3d.html. Fill cfg['load_plan'] from LIVE RAG before pipeline.

@@ -1,0 +1,36 @@
+{
+  "_label": "EXAMPLE / not-for-construction",
+  "_purpose": "CI / COMPLETE-gate exercise for IN_CFS_Ex14 mixed LFRS — WSP vn + strap Tn + EOR-documented R. Do NOT treat values as project law.",
+  "_building": "IN_CFS_Ex14_Mixed_3levels_splitlevel_Coimbatore",
+  "_disclaimer": "EXAMPLE only. Real jobs require LIVE RAG for IS 875/1893 load_plan and project-specific manufacturer/test vn + strap Tn + EOR R cite. Never auto-fill R from IS 800.",
+  "system": "mixed_strap_wsp",
+  "jurisdiction": "india",
+  "units": "N-mm",
+  "R": 2.5,
+  "R_source": "eor_documented",
+  "R_cite": "EXAMPLE EOR memo: CFS mixed strap/WSP SFRS absent from IS 1893 Part 1 Table 9 (found:false); project adopts R=2.5 each direction with EOR concurrence — NOT an IS 800 OMRF proxy.",
+  "R_cfs_table9_found": false,
+  "wall_vn_plf_asd": 520.0,
+  "wall_vn_source": "manufacturer",
+  "wall_vn_cite": "EXAMPLE Acme CFS WSP Table B — N-S direction only (not-for-construction)",
+  "wall_vn_found": true,
+  "strap_Tn_N": 45000.0,
+  "strap_Tn_source": "manufacturer",
+  "strap_Tn_cite": "EXAMPLE Acme CFS Strap Table D — E-W direction only (not-for-construction)",
+  "seis": {
+    "R": 2.5,
+    "R_source": "eor_documented",
+    "R_cite": "EXAMPLE EOR memo (see top-level R_cite)",
+    "R_cfs_table9_found": false,
+    "Cd": 1.0,
+    "Ie": 1.0,
+    "Om0_found": false,
+    "Om0_note": "S400 Ω0 N/A under IS 801 (found:false) — do not invent."
+  },
+  "notes": {
+    "amd1": "IS_811_1987_Amd1_2011 property deltas found:false when empty — does not alone block COMPLETE",
+    "s400_omega0": "found:false / N/A — does not alone block COMPLETE",
+    "table9": "CFS mixed strap/WSP / light-gauge R row found:false in LIVE RAG",
+    "split_level": "Stepped-base / walkout diaphragm — EXAMPLE geometry note"
+  }
+}
