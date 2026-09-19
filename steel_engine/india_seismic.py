@@ -424,3 +424,167 @@ def drift_limit_label(cfg) -> str:
         f"{dl*100:.2f}% of storey height (IS 1893 Part 1:2016 cl.7.11.1.1; "
         f"VB with γ=1.0; no Cd/Ie amplification)"
     )
+
+
+# --- Annex E / Fig.1 seismic town honesty (Wave B #9; Ex9 Noida) -----------------
+# IS 1893 Part 1:2016 Annex E lists important towns and seismic zones.
+# Do NOT invent a Noida Annex E row. Delhi is the NCR listed-town proxy used in
+# EXAMPLE packages (Z=0.24, Zone IV) — agents should still confirm via LIVE RAG.
+
+ANNEX_E_KNOWN = {
+    "delhi": {
+        "found": True,
+        "zone": "IV",
+        "Z": 0.24,
+        "annex_name": "Delhi",
+        "note": (
+            "IS 1893 Part 1:2016 Annex E / Fig.1 — Delhi listed Zone IV (Z=0.24) "
+            "in EXAMPLE corpus path; confirm via LIVE RAG for project work."
+        ),
+    },
+    "new_delhi": {
+        "found": True,
+        "zone": "IV",
+        "Z": 0.24,
+        "annex_name": "Delhi / New Delhi",
+        "note": (
+            "Annex E / Fig.1 — New Delhi treated with Delhi Zone IV (Z=0.24); "
+            "confirm via LIVE RAG."
+        ),
+    },
+    "noida": {
+        "found": False,
+        "zone": None,
+        "Z": None,
+        "annex_name": None,
+        "proxy": {"town": "Delhi", "zone": "IV", "Z": 0.24},
+        "note": (
+            "Noida is NOT treated as a verified IS 1893 Part 1 Annex E town row in "
+            "this honesty map (found:false — do not invent a Noida Annex E entry). "
+            "Nearest NCR listed-town proxy: Delhi Zone IV, Z=0.24; or read zone from "
+            "Fig.1 seismic zone map via LIVE RAG. Disclose proxy clearly in "
+            "load_plan.seismic_summary."
+        ),
+    },
+}
+
+
+def _norm_town(s) -> str:
+    return str(s or "").strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def annex_e_seismic_town(town: str | None = None, *, cfg=None) -> dict:
+    """Honest IS 1893 Annex E / Fig.1 seismic-town lookup (Ex9 Noida polish).
+
+    Noida → found:false with Delhi Zone IV / Z=0.24 proxy disclosure.
+    Never invent a Noida Annex E row. Unknown towns → found:false (LIVE RAG).
+    """
+    cfg = cfg or {}
+    raw = town or cfg.get("city") or cfg.get("town") or cfg.get("site_town")
+    key = _norm_town(raw)
+    out = {
+        "found": False,
+        "town": raw,
+        "town_key": key or None,
+        "zone": None,
+        "Z": None,
+        "annex_name": None,
+        "proxy": None,
+        "stem": "IS_1893_Part_1_2016",
+        "cite": "IS 1893 Part 1:2016 Annex E / Fig.1",
+        "note": None,
+        "fig1_path_available": True,
+    }
+    if not key:
+        out["note"] = (
+            "No town supplied — RAG IS 1893 Annex E town list / Fig.1 zone map "
+            "(found:false; do not invent Z)."
+        )
+        return out
+    hit = ANNEX_E_KNOWN.get(key)
+    if not hit:
+        out["note"] = (
+            "Town %r not in the small known Annex E honesty map — LIVE RAG Annex E "
+            "/ Fig.1 required (found:false; do not invent zone or Z)."
+            % (raw or key,)
+        )
+        return out
+    out.update(
+        found=bool(hit.get("found")),
+        zone=hit.get("zone"),
+        Z=hit.get("Z"),
+        annex_name=hit.get("annex_name"),
+        proxy=hit.get("proxy"),
+        note=hit.get("note"),
+    )
+    if out.get("proxy"):
+        out["zone_proxy"] = out["proxy"].get("zone")
+        out["Z_proxy"] = out["proxy"].get("Z")
+        out["proxy_town"] = out["proxy"].get("town")
+    return out
+
+
+def noida_seismic_wind_honesty(cfg=None) -> dict:
+    """Combined Ex9 Noida honesty: Annex A wind (india_loads) + Annex E seismic."""
+    cfg = cfg or {}
+    try:
+        import india_loads as IL
+        wind = IL.annex_a_basic_wind("Noida", cfg=cfg)
+    except Exception as ex:
+        wind = dict(found=False, note="india_loads.annex_a_basic_wind unavailable: %s" % ex)
+    seis = annex_e_seismic_town("Noida", cfg=cfg)
+    return {
+        "town": "Noida",
+        "found": False,  # town itself is not a verified Annex A or Annex E row
+        "annex_a_wind": wind,
+        "annex_e_seismic": seis,
+        "delhi_proxy": {
+            "Vb_mps": (wind.get("proxy") or {}).get("Vb_mps") or wind.get("Vb_mps_proxy"),
+            "zone": (seis.get("proxy") or {}).get("zone") or seis.get("zone_proxy"),
+            "Z": (seis.get("proxy") or {}).get("Z") or seis.get("Z_proxy"),
+        },
+        "note": (
+            "Noida: Annex A Vb found:false + Delhi 47 proxy; Annex E seismic town "
+            "found:false + Delhi Zone IV / Z=0.24 proxy (or Fig.1). Do not invent "
+            "Noida rows. Disclose proxies in load_plan wind_summary / seismic_summary."
+        ),
+        "rag_query_plan": rag_query_plan_annex_e(cfg),
+    }
+
+
+def rag_query_plan_annex_e(cfg=None) -> list:
+    """LIVE RAG hooks for Annex E / Fig.1 (Ex9)."""
+    cfg = cfg or {}
+    town = cfg.get("city") or cfg.get("town") or "Noida"
+    return [
+        {
+            "stem": "IS_1893_Part_1_2016",
+            "query": "Annex E",
+            "purpose": "annex_e_town_list",
+            "type": "exact_section",
+            "found": None,
+            "note": "Noida → found:false + Delhi proxy if absent from list.",
+        },
+        {
+            "stem": "IS_1893_Part_1_2016",
+            "query": str(town),
+            "purpose": "annex_e_town_fts",
+            "type": "fts",
+            "found": None,
+        },
+        {
+            "stem": "IS_1893_Part_1_2016",
+            "query": "Fig.1 seismic zones of India",
+            "purpose": "fig1_zone_map",
+            "type": "fts",
+            "found": None,
+            "note": "Fig.1 path when town not in Annex E.",
+        },
+        {
+            "stem": "IS_1893_Part_1_2016",
+            "query": "Delhi Zone IV Z",
+            "purpose": "delhi_proxy_confirm",
+            "type": "fts",
+            "found": None,
+        },
+    ]

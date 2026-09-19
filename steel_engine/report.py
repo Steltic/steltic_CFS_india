@@ -147,7 +147,8 @@ def _chapters(cfg=None):
         "corpus/LIVE RAG by structure class (post-cyclone 1.30 / industrial 1.15 / other 1.00) "
         "— do not force 1.0 when class is industrial/post-cyclone; Noida Annex A found:false "
         "→ Delhi 47 proxy (do not invent town row).",
-        "Seismic per IS 1893 Part 1:2016 (Z, I, R, Ah, VB) via load_plan — both wind and EQ run.",
+        "Seismic per IS 1893 Part 1:2016 (Z, I, R, Ah, VB) via load_plan — both wind and EQ run; "
+        "Noida Annex E town found:false → Delhi Zone IV / Z=0.24 or Fig.1 proxy (do not invent).",
         "Governing case (wind vs seismic) identified per line/direction.",
     ])
     ch[4] = ("Load combinations", [
@@ -181,9 +182,13 @@ def _chapters(cfg=None):
     ])
     ch[9] = ("Lateral-system detailing (IS 801 / IS 1893)", [
         "System detailing matches the R used; CFS Table 9 row often found:false → eor_documented.",
-        "Capacity-design / Ω0 S400 stack: found:false / N/A under IS 801 — do not invent.",
+        "Capacity-design / Ω0 S400 stack: found:false / N/A under IS 801 — do not invent; "
+        "SBMF bolt slip/bearing: manufacturer/EOR path or found:false — refuse silent S400 E4.",
         "Type II perforated: ends-only hold-downs + distributed track (practice); IS rules found:false.",
-        "Hold-downs/rods for overturning tension; net-uplift path under wind combos.",
+        "Hold-downs/rods as class envelopes or EOR/project product + cite — refuse inventing "
+        "commercial SKUs; net-uplift path under wind combos.",
+        "Mezzanine (when present): explicit lateral share / frame model — gravity-in-W alone "
+        "is found:false for lateral (india_mezzanine_lateral).",
     ])
     ch[10] = ("Connections", [
         "Connection demands stated; design per IS 801 cl.7 (RAG) — not AISI S100 Ch. J as authority.",
@@ -1023,6 +1028,8 @@ def _design_basis_codes(cfg, s):
         if seismic:
             rows.append(["IS 1893 dual/least-R / podium two-stage",
                          "stubs: found:false unless LIVE RAG fill; refuse ASCE 12.2.3 / 12.2.3.2 as India law"])
+            rows.append(["SBMF bolt / proprietary HD / mezzanine lateral",
+                         "Wave B stubs: manufacturer/EOR or found:false; refuse S400 E4 &amp; invented SKUs"])
         rows += [["IS 800:2007", "hard-banned as silent CFS R proxy (C6) — allowlisted found:false documentation only"],
                  ["Concrete anchorage", "handed to foundation engineer (IS 456 / project) — demands transmitted"]]
     else:
@@ -1616,10 +1623,49 @@ _S400_CHECKS = {
 
 
 def _s400_capacity_chapter(cfg, pkg):
-    """Chapter 9: the S400 (or S100-only) capacity-design and detailing chapter — replaces
-    the hot-rolled AISC 341 SCWB/panel-zone chapter."""
+    """Chapter 9: capacity-design / detailing — S400 for USA; IS 801 / IS 1893 honesty for India."""
     s = cfg["seis"]
     sysname = (cfg.get("system") or s.get("system") or "").lower()
+    if _is_india_report(cfg):
+        # India: refuse silent S400 E1–E5 as design authority; point at Wave A/B stubs.
+        checks = [
+            ("CFS Table 9 / R grounding",
+             "IS 1893 Table 9 CFS row often found:false → eor_documented R + cite "
+             "(never silent IS 800 OMRF / S400 R)"),
+            ("Capacity-design / Ω0 stack",
+             "S400 Ω0 expected-strength stack found:false / N/A under IS 801 — do not invent"),
+            ("SBMF bolt slip/bearing (when SBMF)",
+             "india_sbmf_bolt: manufacturer/EOR capacity + cite, or found:false — "
+             "refuse silent S400 E4 as India law"),
+            ("Hold-down / anchor products",
+             "Class envelopes or EOR/project_submittal product + cite "
+             "(india_proprietary_hd) — refuse inventing commercial SKUs"),
+            ("Perforated / Type II (when applicable)",
+             "IS 801 rules found:false unless LIVE RAG; practice Ca OK — refuse S400 Type II"),
+            ("Mezzanine lateral (when present)",
+             "Explicit lateral model / share (india_mezzanine_lateral) — "
+             "gravity-in-W alone is found:false for lateral"),
+            ("Podium / two-stage (when applicable)",
+             "IS 1893 two-stage found:false honest — refuse silent ASCE 12.2.3.2"),
+        ]
+        rows = [[nm, basis, "see stubs / Appendix A"] for nm, basis in checks]
+        intro = (
+            f"<p>India CFS detailing for system <b>{sysname or '(undeclared)'}</b> "
+            f"(R = {s.get('R')}). AISI S400 E1–E5 capacity-design / bolt-bearing fuse rules "
+            "are <b>not</b> India design authority — use IS 801 / IS 1893 RAG + EOR paths "
+            "below. Values populate from the calc package / Wave A–B status objects when present.</p>"
+        )
+        cap = (pkg or {}).get("capacity_design")
+        extra = ("<h4>Capacity-design results (from the calc package)</h4>" + _capdesign_html(cap)) if cap else ""
+        note = (
+            "<p class='cnote'>Hold-down/connector <b>class envelopes</b> (strap/bolted/rod) are "
+            "analysis scaffolding; specific commercial products require EOR/project submittal + cite "
+            "(do not invent Simpson/USP SKUs). Concrete anchorage detailing is handed to the "
+            "foundation engineer (IS 456 / project). Wind- vs EQ-governed wall vn from "
+            "manufacturer/test/IS-table — not S400 wind columns as India law.</p>"
+        )
+        return intro + _table(["Required check", "Basis", "Status"], rows) + extra + note
+
     det = (pkg or {}).get("detailing")
     if det:
         _rows = [[c.get("check", ""), c.get("status", "")] for c in det.get("checks", [])]
@@ -2531,14 +2577,26 @@ def build_report(name, root=None):
         parts.append("<p>Connection design demands transmitted to the fabricator / connection engineer (member end "
                      "forces from the analysis; each connection is then DESIGNED to these demands below):</p>")
         parts.append(_ctbl)
-    parts.append("<p class='cnote'><b>Designed in this package:</b> each connection is sized to the demands above per "
-                 "AISI S100 Ch. J (screws: tilting/bearing/pull-out/pull-over; welds on thin sheet; bolts with "
-                 "tilting), with capacity-design demands per S400 where the chain requires them (strap connections "
-                 "at R<sub>y</sub>F<sub>y</sub>A<sub>g</sub>) &mdash; limit "
-                 "state, capacity and D/C &le; 1.0 derived by the agent from the RAG (see Chapter 6 / Appendix A). "
-                 "Sheathing fastener schedules ARE the wall connection design (Chapter 6). Anchorage to concrete is "
-                 "scoped to ACI 318 Ch. 17 with demands handed off; only shop-level detailing is confirmed on the "
-                 "fabricator's submittal.</p>")
+    if _is_india_report(cfg):
+        parts.append(
+            "<p class='cnote'><b>Designed in this package (India):</b> each connection is sized to the "
+            "demands above per <b>IS 801:1975 cl.7</b> (LIVE RAG) and/or manufacturer EOR capacity with "
+            "cite — <b>not</b> AISI S100 Ch. J / S400 as India authority. SBMF bolt slip/bearing: "
+            "india_sbmf_bolt manufacturer/EOR path or found:false (refuse silent S400 E4). "
+            "Limit state, capacity and D/C &le; 1.0 from IS 801 / manufacturer RAG (Chapter 6 / Appendix A). "
+            "Sheathing fastener schedules ARE the wall connection design (Chapter 6). Anchorage to concrete "
+            "is handed to the foundation engineer (IS 456 / project) with demands transmitted; "
+            "HD products as class envelopes or EOR submittal + cite (india_proprietary_hd).</p>"
+        )
+    else:
+        parts.append("<p class='cnote'><b>Designed in this package:</b> each connection is sized to the demands above per "
+                     "AISI S100 Ch. J (screws: tilting/bearing/pull-out/pull-over; welds on thin sheet; bolts with "
+                     "tilting), with capacity-design demands per S400 where the chain requires them (strap connections "
+                     "at R<sub>y</sub>F<sub>y</sub>A<sub>g</sub>) &mdash; limit "
+                     "state, capacity and D/C &le; 1.0 derived by the agent from the RAG (see Chapter 6 / Appendix A). "
+                     "Sheathing fastener schedules ARE the wall connection design (Chapter 6). Anchorage to concrete is "
+                     "scoped to ACI 318 Ch. 17 with demands handed off; only shop-level detailing is confirmed on the "
+                     "fabricator's submittal.</p>")
 
     # ===================== Chapter 11 — Foundations interface ============================
     parts.append(_chapter(11, cfg=cfg))
@@ -2569,10 +2627,19 @@ def build_report(name, root=None):
     parts.append(_qa_scorecard(cfg, Fx, reX, eX, eY, drX, drY))
     parts.append(_grounding_check(cfg, name, pkg))
     parts.append(_consistency_section(name, root, pkg))
-    parts.append("<p>Automated QA evidence in this report: per-combination equilibrium balances to ~0 in all three "
-                 "axes (Chapter 5); every member demand is enveloped over the full ASCE 7-22 combination set "
-                 "(Chapter 4 / Appendix B); each capacity is traceable to a cited AISI clause (Appendix A); and "
-                 "the tool-call activity log is in Appendix C.</p>")
+    if _is_india_report(cfg):
+        parts.append(
+            "<p>Automated QA evidence in this report: per-combination equilibrium balances to ~0 in all three "
+            "axes (Chapter 5); every member demand is enveloped over the load_plan combination set "
+            "(Chapter 4 / Appendix B — IS 875 / IS 1893, not ASCE 7-22 labels); each capacity is "
+            "traceable to a cited <b>IS 801 / IS 811</b> (or manufacturer EOR) clause (Appendix A) — "
+            "not AISI S100/S240/S400 as India authority; and the tool-call activity log is in Appendix C.</p>"
+        )
+    else:
+        parts.append("<p>Automated QA evidence in this report: per-combination equilibrium balances to ~0 in all three "
+                     "axes (Chapter 5); every member demand is enveloped over the full ASCE 7-22 combination set "
+                     "(Chapter 4 / Appendix B); each capacity is traceable to a cited AISI clause (Appendix A); and "
+                     "the tool-call activity log is in Appendix C.</p>")
     parts.append("<p class='cnote'><b>Out of scope (engineer judgement):</b> independent third-party check, software "
                  "validation sign-off, reconciliation of model assumptions against final detailing, and the EOR seal "
                  "are professional-responsibility steps completed outside the automated package.</p>")
