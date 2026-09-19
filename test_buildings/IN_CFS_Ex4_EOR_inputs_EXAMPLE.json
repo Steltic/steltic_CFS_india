@@ -1,0 +1,39 @@
+{
+  "_label": "EXAMPLE / not-for-construction",
+  "_purpose": "CI / COMPLETE-gate exercise for IN_CFS_Ex4 — strap system + EOR-documented R. Do NOT treat values as project law or IS 1893 Table 9.",
+  "_building": "IN_CFS_Ex4_StrapBraced_6levels_Bengaluru",
+  "_disclaimer": "EXAMPLE only. Real jobs require LIVE RAG for IS 875/1893 load_plan and project-specific EOR R / strap capacity cites. Never auto-fill R from IS 800.",
+
+  "system": "strap_braced",
+  "jurisdiction": "india",
+  "units": "N-mm",
+
+  "R": 2.5,
+  "R_source": "eor_documented",
+  "R_cite": "EXAMPLE EOR memo: CFS flat-strap X-braced SFRS absent from IS 1893 Part 1 Table 9 (found:false); project adopts R=2.5 with EOR concurrence — NOT an IS 800 OMRF proxy.",
+  "R_cfs_table9_found": false,
+
+  "wall_vn_found": false,
+  "wall_vn_note": "N/A — strap-braced (not WSP/steel-sheet/gypsum panel wall). Strap Tn / connection capacity from manufacturer or EOR; C1 wall vn gate skipped or mapped per agent.",
+
+  "strap_Tn_N": 45000.0,
+  "strap_Tn_source": "manufacturer",
+  "strap_Tn_cite": "EXAMPLE Acme CFS Strap Table D — 50×1.2 mm Fy=350 MPa flat strap (not-for-construction)",
+
+  "seis": {
+    "R": 2.5,
+    "R_source": "eor_documented",
+    "R_cite": "EXAMPLE EOR memo (see top-level R_cite)",
+    "R_cfs_table9_found": false,
+    "Cd": 1.0,
+    "Ie": 1.0,
+    "Om0_found": false,
+    "Om0_note": "S400 Ω0 N/A under IS 801 (found:false) — do not invent."
+  },
+
+  "notes": {
+    "amd1": "IS_811_1987_Amd1_2011 property deltas found:false when empty — does not alone block COMPLETE",
+    "s400_omega0": "found:false / N/A — does not alone block COMPLETE",
+    "table9": "CFS strap-braced / light-gauge R row found:false in LIVE RAG"
+  }
+}
