@@ -103,6 +103,37 @@ def _si_unit_banner(cfg=None):
     )
 
 
+def _is_india_report(cfg=None):
+    """steltic_CFS_india is India-jurisdiction; also honor explicit cfg flags."""
+    if cfg is None:
+        cfg = _REP_CFG or {}
+    if not isinstance(cfg, dict):
+        return True
+    if cfg.get("force_asce_drift_amp") or cfg.get("force_usa_drift_ui"):
+        return False
+    j = str((cfg.get("load_plan") or {}).get("jurisdiction")
+            if isinstance(cfg.get("load_plan"), dict) else cfg.get("jurisdiction") or "india").lower()
+    return j in ("india", "is", "is_bis", "bis", "in", "")
+
+
+def _chapters(cfg=None):
+    """Checklist chapters; India strips USA 0.025h drift scaffold (S2/C4)."""
+    ch = {k: (v[0], list(v[1])) for k, v in CHAPTERS.items()}
+    if _is_india_report(cfg):
+        ch[8] = (ch[8][0], [
+            "Storey drift &le; 0.004 h per IS 1893 Part 1:2016 cl.7.11.1.1 "
+            "(design seismic forces; no C<sub>d</sub>/I<sub>e</sub> amplification). "
+            "Soft-storey / URM-infill: 0.002 h where Table 6 notes apply.",
+            "Wind drift &le; project limit; joist/header deflections LL &le; L/360, TL &le; L/240.",
+            "Building separation where structures adjoin (wings, host + mezzanine).",
+            "Differential movement at podium/split-level steps; thermal movement where raised.",
+        ])
+        # Drop USA 0.025 wording if any residual
+        for i, item in enumerate(ch[8][1]):
+            if "0.025" in item or "Table 12.12-1" in item:
+                ch[8][1][i] = ch[8][1][0]  # already replaced wholesale
+    return ch
+
 
 try:
     import design_post as DPOST      # run_case + capacity snippets (operator side; needs E)
@@ -2356,16 +2387,43 @@ def build_report(name, root=None):
         parts.append("<p class='note'>[needs seismic drift data]</p>")
 
     # ============================ Chapter 8 — Serviceability =============================
-    parts.append(_chapter(8))
+    _ch8_status = None
+    if _is_india_report(cfg):
+        # rebuild chapter heading with India checklist
+        title8, items8 = _chapters(cfg)[8]
+        li8 = "".join(f"<li>{x}</li>" for x in items8)
+        parts.append(f"<h2>Chapter 8 &mdash; {title8}</h2>"
+                     f"<div class='chk'><div class='chk-h'>Reviewer acceptance items</div><ul>{li8}</ul></div>")
+    else:
+        parts.append(_chapter(8))
     if Fx is not None and drX is not None:
-        Cd = s.get("Cd", 5.0); Ie = s["Ie"]; lim = cfg.get("drift_limit", 0.02)
-        parts.append("<h3>Seismic design drift</h3>")
-        parts.append(f"<p>Elastic story drift &delta;<sub>e</sub> amplified to &delta; = C<sub>d</sub>&delta;<sub>e</sub>/I<sub>e</sub> "
-                     f"(&sect;12.8.6, C<sub>d</sub>={Cd}, I<sub>e</sub>={Ie}); allowable {lim*100:.1f}% of story height.</p>")
-        drow = [[k, f"{drX[k-1]*100:.3f}", f"{drX[k-1]*Cd/Ie*100:.3f}", f"{drY[k-1]*100:.3f}",
-                 f"{drY[k-1]*Cd/Ie*100:.3f}", "OK" if max(drX[k-1], drY[k-1])*Cd/Ie <= lim else "NG"]
-                for k in range(1, NF+1)]
-        parts.append(_table(["Story", "&delta;e X %", "&delta; X %", "&delta;e Y %", "&delta; Y %", f"&le;{lim*100:.1f}%"], drow))
+        Cd = s.get("Cd", 5.0); Ie = s["Ie"]
+        if _is_india_report(cfg):
+            try:
+                import india_seismic as _IS1893
+                lim, _ = _IS1893.drift_allowable(cfg)
+            except Exception:
+                lim = float(cfg.get("drift_limit") or 0.004)
+            parts.append("<h3>Seismic design drift (IS 1893)</h3>")
+            parts.append(
+                f"<p>Storey drift under design seismic forces (load factors = 1.0) "
+                f"&le; <b>0.004 h</b> per IS 1893 Part 1:2016 cl.7.11.1.1 "
+                f"(no C<sub>d</sub>/I<sub>e</sub> amplification). "
+                f"Allowable used: {lim*100:.2f}% of storey height. "
+                f"USA ASCE Table 12.12-1 0.025h row is <b>not</b> shown.</p>")
+            drow = [[k, f"{drX[k-1]*100:.3f}", f"{drY[k-1]*100:.3f}",
+                     "OK" if max(abs(drX[k-1]), abs(drY[k-1])) <= lim else "NG"]
+                    for k in range(1, NF+1)]
+            parts.append(_table(["Storey", "&delta; X %", "&delta; Y %", f"&le;{lim*100:.2f}%"], drow))
+        else:
+            lim = cfg.get("drift_limit", 0.02)
+            parts.append("<h3>Seismic design drift</h3>")
+            parts.append(f"<p>Elastic story drift &delta;<sub>e</sub> amplified to &delta; = C<sub>d</sub>&delta;<sub>e</sub>/I<sub>e</sub> "
+                         f"(&sect;12.8.6, C<sub>d</sub>={Cd}, I<sub>e</sub>={Ie}); allowable {lim*100:.1f}% of story height.</p>")
+            drow = [[k, f"{drX[k-1]*100:.3f}", f"{drX[k-1]*Cd/Ie*100:.3f}", f"{drY[k-1]*100:.3f}",
+                     f"{drY[k-1]*Cd/Ie*100:.3f}", "OK" if max(drX[k-1], drY[k-1])*Cd/Ie <= lim else "NG"]
+                    for k in range(1, NF+1)]
+            parts.append(_table(["Story", "&delta;e X %", "&delta; X %", "&delta;e Y %", "&delta; Y %", f"&le;{lim*100:.1f}%"], drow))
     parts.append(_wind_drift_section(cfg))
     parts.append(_floor_serviceability(pkg))
     parts.append(_deflection_section(cfg))

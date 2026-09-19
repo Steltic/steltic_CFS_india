@@ -79,6 +79,19 @@ designators (600S162-54) carry their own mil thickness; `Fy` in ksi (33 or 50; E
 IS 801 materials — confirm Fy from RAG; USA E=29,500 ksi is not India authority without cite). If the geometry check flags story heights that "look like INCHES" on the wall
 path or "look like FEET" on the frame path, fix the cfg BEFORE chasing numbers.
 
+## India P0 gates (wall vn + R + complete label) — hard rules
+- **C1 wall vn:** Never invent a silent provisional **700 plf ASD** wall shear. Set
+  `cfg['wall_vn_plf_asd']`, `cfg['wall_vn_source']` ∈ {manufacturer, test, is801_table, documented},
+  and `cfg['wall_vn_cite']`. IS 801 cl.9 / cl.9.1.4 → diaphragms/shear walls are outside tabulated
+  scope (`found:false` for vn tables). Source `provisional` / `assumed` / `default` → **preflight ERROR**.
+- **C2 R:** Never silently use IS 800 / Table 9 steel **OMRF R=3.0** as a CFS proxy. Set
+  `cfg['R']` (or `seis['R']`) **and** `cfg['R_source']`. If IS 1893 Table 9 has no CFS row:
+  `R_cfs_table9_found=false` + `R_source='explicit'|'documented'` + `R_cite`. Missing `R_source`
+  → **preflight ERROR** (silent-proxy path). `R_source` containing proxy/OMRF → WARN + PARTIAL only.
+- **C7 complete label:** Do **not** declare COMPLETE / admin-notify complete if wall vn is
+  provisional **or** R source is proxy. Stay **PARTIAL** until both sources are non-provisional /
+  non-proxy. `load_plan` RAG gate remains mandatory.
+
 ## Gotchas that fail SILENTLY (read once — they will not error loudly)
 - **Diaphragm default is FLEXIBLE** (state the IS 1893 / brief idealization; do not invent ASCE). Shear goes to wall lines
   by **tributary area**; accidental torsion is a **5% tributary shift**, not master-node rotation.

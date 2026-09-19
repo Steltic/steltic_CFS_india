@@ -169,9 +169,15 @@ def run(cfg):
                                  cfg.get("analysis_fidelity", 0))
     if warn:
         res["preflight_warnings"] = warn
-    dl = CS.drift_limit(cfg.get("system", "wsp_shearwall"), cfg["stories"],
-                        cfg.get("risk_cat", "II"))
+    # India: IS 1893 cl.7.11.1.1 = 0.004 h (no ASCE Table 12.12-1 0.025 scaffold)
+    dl = CS.india_drift_limit(cfg)
+    if cfg.get("drift_limit") is not None:
+        try:
+            dl = float(cfg["drift_limit"])
+        except (TypeError, ValueError):
+            pass
     Cd, Ie = cfg["seis"]["Cd"], cfg["seis"]["Ie"]
+    _india_drift = not bool(cfg.get("force_asce_drift_amp"))
     semirigid = cfg.get("diaphragm", "flexible") == "semi-rigid"
     for dirn, lines, dim in (("X", cfg["lines_x"], cfg["plan_ft"][1]),
                              ("Y", cfg["lines_y"], cfg["plan_ft"][0])):
@@ -194,14 +200,17 @@ def run(cfg):
                     model_shears[k][ln.name] = lr[k]["V"] - (
                         lr.get(k + 1, {}).get("V", 0.0)
                         if isinstance(lr.get(k + 1), dict) else 0.0)
-        # drift screen: amplified Cd/Ie vs limit, per line per story
+        # drift screen: India IS 1893 uses elastic design drifts (no Cd/Ie) vs 0.004 h
         drift_flags = []
         for name, lr in dres.items():
             for k, r in lr.items():
-                amp = Cd * r["dr_ratio"] / Ie
+                if _india_drift:
+                    amp = r["dr_ratio"]
+                else:
+                    amp = Cd * r["dr_ratio"] / Ie
                 r["drift_amplified"] = amp
                 if amp > dl:
-                    drift_flags.append("%s line %s story %d: Cd*dr/Ie = %.4f > %.3f"
+                    drift_flags.append("%s line %s story %d: design_drift = %.4f > %.3f"
                                        % (dirn, name, k, amp, dl))
         gate = WL.compare_with_model(
             dist, {k: {ln.name: dres[ln.name][k]["V"] - (dres[ln.name][k + 1]["V"]
@@ -394,7 +403,7 @@ def _selftest():
           % (r11["V"], r11["v_unit_plf"], r11["K_kip_in"], r11["drift_amplified"],
              dx["drift_limit"]))
     assert r11["V"] >= dx["lines"]["X1"][4]["V"], "cumulative shear must grow downward"
-    assert dx["drift_limit"] == 0.025
+    assert abs(dx["drift_limit"] - 0.004) < 1e-9  # IS 1893 cl.7.11.1.1
     # two-stage machinery
     ok, msgs = two_stage_check(100.0, 1500.0, 0.4, 0.42)
     assert ok and not msgs
