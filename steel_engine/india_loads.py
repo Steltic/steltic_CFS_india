@@ -222,3 +222,324 @@ def render_findings(findings) -> str:
     for lvl, msg in findings:
         lines.append("  [%s] %s" % (lvl, msg))
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# IS 875 Part 3 §6.3.4 k4 (cyclonic importance) + Annex A town honesty
+# Corpus QFM 2026-09-19: exact_section 6.3.4 / fts k4 now HIT (was OCR-broken).
+# Prefer LIVE RAG fill; fall back to recovered corpus table by structure class.
+# Never invent; never silently force k4=1.0 when class is industrial/post-cyclone.
+# ---------------------------------------------------------------------------
+
+# Recovered from IS_875_Part_3_2015.pdf cl.6.3.4 (QFM polish handoff).
+K4_CORPUS_BY_CLASS = {
+    "post_cyclone": 1.30,
+    "post-cyclone": 1.30,
+    "postcyclone": 1.30,
+    "emergency": 1.30,
+    "cyclone_shelter": 1.30,
+    "hospital": 1.30,
+    "school": 1.30,
+    "communication_tower": 1.30,
+    "industrial": 1.15,
+    "industry": 1.15,
+    "all_other": 1.00,
+    "other": 1.00,
+    "all-other": 1.00,
+    "residential": 1.00,
+    "motel": 1.00,
+    "hotel": 1.00,
+    "office": 1.00,
+}
+
+K4_CLAUSE = {
+    "stem": "IS_875_Part_3_2015",
+    "clause": "6.3.4",
+    "cite": "IS 875 Part 3:2015 cl.6.3.4 Importance Factor for Cyclonic Region (k4)",
+    "coastal_belt_note": (
+        "Applies in ~60 km coastal belt on east coast and Gujarat coast. "
+        "§6.6: offshore to ~200 km may use 1.15× nearest coast in addition to k4 "
+        "(IS 15498 referenced in clause)."
+    ),
+    "qfm_handoff": "/workspace/handoff/qfm/IS875_P3_k4_AnnexA_polish_2026-09-19.md",
+}
+
+# Annex A basic wind speed honesty (town → Vb m/s). Not a full table — known fixes only.
+ANNEX_A_KNOWN = {
+    "vizag": {"Vb_mps": 50.0, "annex_name": "Vishakapatnam / Visakhapatnam", "found": True},
+    "visakhapatnam": {"Vb_mps": 50.0, "annex_name": "Visakhapatnam", "found": True},
+    "vishakapatnam": {"Vb_mps": 50.0, "annex_name": "Vishakapatnam", "found": True},
+    "vishakhapatnam": {"Vb_mps": 50.0, "annex_name": "Vishakhapatnam", "found": True},
+    "delhi": {"Vb_mps": 47.0, "annex_name": "Delhi", "found": True},
+    "noida": {
+        "Vb_mps": None,
+        "annex_name": None,
+        "found": False,
+        "proxy": {"town": "Delhi", "Vb_mps": 47.0},
+        "note": (
+            "Noida is NOT in IS 875 Part 3 Annex A (found:false — do not invent a Noida row). "
+            "Nearest listed NCR town: Delhi Vb=47 m/s as proxy, or use Fig.1 zone map."
+        ),
+    },
+}
+
+
+def _norm_class(s) -> str:
+    return str(s or "").strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def normalize_k4_class(raw) -> str | None:
+    """Map free-text structure class to canonical key: post_cyclone|industrial|all_other."""
+    if raw is None or raw == "":
+        return None
+    s = _norm_class(raw)
+    post = {
+        "post_cyclone", "postcyclone", "emergency", "cyclone_shelter",
+        "hospital", "school", "communication_tower",
+    }
+    industrial = {"industrial", "industry"}
+    other = {"all_other", "other", "residential", "motel", "hotel", "office"}
+    if s in post:
+        return "post_cyclone"
+    if s in industrial:
+        return "industrial"
+    if s in other:
+        return "all_other"
+    if "post" in s and "cyclone" in s:
+        return "post_cyclone"
+    if "industrial" in s or s == "industry":
+        return "industrial"
+    if any(tok in s for tok in ("shelter", "hospital", "emergency", "school", "communication")):
+        return "post_cyclone"
+    if any(tok in s for tok in ("motel", "hotel", "residential", "office", "all_other", "other")):
+        return "all_other"
+    return None
+
+
+def resolve_k4_cyclonic(cfg=None, *, wind_summary=None) -> dict:
+    """Resolve IS 875 P3 §6.3.4 k4 for cyclonic coastal sites.
+
+    Preference order:
+      1. LIVE RAG fill on load_plan.wind / wind_summary / cfg['k4_rag'] with found+value+cite
+      2. Structure class → recovered corpus table (cl.6.3.4 QFM HIT) with cite
+      3. found:false — never invent; never silently force 1.0 for industrial/post-cyclone
+
+    Drops the historical Ex11 agent override that forced k4=1.0 (all-other) whenever
+    OCR table was found:false — class industrial→1.15 / post-cyclone→1.30 now apply.
+    """
+    cfg = cfg or {}
+    plan = cfg.get("load_plan") if isinstance(cfg.get("load_plan"), dict) else {}
+    wind = wind_summary if isinstance(wind_summary, dict) else None
+    if wind is None:
+        wind = plan.get("wind") if isinstance(plan.get("wind"), dict) else {}
+    if not wind:
+        wind = plan.get("wind_summary") if isinstance(plan.get("wind_summary"), dict) else {}
+    rag = cfg.get("k4_rag") if isinstance(cfg.get("k4_rag"), dict) else {}
+
+    out = {
+        "found": False,
+        "k4": None,
+        "class": None,
+        "class_key": None,
+        "cite": None,
+        "stem": K4_CLAUSE["stem"],
+        "clause": K4_CLAUSE["clause"],
+        "source": None,
+        "coastal_belt_note": K4_CLAUSE["coastal_belt_note"],
+        "forced_1_0_override_refused": False,
+        "note": None,
+    }
+
+    # Class from cfg / wind
+    class_raw = (
+        cfg.get("k4_class")
+        or cfg.get("structure_class_k4")
+        or cfg.get("cyclonic_structure_class")
+        or wind.get("k4_class")
+        or wind.get("structure_class")
+        or rag.get("class")
+    )
+    class_key = normalize_k4_class(class_raw)
+    out["class"] = class_raw
+    out["class_key"] = class_key
+
+    # Detect forbidden silent force-1.0 override
+    force_1 = cfg.get("force_k4_1_0") or wind.get("force_k4_1_0") or rag.get("force_k4_1_0")
+    if force_1 and class_key in ("industrial", "post_cyclone"):
+        out["forced_1_0_override_refused"] = True
+        out["note"] = (
+            "Refuse force_k4_1_0 override: structure class=%r maps to k4=%s per "
+            "IS 875 P3 cl.6.3.4 corpus (QFM HIT). Drop the all-other=1.0 agent override."
+            % (class_raw, K4_CORPUS_BY_CLASS.get(class_key))
+        )
+
+    # 1) Explicit LIVE RAG / agent fill with found:true
+    for blob, src in (
+        (rag, "cfg.k4_rag"),
+        (wind, "load_plan.wind"),
+        (plan.get("k4") if isinstance(plan.get("k4"), dict) else {}, "load_plan.k4"),
+    ):
+        if not blob:
+            continue
+        if blob.get("found") is True and blob.get("k4") is not None:
+            try:
+                k4v = float(blob["k4"])
+            except (TypeError, ValueError):
+                continue
+            cite = blob.get("cite") or blob.get("clause") or K4_CLAUSE["cite"]
+            out.update(
+                found=True, k4=k4v, cite=cite, source=src,
+                note=blob.get("note") or "k4 from LIVE RAG / load_plan fill.",
+            )
+            if class_key and abs(k4v - K4_CORPUS_BY_CLASS.get(class_key, k4v)) > 0.011:
+                out["warn"] = (
+                    "RAG k4=%.3f differs from corpus class %s→%.2f — confirm cite."
+                    % (k4v, class_key, K4_CORPUS_BY_CLASS[class_key])
+                )
+            return out
+        if blob.get("found") is False and blob.get("k4") is None and not class_key:
+            out["note"] = (
+                blob.get("note")
+                or "k4 retrieval found:false and no structure class — do not invent k4."
+            )
+            out["source"] = src
+            # continue — class path may still resolve
+
+    # Bare numeric on wind without found flag: only accept with cite
+    if wind.get("k4") is not None and (wind.get("cite") or wind.get("k4_cite") or rag.get("cite")):
+        try:
+            k4v = float(wind["k4"])
+            out.update(
+                found=True, k4=k4v,
+                cite=wind.get("cite") or wind.get("k4_cite") or rag.get("cite"),
+                source="load_plan.wind.k4+cite",
+                note="k4 accepted with cite (LIVE RAG / agent).",
+            )
+            return out
+        except (TypeError, ValueError):
+            pass
+
+    # 2) Corpus table by structure class (QFM-recovered HIT)
+    if class_key and class_key in K4_CORPUS_BY_CLASS:
+        # If agent explicitly marked retrieval found:false AND force stayed on all-other path
+        # but class is industrial/post-cyclone — still apply corpus (drop override).
+        k4v = float(K4_CORPUS_BY_CLASS[class_key])
+        out.update(
+            found=True,
+            k4=k4v,
+            cite=K4_CLAUSE["cite"],
+            source="corpus_IS875_P3_6.3.4_qfm",
+            note=(
+                "k4=%.2f from IS 875 Part 3:2015 cl.6.3.4 recovered corpus table "
+                "(QFM 2026-09-19 HIT) for structure class=%r. "
+                "Prefer LIVE RAG confirmation when available; do not invent other values."
+                % (k4v, class_raw)
+            ),
+        )
+        if out["forced_1_0_override_refused"]:
+            out["note"] += " Silent force_k4_1_0 override refused for this class."
+        return out
+
+    # 3) Explicit found:false from RAG with no usable class
+    if (rag.get("found") is False) or (wind.get("k4_found") is False):
+        out["found"] = False
+        out["note"] = (
+            "k4 found:false (retrieval failed / OCR gap) and no resolvable structure class. "
+            "Set k4_class to post_cyclone|industrial|all_other or fill k4_rag from LIVE "
+            "exact_section 6.3.4 — do not invent."
+        )
+        return out
+
+    out["note"] = (
+        "k4 unresolved (found:false): provide LIVE RAG fill (exact_section 6.3.4 / fts k4) "
+        "or cfg['k4_class'] in {post_cyclone, industrial, all_other}. "
+        "Do not invent; do not force 1.0 when class is industrial/post-cyclone."
+    )
+    return out
+
+
+def annex_a_basic_wind(town: str | None, *, cfg=None) -> dict:
+    """Honest Annex A Vb lookup for known towns (Vizag/Delhi/Noida proxy).
+
+    Noida → found:false with Delhi 47 proxy note — never invent a Noida row.
+    Unknown towns → found:false (agent must RAG Annex A / Fig.1).
+    """
+    cfg = cfg or {}
+    key = _norm_class(town or cfg.get("city") or cfg.get("town") or cfg.get("site_town"))
+    out = {
+        "found": False,
+        "town": town or cfg.get("city") or cfg.get("town"),
+        "town_key": key or None,
+        "Vb_mps": None,
+        "annex_name": None,
+        "proxy": None,
+        "stem": "IS_875_Part_3_2015",
+        "cite": "IS 875 Part 3:2015 Annex A",
+        "note": None,
+    }
+    if not key:
+        out["note"] = "No town supplied — RAG Annex A / Fig.1 (found:false)."
+        return out
+    hit = ANNEX_A_KNOWN.get(key)
+    if not hit:
+        out["note"] = (
+            "Town %r not in the small known Annex A honesty map — LIVE RAG Annex A / "
+            "Fig.1 required (found:false; do not invent Vb)."
+            % (town or key,)
+        )
+        return out
+    out.update(
+        found=bool(hit.get("found")),
+        Vb_mps=hit.get("Vb_mps"),
+        annex_name=hit.get("annex_name"),
+        proxy=hit.get("proxy"),
+        note=hit.get("note"),
+    )
+    if out["found"]:
+        out["note"] = out["note"] or (
+            "Annex A %s Vb=%.0f m/s (corpus / QFM)."
+            % (out["annex_name"], float(out["Vb_mps"]))
+        )
+    elif out.get("proxy"):
+        # Noida path — expose proxy clearly without claiming Annex A row
+        out["Vb_mps_proxy"] = out["proxy"].get("Vb_mps")
+        out["proxy_town"] = out["proxy"].get("town")
+    return out
+
+
+def rag_query_plan_k4_annex(cfg=None) -> list:
+    """Retrieval plan hooks for k4 + Annex A (Ex11 / Ex9)."""
+    cfg = cfg or {}
+    town = cfg.get("city") or cfg.get("town") or ""
+    return [
+        {
+            "stem": "IS_875_Part_3_2015",
+            "query": "6.3.4",
+            "purpose": "k4_cyclonic_importance",
+            "type": "exact_section",
+            "found": None,
+            "note": "Expect 1.30 / 1.15 / 1.00 table (QFM HIT).",
+        },
+        {
+            "stem": "IS_875_Part_3_2015",
+            "query": "k4",
+            "purpose": "k4_fts",
+            "type": "fts",
+            "found": None,
+        },
+        {
+            "stem": "IS_875_Part_3_2015",
+            "query": "importance factor for the cyclonic region",
+            "purpose": "k4_phrase",
+            "type": "fts",
+            "found": None,
+        },
+        {
+            "stem": "IS_875_Part_3_2015",
+            "query": str(town or "Annex A basic wind speed"),
+            "purpose": "annex_a_town_Vb",
+            "type": "fts",
+            "found": None,
+            "note": "Noida → found:false + Delhi 47 proxy; Vizag → 50.",
+        },
+    ]

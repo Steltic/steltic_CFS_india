@@ -5,6 +5,10 @@ rather than arbitrary SFIA-only designators. This helper only resolves against t
 catalog — it does NOT invent properties or fabricate missing designations.
 
 Missing / unmatched sizes → ``found:false`` (honest; RAG or EOR must supply an alternate).
+
+Nx packs (``8xCLR…``, ``32xCLR…``) and built-ups (``2xCLR…``): parse ply count; stock
+catalog covers single + conventional ``2x`` built-up. ``N>2`` → ``found:false`` with
+nearest stocked / ``2x`` candidates as aid only (Ex5/Ex15) — do not invent Nx capacity.
 """
 from __future__ import annotations
 
@@ -35,20 +39,56 @@ def _looks_sfia(name: str) -> bool:
     return bool(re.match(r"^(?:2[xX])?\d{3}[STUCZFH]\d{3}-\d{2,3}$", str(name or "").strip()))
 
 
+def parse_nx_pack(name: str | None) -> dict[str, Any]:
+    """Parse ``Nx<label>`` / ``2x<label>`` built-up / pack prefixes.
+
+    Returns ``{n_ply, bare, prefix, is_nx_pack, is_built_up}``.
+    ``n_ply=1`` when no leading integer× prefix. Does not invent properties.
+    """
+    import re
+    raw = str(name or "").strip()
+    lab = raw.upper().replace(" ", "")
+    # Keep hyphens out of IS labels for catalog match; SFIA may use them
+    lab_compact = lab.replace("-", "")
+    m = re.match(r"^(\d+)X(.+)$", lab_compact)
+    if m:
+        n = int(m.group(1))
+        bare = m.group(2)
+        return dict(
+            n_ply=n,
+            bare=bare,
+            prefix="%dx" % n,
+            is_nx_pack=n > 2,
+            is_built_up=n >= 2,
+            requested=raw,
+        )
+    return dict(
+        n_ply=1,
+        bare=lab_compact or None,
+        prefix=None,
+        is_nx_pack=False,
+        is_built_up=False,
+        requested=raw,
+    )
+
+
 def resolve_is811_label(name: str) -> dict[str, Any]:
     """Look up an exact IS 811 label in the catalog.
 
     Returns ``found:true`` with props summary, or ``found:false`` without inventing.
+    Supports ``2xCLR…`` built-up (catalog ply) and diagnoses ``Nx`` packs (N>2).
     """
-    lab = str(name or "").upper().replace(" ", "").replace("-", "")
-    # Allow leading 2x for back-to-back built-ups
-    bare = lab[2:] if lab.startswith("2X") else lab
+    parsed = parse_nx_pack(name)
+    bare = parsed.get("bare") or ""
+    n_ply = int(parsed.get("n_ply") or 1)
     out: dict[str, Any] = {
         "requested": name,
         "label": bare or None,
         "found": False,
         "in_catalog": False,
-        "built_up": lab.startswith("2X"),
+        "built_up": bool(parsed.get("is_built_up")),
+        "n_ply": n_ply,
+        "is_nx_pack": bool(parsed.get("is_nx_pack")),
         "source": "is811_shapes.csv",
     }
     if not bare:
@@ -74,9 +114,13 @@ def resolve_is811_label(name: str) -> dict[str, Any]:
         out["note"] = str(ex)
         out["looks_is811"] = True
         return out
+
+    # Bare label is in catalog
+    base_note = (
+        "IS 811 catalog hit (is811_shapes.csv). Verify OCR/QFM Ix when noisy "
+        "(see india_is811_retrieval.ix_qfm_correction_status)."
+    )
     out.update(
-        found=True,
-        in_catalog=True,
         label=props.get("label") or bare,
         type=props.get("Type"),
         table=props.get("Table"),
@@ -88,8 +132,38 @@ def resolve_is811_label(name: str) -> dict[str, Any]:
         Ix_mm4=props.get("Ix"),
         Ix_si_cm4=props.get("Ix_si_cm4"),
         depth=props.get("depth", props.get("d")),
-        note="IS 811 catalog hit (is811_shapes.csv). Verify OCR/QFM Ix when noisy "
-             "(see india_is811_retrieval.ix_qfm_correction_status).",
+    )
+
+    if n_ply == 1:
+        out.update(found=True, in_catalog=True, note=base_note)
+        return out
+
+    if n_ply == 2:
+        # Conventional back-to-back built-up — bare stocked; interconnection is agent/IS 801 item
+        out.update(
+            found=True,
+            in_catalog=True,
+            built_up_label="2x%s" % (props.get("label") or bare),
+            note=base_note + (
+                " Built-up 2x (back-to-back): stocked single ply resolved; "
+                "interconnection / built-up rules are agent+IS 801 (not invented here)."
+            ),
+        )
+        return out
+
+    # N>2 pack: bare exists but Nx is NOT a stocked catalog designation
+    out.update(
+        found=False,
+        in_catalog=False,  # the Nx pack itself is not a catalog row
+        bare_in_catalog=True,
+        bare_label=props.get("label") or bare,
+        note=(
+            "Nx pack %r (n_ply=%d) is NOT a stocked IS 811 designation (found:false). "
+            "Bare ply %s is in is811_shapes.csv — listed as nearest-candidate aid only. "
+            "Prefer single stocked CLR/CLS/… or conventional 2x built-up; engineered "
+            "multi-ply packs need EOR/constructibility disclosure (do not invent Nx capacity)."
+            % (name, n_ply, props.get("label") or bare)
+        ),
     )
     return out
 
@@ -242,6 +316,111 @@ def prefer_practical_is811(
     )
 
 
+def prefer_portal_stock_or_built_up(
+    requested: str | None = None,
+    *,
+    h_mm: float | None = None,
+    b_mm: float | None = None,
+    t_mm: float | None = None,
+    jurisdiction: str | None = "india",
+    max_candidates: int = 8,
+) -> dict[str, Any]:
+    """Portal / Nx pack path (Ex5/Ex15): prefer stocked IS 811 or 2x built-up.
+
+    - Exact single / 2x catalog → found:true
+    - Nx (N>2) even if bare stocked → found:false + nearest single/2x candidates
+    - Missing → found:false with nearest-candidate aid only (no invented label)
+    """
+    if jurisdiction is not None and not _india_jurisdiction(jurisdiction):
+        return dict(
+            found=False,
+            jurisdiction=jurisdiction,
+            note="prefer_portal_stock_or_built_up is an India helper.",
+        )
+
+    parsed = parse_nx_pack(requested) if requested else dict(n_ply=1, bare=None, is_nx_pack=False)
+    n_ply = int(parsed.get("n_ply") or 1)
+    bare = parsed.get("bare")
+
+    # Exact / 2x path via resolve
+    if requested:
+        hit = resolve_is811_label(requested)
+        if hit.get("found"):
+            hit = dict(hit)
+            hit["selection"] = "exact" if n_ply == 1 else "built_up_2x"
+            hit["role"] = "portal"
+            return hit
+
+        # Nx pack with bare in catalog → found:false but attach nearest aid
+        if hit.get("is_nx_pack") and hit.get("bare_in_catalog"):
+            dims = dict(
+                h_mm=h_mm if h_mm is not None else hit.get("h_mm"),
+                b_mm=b_mm if b_mm is not None else hit.get("b_mm"),
+                t_mm=t_mm if t_mm is not None else hit.get("t_mm"),
+            )
+            nearest = prefer_practical_is811(
+                hit.get("bare_label") or bare,
+                h_mm=dims.get("h_mm"),
+                b_mm=dims.get("b_mm"),
+                t_mm=dims.get("t_mm"),
+                role="portal",
+                jurisdiction="india",
+                max_candidates=max_candidates,
+            )
+            # Also propose conventional 2x of the bare label
+            built = None
+            if hit.get("bare_label") or bare:
+                bl = hit.get("bare_label") or bare
+                built = dict(
+                    label="2x%s" % bl,
+                    n_ply=2,
+                    bare=bl,
+                    note="Conventional 2x built-up of stocked ply (interconnection agent/IS 801).",
+                )
+            cands = list(nearest.get("candidates") or [])
+            if built:
+                cands = [built] + [c for c in cands if c.get("label") != bl]
+            return dict(
+                found=False,
+                requested=requested,
+                selection=None,
+                role="portal",
+                is_nx_pack=True,
+                n_ply=n_ply,
+                bare_label=hit.get("bare_label") or bare,
+                bare_in_catalog=True,
+                h_mm=hit.get("h_mm"),
+                b_mm=hit.get("b_mm"),
+                t_mm=hit.get("t_mm"),
+                candidates=cands[:max_candidates],
+                nearest_stocked=nearest if nearest.get("found") else None,
+                built_up_candidate=built,
+                note=hit.get("note"),
+                source="is811_shapes.csv",
+            )
+
+    # Dimensional / unknown — fall through to practical nearest among portal types
+    pref = prefer_practical_is811(
+        requested if requested and n_ply == 1 else (bare or requested),
+        h_mm=h_mm,
+        b_mm=b_mm,
+        t_mm=t_mm,
+        role="portal",
+        jurisdiction="india",
+        max_candidates=max_candidates,
+    )
+    if pref.get("found") and pref.get("label"):
+        # Offer 2x companion as optional built-up aid
+        pref = dict(pref)
+        pref["built_up_candidate"] = dict(
+            label="2x%s" % pref["label"],
+            n_ply=2,
+            bare=pref["label"],
+            note="Optional 2x built-up of nearest stocked ply.",
+        )
+    return pref
+
+
 def section_selection_for_cfg(cfg: dict | None) -> dict[str, Any]:
     """Summarize practical section status for portal/wall cfg (col/raf/stud slots)."""
     cfg = cfg or {}
@@ -254,11 +433,20 @@ def section_selection_for_cfg(cfg: dict | None) -> dict[str, Any]:
             continue
         name = cfg[key]
         role = "portal" if key in ("col_section", "raf_section") else "stud"
+        if role == "portal":
+            dims = cfg.get("section_target_mm") or cfg.get("%s_target_mm" % key) or {}
+            slots[key] = prefer_portal_stock_or_built_up(
+                name,
+                h_mm=dims.get("h_mm") if isinstance(dims, dict) else None,
+                b_mm=dims.get("b_mm") if isinstance(dims, dict) else None,
+                t_mm=dims.get("t_mm") if isinstance(dims, dict) else None,
+                jurisdiction="india",
+            )
+            continue
         hit = resolve_is811_label(name)
         if hit.get("found"):
             slots[key] = dict(hit, selection="exact", role=role)
         else:
-            # Try dims from cfg if present
             dims = cfg.get("section_target_mm") or cfg.get("%s_target_mm" % key) or {}
             pref = prefer_practical_is811(
                 name,
@@ -281,7 +469,8 @@ def section_selection_for_cfg(cfg: dict | None) -> dict[str, Any]:
             "All India framing slots resolve to IS 811 catalog labels."
             if any_found and not missing else
             ("Practical IS 811 selection incomplete for %s — found:false on those slots; "
-             "prefer stocked CLR/CLS/… from is811_shapes.csv (do not invent)."
+             "prefer stocked CLR/CLS/… or 2x built-up from is811_shapes.csv "
+             "(Nx packs N>2 are not stock — candidates listed as aid only)."
              % (missing or "no section keys"))
         ),
     )
