@@ -1,0 +1,33 @@
+{
+  "_label": "EXAMPLE / not-for-construction",
+  "_purpose": "CI / COMPLETE-gate exercise for IN_CFS_Ex13 — manufacturer vn + EOR-documented R. Do NOT treat values as project law or IS 801/1893 table lookups.",
+  "_building": "IN_CFS_Ex13_TypeII_perforated_4levels_Lucknow",
+  "_disclaimer": "EXAMPLE only. Real jobs require LIVE RAG for IS 875/1893 load_plan and project-specific manufacturer/test vn + EOR R cite. Never auto-fill R from IS 800.",
+  "system": "wsp_perforated_typeII",
+  "jurisdiction": "india",
+  "units": "N-mm",
+  "R": 2.5,
+  "R_source": "eor_documented",
+  "R_cite": "EXAMPLE EOR memo: CFS WSP Type II perforated SFRS absent from IS 1893 Part 1 Table 9 (found:false); project adopts R=2.5 with EOR concurrence — NOT an IS 800 OMRF proxy.",
+  "R_cfs_table9_found": false,
+  "wall_vn_plf_asd": 420.0,
+  "wall_vn_source": "manufacturer",
+  "wall_vn_cite": "EXAMPLE Acme CFS WSP Table B perforated — 12 mm OSB, adjusted Ca for ~60% full-height sheathing (not-for-construction; show adjustment calc)",
+  "wall_vn_found": true,
+  "seis": {
+    "R": 2.5,
+    "R_source": "eor_documented",
+    "R_cite": "EXAMPLE EOR memo (see top-level R_cite)",
+    "R_cfs_table9_found": false,
+    "Cd": 1.0,
+    "Ie": 1.0,
+    "Om0_found": false,
+    "Om0_note": "S400 Ω0 N/A under IS 801 (found:false) — do not invent."
+  },
+  "notes": {
+    "amd1": "IS_811_1987_Amd1_2011 property deltas found:false when empty — does not alone block COMPLETE",
+    "s400_omega0": "found:false / N/A — does not alone block COMPLETE",
+    "table9": "CFS WSP Type II perforated / light-gauge R row found:false in LIVE RAG",
+    "typeII": "Hold-downs at wall-line ends only; distributed track anchorage — EXAMPLE practice note under IS 801"
+  }
+}

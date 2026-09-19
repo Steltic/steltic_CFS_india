@@ -1,0 +1,35 @@
+{
+  "_label": "EXAMPLE / not-for-construction",
+  "_purpose": "CI / COMPLETE-gate exercise for IN_CFS_Ex11 — manufacturer vn + EOR-documented R. Do NOT treat values as project law or IS 801/1893 table lookups.",
+  "_building": "IN_CFS_Ex11_Gypsum_3levels_coastal_Vizag",
+  "_disclaimer": "EXAMPLE only. Real jobs require LIVE RAG for IS 875/1893 load_plan and project-specific manufacturer/test vn + EOR R cite. Never auto-fill R from IS 800.",
+  "system": "gypsum_shearwall",
+  "jurisdiction": "india",
+  "units": "N-mm",
+  "R": 2.5,
+  "R_source": "eor_documented",
+  "R_cite": "EXAMPLE EOR memo: CFS gypsum-board SFRS absent from IS 1893 Part 1 Table 9 (found:false); project adopts R=2.5 with EOR concurrence — NOT an IS 800 OMRF proxy.",
+  "R_cfs_table9_found": false,
+  "wall_vn_plf_asd": 180.0,
+  "wall_vn_source": "manufacturer",
+  "wall_vn_cite": "EXAMPLE Acme CFS Gypsum Table G — 12.5 mm gypsum both faces, #6@150 mm o.c. (not-for-construction; upgrade lines to WSP per wind check)",
+  "wall_vn_found": true,
+  "seis": {
+    "R": 2.5,
+    "R_source": "eor_documented",
+    "R_cite": "EXAMPLE EOR memo (see top-level R_cite)",
+    "R_cfs_table9_found": false,
+    "Cd": 1.0,
+    "Ie": 1.0,
+    "Om0_found": false,
+    "Om0_note": "S400 Ω0 N/A under IS 801 (found:false) — do not invent."
+  },
+  "notes": {
+    "amd1": "IS_811_1987_Amd1_2011 property deltas found:false when empty — does not alone block COMPLETE",
+    "s400_omega0": "found:false / N/A — does not alone block COMPLETE",
+    "table9": "CFS gypsum-board / light-gauge R row found:false in LIVE RAG",
+    "coastal": "Galvanized/stainless fasteners — EXAMPLE corrosion note only",
+    "wsp_upgrade_vn_plf_asd": 520.0,
+    "wsp_upgrade_note": "EXAMPLE WSP vn if agent upgrades exterior lines under wind"
+  }
+}

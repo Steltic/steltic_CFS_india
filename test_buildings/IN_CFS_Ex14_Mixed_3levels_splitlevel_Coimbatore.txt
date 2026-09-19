@@ -1,0 +1,20 @@
+IN_CFS_Ex14 — Mixed LFRS CFS medical office, split-level site, Coimbatore (India)
+
+Location: Coimbatore. Seismic: RETRIEVE Z, I, R, spectrum from IS 1893 Part 1:2016 (do not invent).
+Soil: retrieve from IS 1893. Wind: RETRIEVE IS 875 Part 3:2015 and compare to EQ.
+
+Geometry:
+- Split-level: 3 storeys uphill face / 4 storeys downhill walkout; plan ~37 m × 21 m
+- Grade drop ~3.0 m N→S; south half walkout lower level; Level-1 diaphragm over south half only
+- MIXED BY DIRECTION: E-W = flat-strap X-braced walls; N-S = WSP-sheathed CFS shear walls
+- Different R each direction if Table 9 / EOR allows — shared chords/diaphragm/foundations see both
+- Stepped-base end walls; mid-split LFRS line at top of walkout north wall
+
+Gravity (RETRIEVE IS 875 Part 1 / Part 2 — do not invent):
+- Outpatient clinic / exam / corridor live; imaging-suite heavy zone if applicable
+- Snow N/A for Coimbatore (found:false / N/A)
+
+Design: IS 801:1975 + IS 811. Do NOT cite AISI S100/S240/S400.
+Wall vn (N-S WSP) + strap Tn (E-W) from manufacturer/EOR EXAMPLE. R: eor_documented per
+direction if CFS rows absent from Table 9 — never IS 800 OMRF proxy.
+Deliverable: report.html + viewer_3d.html. Fill cfg['load_plan'] from LIVE RAG before pipeline.
