@@ -454,6 +454,7 @@ def build_portal_package(name, cfg, res):
     pkg = dict(building=name, code="IS 801:1975 + IS 811:1987 -- India CFS; loads via load_plan",
                kind="cfs_portal", system="portal frame",
                structure_kind=res["structure_kind"], combos_note=COMBOS_NOTE,
+               india_combo_path=res.get("india_combo_path"),
                sections=res["sections"], members=[], connections=[], anchorage=[],
                schedules=[], drift_table=[],
                preflight_warnings=res.get("preflight_warnings", []),
