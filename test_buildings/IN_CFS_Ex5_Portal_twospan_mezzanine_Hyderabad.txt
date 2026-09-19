@@ -1,0 +1,16 @@
+IN_CFS_Ex5 — Two-span CFS portal warehouse + mezzanine, Hyderabad (India)
+
+Location: Hyderabad. Wind and seismic both matter — RETRIEVE IS 875 Part 3:2015 (Vb, terrain,
+Cp) and IS 1893 Part 1 Zone / spectrum; prove neither is skipped.
+
+Geometry: two-span portal ~2 × 12 m clear × 7 m eave; CFS channel rafters/columns (IS 811);
+mezzanine at 3.5 m over one end bay (~8 m deep). Snow N/A for Hyderabad (state found:false /
+N/A honestly).
+
+Loads: dead/imposed from IS 875 Parts 1–2 (roof + mezzanine floor); wind and EQ story forces
+in load_plan.story_forces from LIVE RAG.
+
+Design: IS 801:1975 member checks + IS 811 section properties. Wall vn N/A (portal). R: if CFS
+portal SFRS absent from IS 1893 Table 9 (found:false), use eor_documented R with explicit
+cite — never IS 800 OMRF proxy.
+Deliverable: report.html + viewer_3d.html. Fill cfg['load_plan'] before pipeline.
