@@ -198,6 +198,23 @@ def gross_props(name_or_geom, r_in=None):
                 out.setdefault("Fy", 250.0 if _us == "N-mm" else 36.0)
                 out.setdefault("x0", 0.0)
                 out.setdefault("xbar", 0.0)
+                # frame_section / portal path: d → depth (+ flange/t aliases)
+                if out.get("depth") is None and out.get("d") is not None:
+                    out["depth"] = out["d"]
+                if out.get("flange") is None and out.get("bf") is not None:
+                    out["flange"] = out["bf"]
+                if out.get("t") is None:
+                    t_alias = out.get("tw") or out.get("tf") or out.get("t_mm")
+                    if t_alias is not None:
+                        out["t"] = t_alias
+                out.setdefault("lip", 0.0)
+                # J / Cw as available — never invent from SFIA twin
+                if out.get("J") is None:
+                    out["J"] = None
+                    out["_J_found"] = False
+                if out.get("Cw") is None:
+                    out["Cw"] = None
+                    out["_Cw_found"] = False
                 out["_source"] = "IS_811_1987"
                 return out
         except KeyError:
@@ -255,10 +272,15 @@ def built_up_back_to_back(name):
     remain the agent's design item."""
     p = gross_props(name)
     A = 2 * p["A"]; Ix = 2 * p["Ix"]
-    Iy = 2 * (p["Iy"] + p["A"] * p["xbar"] ** 2)     # webs back-to-back at the joint plane
+    Iy = 2 * (p["Iy"] + p["A"] * (p.get("xbar") or 0.0) ** 2)  # webs back-to-back at joint plane
+    depth = p.get("depth", p.get("d"))
+    J = None if p.get("J") is None else 2 * p["J"]
+    Cw = None if p.get("Cw") is None else 2 * p["Cw"]
     return dict(A=A, Ix=Ix, Iy=Iy, rx=math.sqrt(Ix / A), ry=math.sqrt(Iy / A),
-                J=2 * p["J"], Cw=2 * p["Cw"], t=p["t"], depth=p["depth"],
-                flange=p["flange"], lip=p["lip"], Fy=p["Fy"], base=name, built_up="back-to-back")
+                J=J, Cw=Cw, t=p.get("t"), depth=depth,
+                flange=p.get("flange", p.get("bf")), lip=p.get("lip", 0.0),
+                Fy=p["Fy"], base=name, built_up="back-to-back",
+                _J_found=J is not None, _Cw_found=Cw is not None)
 
 
 # ---------------- S100 Effective Width Method (App. 1) ----------------

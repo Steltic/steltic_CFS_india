@@ -6,7 +6,9 @@ C1 — No silent provisional 700 plf ASD wall shear default.
      (IS 801 cl.9 / cl.9.1.4 messaging).
 
 C2 — No silent IS 800 OMRF R=3.0 proxy when CFS is missing from IS 1893 Table 9.
-     Require explicit cfg['R'] (or seis['R']) + R_source. Preflight ERROR if the
+     Require explicit cfg['R'] (or seis['R']) + R_source + R_cite. Allowlisted
+     sources include eor_documented / explicit / is1893_table9 (NOT proxy/
+     is800_omrf). Never auto-fill R from IS 800. Preflight ERROR if the
      silent-proxy path would have been used.
 
 C6 — Hard-ban IS_800_2007 on CFS India jobs except allowlisted purposes
@@ -42,7 +44,8 @@ R_PROXY_SOURCES = frozenset({
 })
 R_OK_SOURCES = frozenset({
     "is1893_table9", "is_1893_table9", "table9", "is1893", "rag",
-    "explicit", "eor_explicit", "documented", "manufacturer_sfrs",
+    "explicit", "eor_explicit", "documented", "eor_documented", "eor",
+    "manufacturer_sfrs",
 })
 
 IS801_VN_MSG = (
@@ -210,21 +213,23 @@ def validate_R(cfg) -> list:
                     "silent IS 800 / Table 9 steel OMRF R=3.0 proxy would have been used (C2). "
                     "RAG-query IS 1893 Table 9 for the CFS SFRS row; if CFS is absent set "
                     "R_cfs_table9_found=false and an EXPLICIT EOR R with R_source="
-                    "'explicit'|'documented' (not 'proxy'). Do not invent OMRF R=3 silently."))
+                    "'eor_documented'|'explicit'|'documented' (not 'proxy'/'is800_omrf'). "
+                    "Never auto-fill R from IS 800. Do not invent OMRF R=3 silently."))
         return out
 
     if src in R_PROXY_SOURCES or "proxy" in src or "omrf" in src:
         # Disclosed proxy: preflight WARN (not the silent failure mode). C7 still refuses COMPLETE.
-        # Preferred: R_source='explicit' + R_cfs_table9_found=false + R_cite (no "proxy" label).
+        # Preferred: R_source='eor_documented'|'explicit' + R_cfs_table9_found=false + R_cite
+        # (no "proxy"/"is800_omrf"; never auto-fill from IS 800).
         out.append(("WARN",
                     "R_source=%r is an OMRF/proxy path (C2/C7). Job MUST stay PARTIAL — "
-                    "complete_allowed=false. Prefer R_source='explicit'|'documented' with "
-                    "R_cfs_table9_found=false when Table 9 has no CFS row; do not silently "
-                    "default to IS 800 OMRF R=3.0." % (info["source"],)))
+                    "complete_allowed=false. Prefer R_source='eor_documented'|'explicit'|'documented' "
+                    "with R_cfs_table9_found=false when Table 9 has no CFS row; never auto-fill "
+                    "from IS 800; do not silently default to IS 800 OMRF R=3.0." % (info["source"],)))
 
     if src not in R_OK_SOURCES and src not in ("eor", "user", "brief"):
         out.append(("WARN",
-                    "R_source=%r unusual — prefer is1893_table9 / explicit / documented"
+                    "R_source=%r unusual — prefer is1893_table9 / eor_documented / explicit / documented"
                     % (info["source"],)))
 
     # When CFS Table 9 row is known-missing, require found:false disclosure + cite.
@@ -235,8 +240,9 @@ def validate_R(cfg) -> list:
                         "for cfg R (found:false for CFS row in IS 1893 Table 9)."))
         out.append(("WARN",
                     "CFS SFRS row missing from IS 1893 Table 9 (found:false). "
-                    "R_source must stay non-proxy (explicit/documented). C7 still refuses "
-                    "COMPLETE if R_source is proxy OR wall vn is provisional."))
+                    "R_source must stay non-proxy (eor_documented/explicit/documented). C7 still refuses "
+                    "COMPLETE if R_source is proxy OR wall vn is provisional. Amd1 found:false alone "
+                    "does not block COMPLETE."))
 
     return out
 
@@ -291,12 +297,16 @@ def R_is_proxy(cfg, pkg=None) -> bool:
 
 
 def complete_allowed(cfg, pkg=None) -> tuple:
-    """C7: (ok, reasons). Refuse COMPLETE if vn provisional OR R proxy."""
+    """C7: (ok, reasons). Refuse COMPLETE if vn provisional OR R proxy.
+
+    Amd1 empty (IS_811_1987_Amd1_2011 found:false) and S400 Ω0 N/A (found:false)
+    must NOT alone block COMPLETE — those are honest gaps, not C7 refusals.
+    """
     reasons = []
     if vn_is_provisional(cfg, pkg):
         reasons.append("wall vn source is provisional (C7) — manufacturer/test vn required for COMPLETE")
     if R_is_proxy(cfg, pkg):
-        reasons.append("R source is proxy / silent OMRF (C7) — IS 1893 Table 9 CFS R or EOR-documented non-proxy R required for COMPLETE")
+        reasons.append("R source is proxy / silent OMRF (C7) — IS 1893 Table 9 CFS R or R_source='eor_documented' (non-proxy) required for COMPLETE")
     # Also refuse if wall vn / R gates still ERROR
     for sev, msg in validate_wall_vn(cfg or {}) + validate_R(cfg or {}):
         if sev == "ERROR":
@@ -310,6 +320,15 @@ def complete_allowed(cfg, pkg=None) -> tuple:
             uniq.append(r)
     return (len(uniq) == 0, uniq)
 
+
+def amd1_gap_blocks_complete(cfg=None, pkg=None) -> bool:
+    """Amd1 empty / found:false must never alone refuse COMPLETE (C5 honesty)."""
+    return False
+
+
+def s400_omega0_blocks_complete(cfg=None, pkg=None) -> bool:
+    """S400 Ω0 capacity-design is N/A under IS 801 — found:false does not block COMPLETE."""
+    return False
 
 def design_status(cfg, pkg=None) -> dict:
     """Admin-facing label helper: complete | partial | blocked."""

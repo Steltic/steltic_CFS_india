@@ -155,7 +155,12 @@ INDIA_SEISMIC_NOTES = {
     "no_Cd_Ie_amplification": True,
     "s400_omega_capacity_design": {
         "found": False,
-        "note": "IS 801 has no S400 Ω0 / expected-strength capacity-design stack for CFS walls.",
+        "Omega0_found": False,
+        "note": (
+            "IS 801 has no AISI S400 Ω0 / expected-strength capacity-design stack for CFS walls "
+            "(N/A under India CFS). Keep found:false; size HD/chord to load_plan envelope "
+            "± optional user Ω. S400 Ω0 found:false alone must not block COMPLETE."
+        ),
     },
     "systems_table_R_Cd_Om0": {
         "found": False,
