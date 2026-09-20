@@ -27,3 +27,15 @@
 ## Remaining kip islands
 
 See `india_units.KIP_ISLANDS`. USA archetype CFGs and AISC shape CSV fallbacks remain inch; India briefs do not use them.
+
+
+## CFS package (WP3, 2026-09-20)
+
+| Layer | Units | Note |
+|---|---|---|
+| cfg (brief-facing) | m, kN/m², m/s, mm for member dimensions | `cfg['units'] = 'm'`, `jurisdiction = 'india'`; no feet / psf / kip |
+| IS 811 catalogue (`is811_sections`) | mm, mm², mm⁴, mm⁶, kg/m | SI-native from the corpus structured table; E 203 400 MPa, G 77 970 MPa (= IS 801 kgf/cm² values × 0.0980665) |
+| IS 801 checks (`is801_members`) | internal kgf/cm², cm, kgf (the code's own constants: E 2 074 000, G 795 000 kgf/cm²) | every public function takes / returns SI (MPa, mm, N, N-mm) and records the kgf/cm² values used |
+| Hot-rolled lateral frame (`hr_vendor`) | N-mm (vendored India HR engine) | forces to the CFS package in kN via `india_cfs_lateral` |
+| All-CFS portal (`india_cfs_portal`) | N-mm | pressures kN/m² → N/mm² at the frame tributary; results reported kN / mm |
+| Report (`report_cfs_india._set_report_units`) | kN, m, mm, MPa, kN/m (diaphragm) | no US units anywhere (consistency check greps) |

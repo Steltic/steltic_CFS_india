@@ -1,5 +1,11 @@
 # Build-your-own engineering-standards RAG
 
+> **India programme (D3, 2026-09-20):** the CFS agent queries the India corpus only — `engineering_standards_IS801`,
+> `_IS811`, `_IS811_Amd1`, `_IS875_P1`…`_IS875_P5`, `_IS1893`, and `_IS800` / `_IS18168` gated by purpose
+> (`steltic/india_collections.py`). The US collections and worked-example recipes described below
+> (`cfs_models.jsonl`, `CFS_MODELS_SCOPE.md`, `load_cfs_models.py` targets) are **not ingested** for India and are kept
+> under `rag_v2/usa_reference/`; `cfs_design_examples` / `cfs_opensees_models` are not available to the India agent.
+
 Steltic's agent calls one small HTTP API for standards grounding. Anything that speaks this API
 works — these scripts are the starter kit used to build the hosted Steltic RAG (embedding +
 [Qdrant](https://qdrant.tech/) vector store), for use with **your own licensed copies** of the
