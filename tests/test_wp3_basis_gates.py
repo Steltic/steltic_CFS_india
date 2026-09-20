@@ -48,7 +48,7 @@ def test_capacity_basis_mixing_fails_consistency():
     issues = B.basis_issues(pkg)
     assert any("mixed bases" in x for x in issues)
     pkg2 = {"x": {"capacity": 2.0, "capacity_basis": "manufacturer_ASD", "allowable_increase": 1.333, "demand_level": "working"}}
-    assert any("only IS 801 allowables" in x for x in B.basis_issues(pkg2))
+    assert any("none otherwise" in x and "manufacturer_ASD" in x for x in B.basis_issues(pkg2))
     with pytest.raises(B.BasisError):
         B.capacity_slot(1.0, basis="AISI_LRFD")
 

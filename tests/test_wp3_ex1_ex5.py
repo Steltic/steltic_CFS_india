@@ -79,7 +79,7 @@ def test_ex1_cfs_members_and_basis(ex1):
             if c["combo"].startswith(("DL+1.0W", "DL+IL+1.0W", "0.9DL")) and not c.get("informational")}
     assert incs == {round(4.0 / 3.0, 4)}
     assert all(c["allowable_increase"] == 1.0 for c in joist["checks"] if c["combo"] in ("DL", "DL+IL"))
-    assert all(c["capacity_basis"] in ("IS801_allowable", "test", "EOR_input") for c in stud["checks"])
+    assert all(c["capacity_basis"] in ("IS801_allowable", "test", "EOR_input", "IS800_Table6") for c in stud["checks"])
     assert pkg["diaphragm"] and all(r["ok"] is True for r in pkg["diaphragm"])
     assert not pkg["consistency"]
 

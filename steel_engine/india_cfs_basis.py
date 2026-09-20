@@ -31,8 +31,10 @@ INCREASE_WL_EL = 4.0 / 3.0
 IS875_5_CITE = ("IS 875 (Part 5):1987 cl. 8.1: DL; DL+IL; DL+WL; DL+EL; DL+IL+WL; DL+IL+EL (Note 1 snow replaces IL; "
                 "Notes 4/5: 0.9 DL against overturning / sliding); Note 2: permissible stresses per the design code (WSM)")
 IS801_61_CITE = "IS 801:1975 6.1 F = 0.60 Fy; 6.1.2.1 / 6.1.2.2 stresses 33 1/3 percent greater for wind or earthquake"
-CAPACITY_BASES = ("IS801_allowable", "IS800_LSD", "IS800_WSM", "manufacturer_ASD", "nominal", "test", "EOR_input")
-WORKING_BASES = ("IS801_allowable", "IS800_WSM", "manufacturer_ASD", "test", "EOR_input")
+CAPACITY_BASES = ("IS801_allowable", "IS800_LSD", "IS800_WSM", "IS800_Table6", "manufacturer_ASD", "nominal", "test", "EOR_input")
+WORKING_BASES = ("IS801_allowable", "IS800_WSM", "IS800_Table6", "manufacturer_ASD", "test", "EOR_input")
+# IS800_Table6 = a serviceability deflection / sway LIMIT read from IS 800 Table 6 (purpose serviceability_limits_table6),
+# never a strength capacity
 # allowable_increase permitted per basis: IS 801 6.1.2 (4/3 on W / EL) for cold-formed allowables; IS 800 11.1.4 for the
 # working-stress hot-rolled base details of the all-CFS portal (1.33 members / 1.25 anchor bolts, W / EL with imposed load only)
 INCREASES_BY_BASIS = {"IS801_allowable": (1.0, 4.0 / 3.0), "IS800_WSM": (1.0, 1.25, 1.33)}

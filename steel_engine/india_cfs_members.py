@@ -156,7 +156,7 @@ def design_studs(cfg, storey=None):
                  "ok": (defl <= L / float(crit)) if crit else None,
                  "clause": "IS 801 5.1 (no limit; 'conventional methods'); criterion %s"
                            % (("L/%s: %s" % (crit, st.get("deflection_cite"))) if crit else "not declared"),
-                 "cite": "IS 801 5.1 deflection determination by conventional methods", "capacity_basis": "EOR_input",
+                 "cite": "IS 801 5.1 deflection determination by conventional methods", "capacity_basis": "IS800_Table6",
                  "allowable_increase": 1.0, "source": M.SRC, "informational": not crit})
     extra = {"storey": k, "height_mm": L, "wind": {"pd_kNm2": pd, "z_m": z_top, "Cpe_windward": cpe_w, "Cpe_leeward": cpe_l, "Cpi": cpi,
                                                    "p_design_kNm2": p, "w_N_per_mm": w,
@@ -207,7 +207,7 @@ def design_joists(cfg):
                  "limit": (span / float(crit)) if crit else None, "dc": (defl / (span / float(crit))) if crit else None,
                  "ok": (defl <= span / float(crit)) if crit else None,
                  "clause": "IS 801 5.1 (no limit); criterion %s" % (("L/%s: %s" % (crit, jt.get("deflection_cite"))) if crit else "not declared"),
-                 "cite": "IS 800:2007 Table 6 read-only (serviceability_limits_table6) when cited", "capacity_basis": "EOR_input",
+                 "cite": "IS 800:2007 Table 6 read-only (serviceability_limits_table6) when cited", "capacity_basis": "IS800_Table6",
                  "allowable_increase": 1.0, "source": M.SRC, "informational": not crit})
     extra = {"span_mm": span, "w_dead_N_per_mm": wD, "w_live_N_per_mm": wL, "grade_cite": cite,
              "clauses": ["IS 801 5.2.1.1", "6.1", "6.2", "6.3", "6.4.1", "6.4.3", "6.5", "7.3"]}
@@ -262,7 +262,7 @@ def design_purlins(cfg, role="purlin"):
                  "limit": (span / float(crit)) if crit else None, "dc": (defl / (span / float(crit))) if crit else None,
                  "ok": (defl <= span / float(crit)) if crit else None,
                  "clause": "IS 801 5.1 (no limit); criterion %s" % (("L/%s: %s" % (crit, pu.get("deflection_cite"))) if crit else "not declared"),
-                 "cite": "IS 800:2007 Table 6 read-only when cited", "capacity_basis": "EOR_input", "allowable_increase": 1.0, "source": M.SRC,
+                 "cite": "IS 800:2007 Table 6 read-only when cited", "capacity_basis": "IS800_Table6", "allowable_increase": 1.0, "source": M.SRC,
                  "informational": not crit})
     extra = {"span_mm": span, "loads_N_per_mm": {"dead": wD, "live": wL, "snow": wS, "wind_up": wW_up, "wind_down": wW_dn},
              "grade_cite": cite, "clauses": ["IS 801 5.2.1.1", "6.1", "6.1.2", "6.2", "6.3", "6.4.1", "6.5"]}

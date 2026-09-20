@@ -945,4 +945,8 @@ def run(cfg, root):
     return {"members": members, "connections": conns, "lateral_summary": lateral, "wind_summary": wind, "seismic_summary": lateral["seismic_summary"],
             "combinations": combos_out, "results_by_combo": {cl: {"forces": {l: {k: v for k, v in f.items() if k != "stations"} for l, f in r["forces"].items()},
                                                                   "reactions": r["reactions"], "pdelta": r["pdelta"]} for cl, r in results.items()},
-            "K": {"exterior": K_ext, "interior": K_int, "beta1": b1, "beta2_ext": b2, "beta2_int": b2i}, "statement": STATEMENT}
+            "K": {"exterior": K_ext, "interior": K_int, "beta1": b1, "beta2_ext": b2, "beta2_int": b2i}, "statement": STATEMENT,
+            "frame_geometry": {"units": "mm", "nodes": {str(t): [x, y] for t, (x, y) in fr0.nodes.items()},
+                               "elements": [[str(e[0]), str(e[1]), e[4]] for e in fr0.elems],
+                               "supports": {str(t): v for t, v in fr0.fix.items()},
+                               "spacing_mm": float(po["spacing_m"]) * 1000.0, "n_frames": int(po.get("n_frames") or 1)}}
