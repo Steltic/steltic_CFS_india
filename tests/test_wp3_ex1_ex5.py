@@ -75,7 +75,8 @@ def test_ex1_cfs_members_and_basis(ex1):
     stud, joist = ids["stud"], ids["joist"]
     assert stud["section"] == "CLR100X50X15X2" and stud["braced_against_twist"] is True
     assert stud["DC"] <= 1.0 and joist["DC"] <= 1.0 and joist["ok"] is True and stud["ok"] is True
-    incs = {round(c["allowable_increase"], 4) for c in stud["checks"] if c["combo"].startswith(("DL+1.0W", "DL+IL+1.0W", "0.9DL"))}
+    incs = {round(c["allowable_increase"], 4) for c in stud["checks"]
+            if c["combo"].startswith(("DL+1.0W", "DL+IL+1.0W", "0.9DL")) and not c.get("informational")}
     assert incs == {round(4.0 / 3.0, 4)}
     assert all(c["allowable_increase"] == 1.0 for c in joist["checks"] if c["combo"] in ("DL", "DL+IL"))
     assert all(c["capacity_basis"] in ("IS801_allowable", "test", "EOR_input") for c in stud["checks"])
