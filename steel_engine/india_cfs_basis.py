@@ -144,8 +144,8 @@ def validate_load_plan(cfg) -> list:
                 if isinstance(c, dict) and c.get("design_basis") not in (None, LATERAL_FRAME_BASIS):
                     say("ERROR", "combinations[%d] (%s) design_basis %r on the IS 800 frame set (mixed bases)"
                         % (i, c.get("label"), c.get("design_basis")))
-    if not (cfg or {}).get("all_cfs_portal") and plan.get("combinations") == "auto" and cc and not plan.get("story_forces_units"):
-        say("ERROR", "load_plan.story_forces_units ('N' or 'kN') required for the frame story forces (WP1.12)")
+    if plan.get("story_forces") and str(plan.get("story_forces_units") or "").lower() not in ("n", "kn"):
+        say("ERROR", "load_plan.story_forces present without story_forces_units ('N' or 'kN') (WP1.12)")
     return out
 
 

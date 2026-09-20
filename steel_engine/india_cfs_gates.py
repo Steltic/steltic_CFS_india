@@ -1,383 +1,49 @@
-"""India CFS P0/P1 gates: wall vn + R provenance + complete-label + IS 800 ban.
+"""india_cfs_gates.py -- the ONE COMPLETE authority of an India CFS job (spec WP0.2, WP3.5 as re-ruled by D3).
 
-C1 — No silent provisional 700 plf ASD wall shear default.
-     Require cfg['wall_vn_plf_asd'] (or nested wall_vn) with a non-provisional
-     manufacturer/test/IS-table source, OR hard-fail with found:false
-     (IS 801 cl.9 / cl.9.1.4 messaging).
+design_status(cfg, pkg) -> {status: complete | partial | example_only, reasons[], authority}
+complete_allowed(cfg, pkg) -> (bool, reasons)   (kept for steltic/agent.py)
 
-C2 — No silent IS 800 OMRF R=3.0 proxy when CFS is missing from IS 1893 Table 9.
-     Require explicit cfg['R'] (or seis['R']) + R_source + R_cite. Allowlisted
-     sources include eor_documented / explicit / is1893_table9 (NOT proxy/
-     is800_omrf). Never auto-fill R from IS 800. Preflight ERROR if the
-     silent-proxy path would have been used.
+A package is `complete` only when ALL of the following hold:
+  * the hot-rolled lateral frame (vendored HR India pipeline) reached `complete` in its own authority
+    (india_seismic_gates.design_status: IS 1893 7.7.1 method, W = engine mass, Table 9 / IS 18168 system gate,
+    IS 800 member checks D/C <= 1, Section 12 / IS 18168 chain, connections and bases with numeric capacities,
+    drift <= 0.004 h, irregularity screens, IS grounding, no US residue);
+  * every CFS member (studs, joists, purlins, girts, all-CFS portal members) has an IS 801 record with numeric demand
+    and capacity, DC recomputed here as demand / capacity, DC <= 1.0, no `ok is None` outside informational rows;
+  * design_basis is IS801_WSM with the two labelled combination families (india_cfs_basis.validate_load_plan) and
+    no mixed capacity bases (india_cfs_basis.basis_issues);
+  * the diaphragm / collector path is evaluated (a cited product / test capacity for the deck / sheathing) -- or the
+    package is honest about it (found:false blocks COMPLETE);
+  * every anchor / connection of the CFS members has a capacity from geometry + clause or a cited product value;
+  * no cite / label / source matches /example|acme|not.for.construction|placeholder|synthetic/i -> `example_only`;
+  * no capacity is a function of its own demand (consistency grep rules);
+  * no SFIA / AISC designator and no US clause string in the package.
+Nothing is waived: `waived: true` is an ERROR.
 
-C6 — Hard-ban IS_800_2007 on CFS India jobs except allowlisted purposes
-     (sfrs_gap_found_false / document_absence / found_false_log / …).
-     Default refuse silent HR R proxy path (reinforces C2).
-
-C7 — Refuse labeling COMPLETE when vn source is provisional OR R source is proxy.
-     PARTIAL is the correct admin label until both sources are authoritative.
-
-C5 (helper): india_is811_retrieval.seed_is811_retrieval_plan — richer IS 811
-     exact_table/exact_section plans; Amd1 found:false when empty.
-
-load_plan RAG gate (india_loads) remains mandatory and is not replaced here.
+C6 (IS 800 retrieval) is re-ruled by D3: the lateral frame IS an IS 800 Section 12 frame, so IS 800 / IS 18168
+queries are allowed for the purposes `lateral_frame_is800`, `serviceability_limits_table6` (deflection limits, WP3.6),
+`sfrs_gap_found_false`, `document_absence`, `found_false_log`.  IS 800 must still never be used as a capacity source
+for a cold-formed member (IS 801 governs those) and never as an R proxy for a CFS system (there is none, D3).
 """
 from __future__ import annotations
+import re
 
-# --- wall unit shear (vn) -------------------------------------------------
-# Acceptable provenance for ASD allowable unit shear (plf).
-WALL_VN_OK_SOURCES = frozenset({
-    "manufacturer", "test", "tested", "lab", "is801_table", "is801",
-    "documented", "eor_documented", "catalogue", "catalog",
-})
-# Explicitly refused (C1 hard-fail). Includes the Ex1 "provisional 700" pattern.
-WALL_VN_PROVISIONAL = frozenset({
-    "provisional", "assumed", "assumption", "default", "silent", "silent_default",
-    "industry_guess", "placeholder", "todo", "tbd",
-})
+EXAMPLE_RE = re.compile(r"example|acme|not.for.construction|placeholder|synthetic", re.I)
+US_RE = re.compile(r"\b(AISI|S100|S240|S400|ASCE\s*7|ASCE7|AISC\s*3[456][018]|SDPWS|SFIA|FEMA\s*P-?695|LRFD|SDS|SD1|Cd\b|"
+                   r"Omega_?0|\bpsf\b|\bplf\b|\bkip\b|\bksi\b|Risk Category|Table 12\.\d)", re.I)
+SFIA_RE = re.compile(r"^\d{3,4}[SsTtUuFfLl]\d{2,3}-\d{2,3}$")
+DEMAND_CAP_RE = re.compile(r"cap\s*=\s*max\(.*\*\s*1\.(15|25)|DC\"?\s*[:=]\s*0\.8\b|seeded D/C", re.I)
+AUTHORITY = "india_cfs_gates.design_status (CFS) over india_seismic_gates.design_status (vendored HR, lateral frame)"
 
-# --- response reduction R -------------------------------------------------
-R_PROXY_SOURCES = frozenset({
-    "proxy", "omrf_proxy", "is800_omrf", "steel_omrf", "omrf", "silent_proxy",
-    "is_800_omrf", "table9_steel_omrf", "cfs_systems_twin",
-})
-R_OK_SOURCES = frozenset({
-    "is1893_table9", "is_1893_table9", "table9", "is1893", "rag",
-    "explicit", "eor_explicit", "documented", "eor_documented", "eor",
-    "manufacturer_sfrs",
-})
-
-IS801_VN_MSG = (
-    "IS 801:1975 cl.9 / cl.9.1.4 — light-gauge diaphragms/shear walls are outside "
-    "IS 801 tabulated scope (found:false for WSP/steel-sheet vn tables in IS 801/811). "
-    "Set cfg['wall_vn_plf_asd'] from manufacturer/test data with cfg['wall_vn_source'] "
-    "in {manufacturer,test,is801_table,documented} and cfg['wall_vn_cite']. "
-    "Do NOT invent a silent provisional 700 plf ASD default."
-)
-
-
-def _norm(s) -> str:
-    return str(s or "").strip().lower().replace(" ", "_").replace("-", "_")
-
-
-def _wall_systems(cfg) -> bool:
-    sysname = _norm(cfg.get("system") if isinstance(cfg, dict) else "")
-    return any(k in sysname for k in (
-        "wsp_shearwall", "steelsheet", "gypsum_wall", "strap_braced", "shearwall", "shear_wall",
-    )) or bool((cfg or {}).get("lines_x") or (cfg or {}).get("lines_y"))
-
-
-def resolve_wall_vn(cfg) -> dict:
-    """Normalize wall vn from flat or nested cfg keys. Does not invent values."""
-    cfg = cfg or {}
-    nested = cfg.get("wall_vn") if isinstance(cfg.get("wall_vn"), dict) else {}
-    plf = cfg.get("wall_vn_plf_asd")
-    if plf is None:
-        plf = nested.get("plf_asd", nested.get("vn_plf_asd", nested.get("capacity")))
-    source = cfg.get("wall_vn_source") or nested.get("source") or nested.get("vn_source")
-    cite = cfg.get("wall_vn_cite") or nested.get("cite") or nested.get("citation")
-    found = cfg.get("wall_vn_found")
-    if found is None:
-        found = nested.get("found")
-    return {
-        "plf_asd": plf,
-        "source": source,
-        "cite": cite,
-        "found": found,
-        "raw_source": _norm(source),
-    }
-
-
-def resolve_R(cfg) -> dict:
-    """Normalize R + provenance from cfg / seis / load_plan.seismic_summary."""
-    cfg = cfg or {}
-    seis = cfg.get("seis") if isinstance(cfg.get("seis"), dict) else {}
-    plan = cfg.get("load_plan") if isinstance(cfg.get("load_plan"), dict) else {}
-    summ = plan.get("seismic_summary") if isinstance(plan.get("seismic_summary"), dict) else {}
-
-    R = cfg.get("R")
-    if R is None:
-        R = seis.get("R")
-    if R is None:
-        R = summ.get("R")
-
-    source = (cfg.get("R_source") or seis.get("R_source") or summ.get("R_source")
-              or cfg.get("r_source") or summ.get("response_reduction_source"))
-    cite = cfg.get("R_cite") or seis.get("R_cite") or summ.get("R_cite") or summ.get("cite")
-    # Table 9 CFS-row found flag (False = missing CFS system in Table 9)
-    cfs_row = cfg.get("R_cfs_table9_found")
-    if cfs_row is None:
-        cfs_row = seis.get("R_cfs_table9_found")
-    if cfs_row is None:
-        cfs_row = summ.get("R_cfs_table9_found")
-    if cfs_row is None:
-        cfs_row = summ.get("cfs_table9_found")
-
-    return {
-        "R": R,
-        "source": source,
-        "cite": cite,
-        "cfs_table9_found": cfs_row,
-        "raw_source": _norm(source),
-    }
-
-
-def validate_wall_vn(cfg) -> list:
-    """Return (severity, message) findings for C1. ERROR = hard-fail."""
-    out = []
-    if not isinstance(cfg, dict):
-        return [("ERROR", "cfg is not a dict")]
-    if not _wall_systems(cfg):
-        return out  # portals / non-wall: wall vn N/A
-
-    vn = resolve_wall_vn(cfg)
-    plf, src = vn["plf_asd"], vn["raw_source"]
-
-    if plf is None or plf == "":
-        out.append(("ERROR",
-                    "cfg['wall_vn_plf_asd'] missing (found:false). " + IS801_VN_MSG))
-        return out
-
-    try:
-        plf_f = float(plf)
-    except (TypeError, ValueError):
-        out.append(("ERROR",
-                    "cfg['wall_vn_plf_asd']=%r is not numeric — " % (plf,) + IS801_VN_MSG))
-        return out
-
-    if plf_f <= 0:
-        out.append(("ERROR",
-                    "cfg['wall_vn_plf_asd']=%.4g must be > 0 — " % plf_f + IS801_VN_MSG))
-
-    if not src:
-        out.append(("ERROR",
-                    "cfg['wall_vn_source'] missing. Refuse silent provisional defaults. "
-                    + IS801_VN_MSG))
-        return out
-
-    if src in WALL_VN_PROVISIONAL or "provisional" in src:
-        out.append(("ERROR",
-                    "wall_vn_source=%r is provisional — hard-fail (C1). "
-                    "Do not use a silent/provisional 700 plf ASD default. "
-                    "Substitute manufacturer/test vn or leave wall shear found:false. "
-                    % (vn["source"],) + IS801_VN_MSG))
-        return out
-
-    if src not in WALL_VN_OK_SOURCES:
-        out.append(("ERROR",
-                    "wall_vn_source=%r not accepted. Use one of %s with wall_vn_cite. "
-                    % (vn["source"], sorted(WALL_VN_OK_SOURCES)) + IS801_VN_MSG))
-        return out
-
-    if not (vn["cite"] or "").strip():
-        out.append(("ERROR",
-                    "cfg['wall_vn_cite'] required when wall_vn_source=%r "
-                    "(document manufacturer/test/table). " % (vn["source"],) + IS801_VN_MSG))
-
-    if vn["found"] is False and src in WALL_VN_OK_SOURCES:
-        out.append(("WARN",
-                    "wall_vn_found=false with source=%s — confirm cite still grounds capacity"
-                    % vn["source"]))
-
-    return out
-
-
-def validate_R(cfg) -> list:
-    """Return (severity, message) findings for C2. ERROR if silent OMRF proxy would apply."""
-    out = []
-    if not isinstance(cfg, dict):
-        return [("ERROR", "cfg is not a dict")]
-
-    # Always require explicit R on India CFS (seismic block is mandatory in preflight).
-    info = resolve_R(cfg)
-    R, src = info["R"], info["raw_source"]
-
-    if R is None or R == "":
-        out.append(("ERROR",
-                    "cfg['R'] / cfg['seis']['R'] missing. India CFS must set R explicitly "
-                    "from IS 1893 Part 1 Table 9 RAG (or EOR-documented value). "
-                    "Silent IS 800 OMRF R=3.0 proxy is forbidden (C2)."))
-        return out
-
-    try:
-        float(R)
-    except (TypeError, ValueError):
-        out.append(("ERROR", "R=%r is not numeric" % (R,)))
-        return out
-
-    if not src:
-        # The silent-proxy failure mode from IN_CFS_Ex1: seis.R=3.0 with no provenance.
-        out.append(("ERROR",
-                    "cfg['R_source'] (or seis/load_plan.seismic_summary R_source) missing — "
-                    "silent IS 800 / Table 9 steel OMRF R=3.0 proxy would have been used (C2). "
-                    "RAG-query IS 1893 Table 9 for the CFS SFRS row; if CFS is absent set "
-                    "R_cfs_table9_found=false and an EXPLICIT EOR R with R_source="
-                    "'eor_documented'|'explicit'|'documented' (not 'proxy'/'is800_omrf'). "
-                    "Never auto-fill R from IS 800. Do not invent OMRF R=3 silently."))
-        return out
-
-    if src in R_PROXY_SOURCES or "proxy" in src or "omrf" in src:
-        # Disclosed proxy: preflight WARN (not the silent failure mode). C7 still refuses COMPLETE.
-        # Preferred: R_source='eor_documented'|'explicit' + R_cfs_table9_found=false + R_cite
-        # (no "proxy"/"is800_omrf"; never auto-fill from IS 800).
-        out.append(("WARN",
-                    "R_source=%r is an OMRF/proxy path (C2/C7). Job MUST stay PARTIAL — "
-                    "complete_allowed=false. Prefer R_source='eor_documented'|'explicit'|'documented' "
-                    "with R_cfs_table9_found=false when Table 9 has no CFS row; never auto-fill "
-                    "from IS 800; do not silently default to IS 800 OMRF R=3.0." % (info["source"],)))
-
-    if src not in R_OK_SOURCES and src not in ("eor", "user", "brief"):
-        out.append(("WARN",
-                    "R_source=%r unusual — prefer is1893_table9 / eor_documented / explicit / documented"
-                    % (info["source"],)))
-
-    # When CFS Table 9 row is known-missing, require found:false disclosure + cite.
-    if info["cfs_table9_found"] is False:
-        if not (info["cite"] or "").strip():
-            out.append(("ERROR",
-                        "R_cfs_table9_found=false but R_cite missing — disclose the EOR basis "
-                        "for cfg R (found:false for CFS row in IS 1893 Table 9)."))
-        out.append(("WARN",
-                    "CFS SFRS row missing from IS 1893 Table 9 (found:false). "
-                    "R_source must stay non-proxy (eor_documented/explicit/documented). C7 still refuses "
-                    "COMPLETE if R_source is proxy OR wall vn is provisional. Amd1 found:false alone "
-                    "does not block COMPLETE."))
-
-    return out
-
-
-def vn_is_provisional(cfg, pkg=None) -> bool:
-    """True if cfg or package marks wall vn as provisional."""
-    vn = resolve_wall_vn(cfg or {})
-    if vn["raw_source"] in WALL_VN_PROVISIONAL or "provisional" in vn["raw_source"]:
-        return True
-    if not isinstance(pkg, dict):
-        return False
-    notes = pkg.get("design_basis_notes") or {}
-    if "provisional" in _norm(notes.get("wall_shear") or notes.get("wall_vn") or ""):
-        return True
-    if "provisional" in _norm(pkg.get("status_agent") or ""):
-        # only if wall-related
-        sa = _norm(pkg.get("status_agent") or "")
-        if "wall" in sa or "vn" in sa or "shear" in sa:
-            return True
-    for w in pkg.get("wall_lines") or []:
-        if not isinstance(w, dict):
-            continue
-        blob = " ".join(str(w.get(k) or "") for k in
-                        ("limit_state", "capacity_unit", "cited", "vn_source", "source"))
-        if "provisional" in _norm(blob):
-            return True
-        if w.get("found_is801_table") is False and not (cfg or {}).get("wall_vn_plf_asd"):
-            return True
-    return False
-
-
-def R_is_proxy(cfg, pkg=None) -> bool:
-    """True if R provenance is an OMRF/proxy path."""
-    info = resolve_R(cfg or {})
-    src = info["raw_source"]
-    if src in R_PROXY_SOURCES or "proxy" in src or "omrf" in src:
-        return True
-    if not src and info["R"] is not None:
-        # missing source with a numeric R = silent-proxy class
-        return True
-    if not isinstance(pkg, dict):
-        return False
-    notes = pkg.get("design_basis_notes") or {}
-    blob = _norm(notes.get("R_basis") or notes.get("R_source") or "")
-    if "proxy" in blob or "omrf" in blob:
-        return True
-    summ = ((pkg.get("load_plan") or {}).get("seismic_summary")
-            if isinstance(pkg.get("load_plan"), dict) else None) or {}
-    if "proxy" in _norm(summ.get("R_source") or summ.get("note") or ""):
-        return True
-    return False
-
-
-def complete_allowed(cfg, pkg=None) -> tuple:
-    """C7: (ok, reasons). Refuse COMPLETE if vn provisional OR R proxy.
-
-    Amd1 empty (IS_811_1987_Amd1_2011 found:false) and S400 Ω0 N/A (found:false)
-    must NOT alone block COMPLETE — those are honest gaps, not C7 refusals.
-    """
-    reasons = []
-    if vn_is_provisional(cfg, pkg):
-        reasons.append("wall vn source is provisional (C7) — manufacturer/test vn required for COMPLETE")
-    if R_is_proxy(cfg, pkg):
-        reasons.append("R source is proxy / silent OMRF (C7) — IS 1893 Table 9 CFS R or R_source='eor_documented' (non-proxy) required for COMPLETE")
-    # Also refuse if wall vn / R gates still ERROR
-    for sev, msg in validate_wall_vn(cfg or {}) + validate_R(cfg or {}):
-        if sev == "ERROR":
-            reasons.append(msg)
-    # de-dupe while preserving order
-    seen = set()
-    uniq = []
-    for r in reasons:
-        if r not in seen:
-            seen.add(r)
-            uniq.append(r)
-    return (len(uniq) == 0, uniq)
-
-
-def amd1_gap_blocks_complete(cfg=None, pkg=None) -> bool:
-    """Amd1 empty / found:false must never alone refuse COMPLETE (C5 honesty)."""
-    return False
-
-
-def s400_omega0_blocks_complete(cfg=None, pkg=None) -> bool:
-    """S400 Ω0 capacity-design is N/A under IS 801 — found:false does not block COMPLETE."""
-    return False
-
-def design_status(cfg, pkg=None) -> dict:
-    """Admin-facing label helper: complete | partial | blocked."""
-    ok, reasons = complete_allowed(cfg, pkg)
-    if ok:
-        return {"status": "complete", "reasons": [], "admin_notify": "complete"}
-    # If hard preflight ERRORs on vn/R → blocked; else partial
-    hard = [m for s, m in (validate_wall_vn(cfg or {}) + validate_R(cfg or {})) if s == "ERROR"]
-    if hard and not (pkg and (pkg.get("wall_lines") or pkg.get("members"))):
-        return {"status": "blocked", "reasons": reasons or hard, "admin_notify": "partial"}
-    return {"status": "partial", "reasons": reasons, "admin_notify": "partial"}
-
-
-def validate_india_cfs_p0(cfg) -> list:
-    """Combined C1+C2 findings for preflight."""
-    return list(validate_wall_vn(cfg)) + list(validate_R(cfg))
-
-
-# =============================================================================
-# C6 — IS_800_2007 hard-ban / allowlist on CFS India jobs
-# =============================================================================
-# Hot-rolled IS 800 must not be the silent path for CFS R, load combos, or
-# member checks. Allowed only for documented SFRS-gap / absence logging with
-# found:false — never as a silent OMRF R=3 proxy (reinforce C2).
-
-IS800_STEMS = frozenset({
-    "IS_800_2007", "IS_800", "IS800", "IS800_2007", "IS-800", "IS-800-2007",
-})
-IS800_COLLECTION_MARKERS = (
-    "is800", "is_800", "engineering_standards_is800", "engineering_standard_is800",
-)
-
-# purpose= values that MAY touch IS 800 (still must log found:false when used for gap).
+IS800_STEMS = ("IS_800_2007", "IS800", "IS_800", "engineering_standards_IS800", "IS_18168_2023", "IS18168")
 IS800_ALLOWLIST_PURPOSES = frozenset({
-    "sfrs_gap_found_false",
-    "sfrs_gap",
-    "document_absence",
-    "document_absence_check",
-    "found_false_log",
-    "cfs_row_absent_log",
-    "eor_documented_exception",
+    "lateral_frame_is800", "lateral_frame", "section_12", "is800_table4", "serviceability_limits_table6",
+    "sfrs_gap_found_false", "document_absence", "found_false_log", "eor_documented_exception",
 })
-
-IS800_BAN_MSG = (
-    "C6: IS_800_2007 is hard-banned on CFS India jobs except allowlisted purposes "
-    "(sfrs_gap_found_false / document_absence / found_false_log / eor_documented_exception). "
-    "Use IS 801 + IS 811 for CFS design and IS 875/1893 for loads. "
-    "Silent HR OMRF R=3 proxy via IS 800 is forbidden (C2/C6) — set explicit R + R_source."
-)
+IS800_BAN_MSG = ("IS 800 / IS 18168 retrieval on a CFS job is limited to the hot-rolled lateral frame (purpose "
+                 "'lateral_frame_is800'), the IS 800 Table 6 deflection limits ('serviceability_limits_table6') and gap "
+                 "logging. Cold-formed members are designed to IS 801:1975 / IS 811:1987 -- IS 800 is never their "
+                 "capacity source and never an R proxy for a CFS system (decision D3).")
 
 
 def _norm_purpose(p) -> str:
@@ -385,120 +51,214 @@ def _norm_purpose(p) -> str:
 
 
 def is_is800_target(collection: str = "", doc: str = "", stem: str = "") -> bool:
-    """True if the RAG target is hot-rolled IS 800."""
     blob = " ".join(str(x or "") for x in (collection, doc, stem)).strip().lower()
     if not blob:
         return False
     compact = blob.replace("-", "_").replace(" ", "")
-    if any(m in compact for m in ("is_800", "is800")):
-        # Avoid false positive on IS_801 / IS_808 / IS_811
-        if "is_801" in compact or "is801" in compact:
-            return False
-        if "is_808" in compact or "is808" in compact:
-            return False
-        if "is_811" in compact or "is811" in compact:
+    if any(m in compact for m in ("is_800", "is800", "is_18168", "is18168")):
+        if any(x in compact for x in ("is_801", "is801", "is_808", "is808", "is_811", "is811")):
             return False
         return True
-    for s in IS800_STEMS:
-        if s.lower().replace("-", "_") in compact:
-            return True
     return False
 
 
 def is800_purpose_allowed(purpose: str = "") -> bool:
     p = _norm_purpose(purpose)
-    if not p:
-        return False
-    if p in IS800_ALLOWLIST_PURPOSES:
-        return True
-    # substring allow for longer agent prose purposes
-    return any(a in p for a in IS800_ALLOWLIST_PURPOSES)
+    return bool(p) and (p in IS800_ALLOWLIST_PURPOSES or any(a in p for a in IS800_ALLOWLIST_PURPOSES))
 
 
-def gate_is800_query(collection: str = "", doc: str = "", stem: str = "",
-                     purpose: str = "") -> tuple:
-    """Return (allowed: bool, message: str). Refused queries must not hit the RAG."""
+def gate_is800_query(collection: str = "", doc: str = "", stem: str = "", purpose: str = "") -> tuple:
     if not is_is800_target(collection=collection, doc=doc, stem=stem):
         return True, ""
     if is800_purpose_allowed(purpose):
-        return True, (
-            "C6 allowlisted IS 800 purpose=%r — log found:false when documenting a gap; "
-            "do NOT adopt IS 800 OMRF R as a silent CFS proxy." % (purpose,)
-        )
+        return True, "IS 800 / IS 18168 query allowed for purpose=%r (hot-rolled lateral frame / Table 6 / gap log)" % (purpose,)
     return False, IS800_BAN_MSG
 
 
 def is800_refusal_payload(collection: str = "", purpose: str = "", query: str = "") -> dict:
-    """Standard refused-search payload (found:false, no hits)."""
-    return {
-        "results": [],
-        "hits": [],
-        "found": False,
-        "refused": True,
-        "collection": collection or "engineering_standards_IS800",
-        "query": query or "",
-        "purpose": purpose or "",
-        "note": IS800_BAN_MSG,
-        "c6": True,
-    }
+    return {"results": [], "hits": [], "found": False, "refused": True,
+            "collection": collection or "engineering_standards_IS800", "query": query or "", "purpose": purpose or "",
+            "note": IS800_BAN_MSG, "c6": True}
 
 
 def validate_is800_retrieval(cfg_or_plan) -> list:
-    """Scan cfg['load_plan'].retrieval (and optional design_retrieval) for banned IS 800 hits.
-
-    ERROR if an IS 800 stem appears without an allowlisted purpose.
-    """
     out = []
-    if isinstance(cfg_or_plan, dict) and "retrieval" not in cfg_or_plan \
-            and "load_plan" in (cfg_or_plan or {}):
-        plan = cfg_or_plan.get("load_plan") or {}
-        rows = list(plan.get("retrieval") or [])
-        rows += list((cfg_or_plan.get("design_retrieval") or
-                      cfg_or_plan.get("is811_retrieval") or []))
+    if isinstance(cfg_or_plan, dict) and "retrieval" not in cfg_or_plan and "load_plan" in cfg_or_plan:
+        rows = list((cfg_or_plan.get("load_plan") or {}).get("retrieval") or []) + list(cfg_or_plan.get("is811_retrieval") or [])
     elif isinstance(cfg_or_plan, dict):
         rows = list(cfg_or_plan.get("retrieval") or [])
     elif isinstance(cfg_or_plan, list):
         rows = cfg_or_plan
     else:
         return out
-
     for i, hit in enumerate(rows):
         if not isinstance(hit, dict):
             continue
         stem = hit.get("stem") or hit.get("doc") or ""
-        coll = hit.get("collection") or ""
-        purpose = hit.get("purpose") or hit.get("why") or ""
-        ok, msg = gate_is800_query(collection=coll, doc=stem, stem=stem, purpose=purpose)
+        ok, msg = gate_is800_query(collection=hit.get("collection") or "", doc=stem, stem=stem, purpose=hit.get("purpose") or "")
         if not ok:
-            out.append(("ERROR",
-                        "load_plan/design retrieval[%d] targets IS 800 without allowlisted "
-                        "purpose (got purpose=%r). %s" % (i, purpose, msg)))
-        elif is_is800_target(collection=coll, doc=stem, stem=stem):
-            # Allowlisted: still require found:false disclosure for gap logging
-            if hit.get("found") is True and "gap" in _norm_purpose(purpose):
-                out.append(("WARN",
-                            "retrieval[%d] IS 800 allowlisted purpose=%r but found=true — "
-                            "gap logs should usually be found:false" % (i, purpose)))
-            out.append(("WARN",
-                        "retrieval[%d] touches IS 800 under allowlisted purpose=%r (C6) — "
-                        "confirm this is gap documentation, not an HR R proxy"
-                        % (i, purpose)))
+            out.append(("ERROR", "retrieval[%d] targets IS 800 without an allowed purpose (got %r). %s"
+                        % (i, hit.get("purpose"), msg)))
     return out
 
 
-def validate_india_cfs_p1(cfg) -> list:
-    """C6 (+ optional C5 richness WARN when is811_retrieval is present and thin)."""
-    out = list(validate_is800_retrieval(cfg))
-    # Optional C5: if agent attached an is811_retrieval / design_retrieval plan, score it
-    plan = None
-    if isinstance(cfg, dict):
-        plan = cfg.get("is811_retrieval") or cfg.get("design_retrieval")
-    if plan:
-        try:
-            import india_is811_retrieval as R811
-            ok, advice = R811.plan_is_rich_enough(plan)
-            if not ok:
-                out.append(("WARN", advice))
-        except Exception:
-            pass
+# ---------------------------------------------------------------------------------------------------------------
+def _walk_strings(obj, path="pkg"):
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            yield from _walk_strings(v, path + "." + str(k))
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            yield from _walk_strings(v, "%s[%d]" % (path, i))
+    elif isinstance(obj, str):
+        yield path, obj
+
+
+def example_hits(obj) -> list:
+    return [(p, s) for p, s in _walk_strings(obj) if EXAMPLE_RE.search(s) and not p.endswith((".note", ".reason", ".authority"))
+            and "example_only" not in s.lower() and "no us" not in s.lower()]
+
+
+def us_residue_hits(obj) -> list:
+    out = []
+    for p, s in _walk_strings(obj):
+        if p.endswith((".note", ".reason", ".cite", ".authority", ".basis_statement")) and ("no " in s.lower() or "never" in s.lower()):
+            continue
+        m = US_RE.search(s)
+        if m:
+            out.append((p, m.group(0)))
     return out
+
+
+def _dc(entry):
+    v = entry.get("value") if entry.get("value") is not None else entry.get("demand")
+    c = entry.get("limit") if entry.get("limit") is not None else entry.get("capacity")
+    if isinstance(v, (int, float)) and isinstance(c, (int, float)) and c > 0:
+        return abs(v) / c
+    return None
+
+
+def cfs_member_issues(pkg) -> list:
+    """Every CFS member: numeric demand / capacity per check, DC recomputed here, DC <= 1, nothing unevaluated."""
+    reasons = []
+    for m in pkg.get("cfs_members") or []:
+        mid = m.get("id")
+        if m.get("waived"):
+            reasons.append("cfs member %s: waived:true is not permitted (WP0.2)" % mid)
+        checks = m.get("checks") or []
+        if not checks:
+            reasons.append("cfs member %s has no IS 801 checks" % mid)
+        for c in checks:
+            if c.get("informational"):
+                continue
+            if c.get("ok") is None:
+                reasons.append("cfs member %s / %s / %s: not evaluated (found:false / ok None)%s"
+                               % (mid, c.get("combo"), c.get("check"), (": " + c["note"]) if c.get("note") else ""))
+                continue
+            if c.get("capacity_basis") is None:
+                reasons.append("cfs member %s / %s: capacity_basis missing" % (mid, c.get("check")))
+            dc = _dc(c)
+            if dc is None and c.get("dc") is None and c.get("limit") is not None:
+                reasons.append("cfs member %s / %s / %s: no numeric demand / capacity" % (mid, c.get("combo"), c.get("check")))
+            elif dc is not None and dc > 1.0 + 1e-9:
+                reasons.append("cfs member %s / %s / %s: D/C = %.3f > 1.0 (recomputed %s / %s)"
+                               % (mid, c.get("combo"), c.get("check"), dc, c.get("value"), c.get("limit")))
+            elif c.get("ok") is False:
+                reasons.append("cfs member %s / %s / %s: ok:false" % (mid, c.get("combo"), c.get("check")))
+    return reasons
+
+
+def lateral_issues(pkg) -> list:
+    lat = pkg.get("lateral_frame") or {}
+    st = (lat.get("status") or {})
+    if not lat:
+        return ["hot-rolled lateral frame not analysed (lateral_frame missing) -- D3: every CFS building has an IS 800 Section 12 frame"]
+    if lat.get("error"):
+        return ["lateral frame run error: %s" % lat["error"]]
+    if str(st.get("status")).lower() != "complete":
+        return ["lateral frame (HR authority) status %s: %s" % (st.get("status"), r) for r in (st.get("reasons") or [])[:60]] or \
+               ["lateral frame (HR authority) status %s" % st.get("status")]
+    return []
+
+
+def diaphragm_issues(pkg) -> list:
+    out = []
+    for r in pkg.get("diaphragm") or []:
+        if r.get("ok") is None or r.get("found") is False:
+            out.append("diaphragm storey %s %s: capacity not evaluated (%s)" % (r.get("storey"), r.get("dir"), r.get("note") or "found:false"))
+        elif _dc(r) is not None and _dc(r) > 1.0:
+            out.append("diaphragm storey %s %s: D/C %.2f > 1" % (r.get("storey"), r.get("dir"), _dc(r)))
+    return out
+
+
+def anchorage_issues(pkg) -> list:
+    out = []
+    for a in pkg.get("cfs_connections") or []:
+        if a.get("waived"):
+            out.append("connection %s: waived:true is not permitted" % a.get("id")); continue
+        if a.get("ok") is None:
+            out.append("connection %s: not evaluated (%s)" % (a.get("id"), a.get("note") or "found:false")); continue
+        dc = _dc(a) if a.get("dc") is None else a.get("dc")
+        if dc is None:
+            out.append("connection %s: no numeric demand / capacity" % a.get("id"))
+        elif dc > 1.0 + 1e-9:
+            out.append("connection %s: D/C %.3f > 1" % (a.get("id"), dc))
+    return out
+
+
+def design_status(cfg, pkg=None) -> dict:
+    import india_cfs_basis as B
+    pkg = pkg or {}
+    reasons = []
+    ex = example_hits({"cfg": {k: v for k, v in (cfg or {}).items() if k != "load_plan"}, "pkg": pkg,
+                       "retrieval": ((cfg or {}).get("load_plan") or {}).get("retrieval")})
+    status = "partial"
+    if ex:
+        reasons += ["EXAMPLE provenance: %s = %r" % (p, s[:80]) for p, s in ex[:10]]
+        status = "example_only"
+    for sev, msg in B.validate_load_plan(cfg or {}):
+        if sev == "ERROR":
+            reasons.append("load plan: " + msg)
+    reasons += ["basis: " + x for x in B.basis_issues(pkg)]
+    reasons += lateral_issues(pkg)
+    reasons += cfs_member_issues(pkg)
+    reasons += diaphragm_issues(pkg)
+    reasons += anchorage_issues(pkg)
+    for p, s in _walk_strings({"cfg": cfg or {}}):
+        if SFIA_RE.match(s.strip()):
+            reasons.append("SFIA designator %r at %s is not permitted on an India job (use IS 811 labels)" % (s, p))
+    us = us_residue_hits(pkg)
+    if us:
+        reasons += ["US residue in the package: %s (%s)" % (p, m) for p, m in us[:10]]
+    for p, s in _walk_strings(pkg):
+        if DEMAND_CAP_RE.search(s):
+            reasons.append("capacity derived from demand pattern at %s" % p)
+    if pkg.get("report_us_residue"):
+        reasons += ["US residue in the report: %s" % x for x in pkg["report_us_residue"][:10]]
+    if pkg.get("grounding_missing"):
+        reasons += ["report grounding row MISSING: %s" % x for x in pkg["grounding_missing"]]
+    if not reasons:
+        status = "complete"
+    return {"status": status, "reasons": reasons, "n_reasons": len(reasons), "authority": AUTHORITY}
+
+
+def complete_allowed(cfg, pkg=None) -> tuple:
+    st = design_status(cfg, pkg)
+    return st["status"] == "complete", st["reasons"]
+
+
+def validate_india_cfs_p0(cfg) -> list:
+    """Preflight-level CFS gates: basis, SFIA designators, IS 800 purposes, drift limit."""
+    import india_cfs_basis as B
+    out = [("ERROR", m) if s == "ERROR" else (s, m) for s, m in B.validate_load_plan(cfg or {})]
+    out += validate_is800_retrieval(cfg or {})
+    for p, s in _walk_strings({"cfg": {k: v for k, v in (cfg or {}).items() if k != "load_plan"}}):
+        if SFIA_RE.match(s.strip()):
+            out.append(("ERROR", "SFIA designator %r at %s -- India jobs use IS 811 labels (cfg['allow_sfia_twin'] is not honoured)" % (s, p)))
+    dl = (cfg or {}).get("drift_limit")
+    if dl not in (None, "") and float(dl) > 0.004 + 1e-12:
+        out.append(("ERROR", "drift_limit %.4f > 0.004 h (IS 1893 7.11.1.1)" % float(dl)))
+    return out
+
+
+validate_india_cfs_p1 = validate_is800_retrieval
