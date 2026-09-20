@@ -1,0 +1,38 @@
+{
+ "found": true,
+ "query": "Delhi basic wind speed",
+ "type": "fts",
+ "hits": [
+  {
+   "found": true,
+   "kind": "annex_town",
+   "doc": "IS_875_Part_3_2015",
+   "edition": "2015",
+   "section_id": "Annex A",
+   "eq_id": null,
+   "table_id": null,
+   "part": "standard",
+   "pdf_page": 53,
+   "printed_label": "51",
+   "printed_label_qualified": null,
+   "collection": "specification",
+   "corpus": "specification",
+   "authoritative": true,
+   "title": "IS 875 (Part 3) Annex A — basic wind speed at 10 m height for some important cities/towns",
+   "id": "spec-page:IS_875_Part_3_2015:standard:53",
+   "text": "\n\n## ANNEX A\n\n( Clause 6.2)\n\n## BASIC WIND SPEED AT 10 m HEIGHT FOR SOME IMPORTANT CITIES / TOWNS\n\n\n\n\n\n\n| City/Town | Basic wind speed Vb, m/s |\n| --- | --- |\n| Agra | 47 |\n| Ahmedabad | 39 |\n| Ajmer | 47 |\n| Almora | 47 |\n| Amritsar | 47 |\n| Asansol | 47 |\n| Aurangabad | 39 |\n| Bahraich | 47 |\n| Bengaluru | 33 |\n| Barauni | 47 |\n| Bareilly | 47 |\n| Bhatinda | 47 |\n| Bhilai | 39 |\n| Bhopal | 39 |\n| Bhubaneshwar | 50 |\n| Bhuj | 50 |\n| Bikaner | 47 |\n| Bokaro | 47 |\n| Chandigarh | 47 |\n| Chennai | 50 |\n| Coimbatore | 39 |\n| Cuttack | 50 |\n| Darbhanga | 55 |\n| Darjeeling | 47 |\n| Dehradun | 47 |\n| Delhi | 47 |\n| Durgapur | 47 |\n| Gangtok | 47 |\n| Guwahati | 50 |\n| Gaya | 39 |\n| Gorakhpur | 47 |\n| Hyderabad | 44 |\n| Imphal | 47 |\n| Jabalpur | 47 |\n| Jaipur | 47 |\n| Jamshedpur | 47 |\n| Jhansi | 47 |\n| Jodhpur | 47 |\n| Kanpur | 47 |\n| Kohima | 44 |\n| Kolkata | 50 |\n| Kozhikode | 39 |\n| Kurnool | 39 |\n| Lakshadweep | 39 |\n| Lucknow | 47 |\n| Ludhiana | 47 |\n| Madurai | 39 |\n| Mandi | 39 |\n| Mangalore | 39 |\n| Moradabad | 47 |\n| Mumbai | 44 |\n| Mysore | 33 |\n| Nagpur | 44 |\n| Nainital | 47 |\n| Nasik | 39 |\n| Nellore | 50 |\n| Panjim | 39 |\n| Patiala | 47 |\n| Patna | 47 |\n| Puducherry | 50 |\n| Port Blair | 44 |\n| Pune | 39 |\n| Raipur | 39 |\n| Rajkot | 39 |\n| Ranchi | 39 |\n| Roorkee | 39 |\n| Rourkela | 39 |\n| Shimla | 39 |\n| Srinagar | 39 |\n| Surat | 44 |\n| Tiruchirappalli | 47 |\n| Trivandrum | 39 |\n| Udaipur | 47 |\n| Vadodara | 44 |\n| Varanasi | 47 |\n| Vijayawada | 50 |\n| Vishakapatnam | 50 |\n\n(Printed in two column pairs; listed here left column first, then right column. The last right-column entries are two rows: Vijayawada 50 and Vishakapatnam 50.)\n\n\n\n\n\n\n\n",
+   "snippet": "| Delhi | 47 |",
+   "neighbors": [],
+   "score": -100.0,
+   "source_collection": "specification",
+   "file": null,
+   "orig": null,
+   "latex": null,
+   "town_matched": "Delhi"
+  }
+ ],
+ "purpose": null,
+ "want_commentary": false,
+ "qid": null,
+ "cached": false
+}

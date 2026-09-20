@@ -1,0 +1,37 @@
+{
+ "found": true,
+ "query": "2",
+ "type": "exact_table",
+ "hits": [
+  {
+   "found": true,
+   "kind": "table",
+   "doc": "IS_875_Part_2_1987",
+   "edition": "1987",
+   "section_id": "6.1",
+   "eq_id": null,
+   "table_id": "2",
+   "part": "standard",
+   "pdf_page": 16,
+   "printed_label": "14",
+   "printed_label_qualified": null,
+   "collection": "specification",
+   "corpus": "specification",
+   "authoritative": true,
+   "title": "Table 2 IMPOSED LOADS ON VARIOUS TYPES OF ROOFS ( 4.1",
+   "id": "spec-tbl:IS_875_Part_2_1987:standard:2:16:4",
+   "text": "<!-- recovered from PDF p.16 by manual transcription 2026-09-20; verified against page image -->\n\n**TABLE 2 IMPOSED LOADS ON VARIOUS TYPES OF ROOFS** (*Clause* 4.1)\n\n| Sl No. | Type of roof | Uniformly distributed imposed load measured on plan area | Minimum imposed load measured on plan |\n| --- | --- | --- | --- |\n| i) | Flat, sloping or curved roof with slopes up to and including 10 degrees | | |\n| i)(a) | Access provided | 1.5 kN/m2 | 3.75 kN uniformly distributed over any span of one metre width of the roof slab and 9 kN uniformly distributed over the span of any beam or truss or wall |\n| i)(b) | Access not provided except for maintenance | 0.75 kN/m2 | 1.9 kN uniformly distributed over any span of one metre width of the roof slab and 4.5 kN uniformly distributed over the span of any beam or truss or wall |\n| ii) | Sloping roof with slope greater than 10 degrees | For roof membrane sheets or purlins — 0.75 kN/m2 less 0.02 kN/m2 for every degree increase in slope over 10 degrees | Subject to a minimum of 0.4 kN/m2 |\n| iii) | Curved roof with slope of line obtained by joining springing point to the crown with the horizontal, greater than 10 degrees | (0.75 − 0.52 γ2) kN/m2, where γ = h/l; h = the height of the highest point of the structure measured from its springing; and l = chord width of the roof if singly curved and shorter of the two sides if doubly curved. Alternatively, where structural analysis can be carried out for curved roofs of all slopes in a simple manner applying the laws of statistics, the curved roof shall be divided into minimum 6 equal segments and for each segment imposed load shall be calculated appropriate to the slope of the chord of each segment as given in (i) and (ii) above | Subject to a minimum of 0.4 kN/m2 |\n\nNOTE 1 — The loads given above do not include loads due to snow, rain, dust collection, etc. The roof shall be designed for imposed loads given above or for snow/rain load, whichever is greater.\n\nNOTE 2 — For special types of roofs with highly permeable and absorbent material, the contingency of roof material increasing in weight due to absorption of moisture shall be provided for.\n\nCanonical line (transcriber restatement of Table 2 (ii), not standard text): sloping roof, slope α > 10°: w = max(0.75 − 0.02 (α − 10), 0.40) kN/m2 on plan (e.g. α = 20° → 0.55; α ≥ 27.5° → 0.40).\n\n\n\n\n\nalong the line of seats and 0.15 kN per linear metre perpendicular to the line of the seats. These loadings need not be applied simultaneously. Platforms without seats shall be designed to resist a minimum horizontal force of 0.25 kN/m2 of plan area.\n\n**6. LOADING EFFECTS DUE TO IMPACT AND VIBRATION**\n\n**6.0** The crane loads to be considered under imposed loads shall include the vertical loads, eccentricity effects induced by vertical loads, impact factors, lateral and longitudinal braking forces acting across and along the crane rails respectively.\n\n**6.1 Impact Allowance for Lifts, Hoists and Machinery** — The imposed loads specified in 3.1 shall be assumed to include adequate allowance for ordinary impact conditions. However, for structures carrying loads which induce impact or vibration, as far as possible, calculations shall be made for increase in the imposed load, due to impact or vibration. In the absence of sufficient data for *(continued on next page)*\n\n**TABLE 2 IMPOSED LOADS ON VARIOUS TYPES OF ROOFS** (*Clause* 4.1)\n\n| Sl No. | Type of roof | Uniformly distributed imposed load measured on plan area | Minimum imposed load measured on plan |\n| --- | --- | --- | --- |\n| i) | Flat, sloping or curved roof with slopes up to and including 10 degrees | | |\n| i)(a) | Access provided | 1.5 kN/m2 | 3.75 kN uniformly distributed over any span of one metre width of the roof slab and 9 kN uniformly distributed over the span of any beam or truss or wall |\n| i)(b) | Access not provided except for maintenance | 0.75 kN/m2 | 1.9 kN uniformly distributed over any span of one metre width of the roof slab and 4.5 kN uniformly distributed over the span of any beam or truss or wall |\n| ii) | Sloping roof with slope greater than 10 degrees | For roof membrane sheets or purlins — 0.75 kN/m2 less 0.02 kN/m2 for every degree increase in slope over 10 degrees | Subject to a minimum of 0.4 kN/m2 |\n| iii) | Curved roof with slope of line obtained by joining springing point to the crown with the horizontal, greater than 10 degrees | (0.75 − 0.52 γ2) kN/m2, where γ = h/l; h = the height of the highest point of the structure measured from its springing; and l = chord width of the roof if singly curved and shorter of the two sides if doubly curved. Alternatively, where structural analysis can be carried out for curved roofs of all slopes in a simple manner applying the laws of statistics, the curved roof shall be divided into minimum 6 equal segments and for each segment imposed load shall be calculated appropriate to the slope of the chord of each segment as given in (i) and (ii) above | Subject to a minimum of 0.4 kN/m2 |\n\nNOTE 1 — The loads given above do not include loads due to snow, rain, dust collection, etc. The roof shall be designed for imposed loads given above or for snow/rain load, whichever is greater.\n\nNOTE 2 — For special types of roofs with highly permeable and absorbent material, the contingency of roof material increasing in weight due to absorption of moisture shall be provided for.\n\nCanonical line (transcriber restatement of Table 2 (ii), not standard text): sloping roof, slope α > 10°: w = max(0.75 − 0.02 (α − 10), 0.40) kN/m2 on plan (e.g. α = 20° → 0.55; α ≥ 27.5° → 0.40).\n\n\n\n\n\n| Structures                                                                             | Impact Allowance Min   |\n|----------------------------------------------------------------------------------------|------------------------|\n| For frames supporting lifts and hoists                                                 | 100                    |\n| For foundations, footings and piers supporting lifts and hoisting apparatus            | 40 percent             |\n| For supporting structures and foundations for light machinery, shaft or motor units    | 20 percent             |\n| For supporting structures and foundations for reci- procating machinery or power units | 50 percent             |",
+   "snippet": null,
+   "neighbors": [],
+   "score": null,
+   "source_collection": "specification",
+   "file": "documents/standards/IS_875_Part_2_1987/tables/IS_875_Part_2_1987_Table_2_recovered.md",
+   "orig": null,
+   "latex": null
+  }
+ ],
+ "purpose": null,
+ "want_commentary": false,
+ "qid": null,
+ "cached": false
+}

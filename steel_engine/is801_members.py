@@ -560,6 +560,9 @@ def combined_67(sec, Fy_MPa, P_N, Mx_Nmm, KLx_mm, KLy_mm, L_unbraced_mm, cm_case
                               "source": SRC, "found": False,
                               "note": "TODO(verify): 6.7.2 (b) sigma_TF interaction (PDF p.22, OCR unreadable) not implemented; "
                                       "brace the member against twisting (8.1) or load it through the shear centre"}
+    for c in checks.values():
+        c.setdefault("allowable_increase", inc)
+        c.setdefault("capacity_basis", "IS801_allowable")
     dcs = [c["dc"] for c in checks.values() if isinstance(c.get("dc"), (int, float))]
     oks = [c.get("ok") for c in checks.values()]
     out = {"checks": checks, "dc": max(dcs) if dcs else None,

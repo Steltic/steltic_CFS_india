@@ -1,0 +1,97 @@
+{
+ "found": true,
+ "query": "snow load",
+ "type": "fts",
+ "hits": [
+  {
+   "found": true,
+   "kind": "fts",
+   "doc": "IS_875_Part_4_1987",
+   "edition": "2021",
+   "section_id": "6",
+   "eq_id": "",
+   "table_id": "",
+   "part": "standard",
+   "pdf_page": "10",
+   "printed_label": "8",
+   "printed_label_qualified": null,
+   "collection": "specification",
+   "corpus": "specification",
+   "authoritative": true,
+   "title": "ICE LOAD ON WIRES",
+   "id": "spec:IS_875_Part_4_1987:standard:6:10",
+   "text": "6 ICE LOAD ON WIRES\n\n## 6 ICE LOAD ON WIRES\n\n6.1 Ice loads are required to be taken into account in the  design  of  overhead  electrical  transmission  and communication lines, over-head contact lines for electric  traction,  aerial  masts  and  similar  structures in zones subjected to ice formation, The thickness of ice deposit around may be taken to be between 3 and 10 mm depending upon the location of the structure. The mass density of ice may be assumed to the equal to  900  kg/m 3 .  While  considering  the  wind  force  on wires and cables, the increase in diameter due to ice formation shall be taken into consideration.\n\n## ANNEX A\n\n( Foreword and Clause 4.2 )\n\n### CHARACTERISTIC GROUND SNOW LOAD\n\nA-1 This  Annex  presents  the  characteristic  ground snow load computation procedure for the union territory  of  Jammu  and  Kashmir,  union  territory  of Ladakh,  Himachal  Pradesh,  Uttarakhand  and  Sikkim which  is  the  result  of  scientific  work  carried  out  by Defence Geoinformatics Research Establishment (DGRE)  under  Defence  Research  and  Development Organization (DRDO).\n\nA-2 The characteristic value of the ground snow load at any site is defined with a 3.4 percent annual exceedance probability  or,  equivalently,  with  a  mean  recurrence interval, MRI = 30 years. The site altitude is the altitude at which the structure is or will be located, measured from mean sea level. The procedure shall be used for the computation of characteristic ground snow load on sites  with  an  altitude  higher  than  1  000  m  and  lower than 4 000 m from mean sea level.\n\nA-3 The characteristic ground snow load, s 0 kPa to be used for any site in the union territory of Jammu and Kashmir, union territory of Ladakh, Himachal Pradesh, Uttarakhand  should  be  obtained  from  the  zone  map shown in Fig. 1 and equation given below:\n\n$$s _ { _ { 0 } } = 1 . 6 2 4 * [ Z - 0 . 5 ] * \\left [ 1 + \\left ( \\frac { A } { 2 6 7 7 } \\right ) ^ { 2 } \\right ] \\ k P a$$\n\nwhere\n\ns 0 =\t characteristic ground snow load (kPa);\n\nZ =\t zone  number  (for  example  1,  2,  3,  4  or  5) obtained from the zone map in Fig. 1; and\n\nA =\t site altitude (m).\n\nA-4 The  characteristic  ground  snow  load s 0 kPa to  be  used  for  any  site  in  Sikkim  should  be  directly obtained from the characteristic ground snow load map shown in Fig. 2.\n\nA-5 The ground snow loads for any mean recurrence interval of n years, different to that for the characteristic snow  load, s 0 ,  (which  by  definition  is  based  on annual  probability  of  exceedance  of  0.034  that  is MRI = 30 years) shall be calculated by the  equation given below:\n\n$$s _ { _ { n } } = s _ { _ { 0 } } \\left \\{ \\frac { 1 - C _ { _ { v } } \\frac { \\sqrt { 6 } } { \\pi } \\left [ \\ln \\left ( - \\ln \\left ( 1 - P _ { _ { n } } \\right ) \\right ) + 0 . 5 7 7 2 2 \\right ] } { \\left ( 1 + 2 . 1 8 8 7 C _ { _ { v } } \\right ) } \\right \\}$$\n\nwhere\n\n- s 0 is  the characteristic snow load on the ground with MRI = 30 years\n- s n is  the characteristic snow load on the ground with MRI = n years\n- P n is the annual probability of exceedance (equivalent to 1/ n , where n is the corresponding recurrence interval in years)\n- C v is the coefficient of variation of annual maximum snow load.\n\nA-5.1 The coefficient of variation of maximum snow load at different snow-meteorological observatories of DGRE located in union territory of J &amp; K, union territory of Ladakh, HP and UK ranges between 0.35 to 0.65. For application of above equation, a constant value of C v = 0.5 is recommended for all the zones to calculate snow loads on the ground for other probability of  exceedance  (for  example,  MRI  of  50  years  for structures where a higher risk of exceedance is deemed acceptable). The above equation is shown graphically in Fig. 3.\n\nNOTES\n\n1 The characteristic ground snow load versus altitude relation as given above in equation and Fig. 1 is determined based on the snow depth observations at more than 70 field observatories of DGRE located in different parts of union territory of Jammu and Kashmir, union territory of Ladakh and states of Himachal Pradesh and Uttarakhand as well as High Asia Refined analysis (HAR10) dataset (HAR, Maussion et al., 2014).\n\n2 Since adequate snow depth measurements are not available for Sikkim region, hence the characteristic ground snow load map for Sikkim given in Fig. 2 is generated based solely on high asia refined analysis (HAR10) dataset (HAR, Maussion et al., 2014).\n\n3 Annex  A  does  not  apply  for  sites  at  altitudes  above 4 000 m. For altitudes greater than 4 000 m specialist advice should  be  sought  from  DGRE  on  the  characteristic  ground snow loads likely to occur at the site.\n\n4 Unusual  local  effects  have  not  been  accounted  for  in  the analysis undertaken to produce the characteristic ground snow load map given in Annex A. These include local shelter from the wind, which can result in increased local snow loads and local configurations in mountainous areas, which may funnel the snow and give increased local loading. Annex A is also not applicable for sites with permanent snow/ice cover throughout the  year.  If  the  designer  suspects  that  there  are  unusual local conditions that need to be taken into account, Defence Geoinformatics Research (DRDO) may be consulted.\n\n5 In  special  cases  where  more  refined  data  is  needed,  the characteristic value of snow load on the ground ( s 0 )  may be refined  using  an  appropriate  statistical  analysis  of  long  term records taken in a well sheltered area near the site.\n\n6 Ground characteristics snow load at any place depends on the  critical  combination  of  maximum  depth  of  undisturbed aggregate cumulative snowfall and its density. In due course the characteristics snow load for states of Arunachal Pradesh will be included based on studies. Till such time the users of this  standard  are  advised  to  consult  DGRE  for  the  specific information relating to the state of Arunachal Pradesh.\n\nIS 875 (Part 4) : 2021\n\nFig. 1 Zone Map For J &amp; K, Ladakh, HP and UK at 10 k m Resolution\n\nIS 875 (Part 4) : 2021\n\nFig. 2 Characteristic Ground Snow Load Map for Sikkim at 10 km Resolution",
+   "snippet": "...A-4 The  characteristic  ground  >>snow<<  >>load<< s 0 kPa to  be  used  for  any  site  in  Sikkim  should  be  directly obtained from the characteristic ground >>snow<< >>load<< map shown in Fig. 2.\n\nA-5 The ground >>snow<< >>loads<< for...",
+   "neighbors": [
+    {
+     "section_id": "5.3",
+     "title": "Shape Coefficients in Areas Exposed to Wind",
+     "pdf_page": 10,
+     "printed_label": "8",
+     "part": "standard",
+     "text": "\n\n## IS 875 (Part 4) : 2021\n\n## 5.3 Shape Coefficients in Areas Exposed to Wind\n\nThe shape coefficients given in 5.2 and Annex B may be  reduced  by  15  percent  provided  the  designer  has demonstrated that the following conditions are fulfilled:\n\n- a)  The  building  is  located  in  an  exposed  location, such  as  open  level  terrain  with  only  scattered buildings,  trees  or  other  obstructions  so  that  the roof  is  exposed  to  the  winds  on  all  sides  and  is not  likely  to  become  shielded  in  the  future  by obstructions higher than the roof within a distance from the building equal to ten times the height of the obstruction above the roof level; and\n- b)  The roof does not have any significant projections, such  as  parapet  walls  which  may  prevent  snow from being blown off the roof.\n\nNOTE - In some areas, winter climate may not be of such a nature as to produce a significant reduction of roof loads from the snow load on the ground. These areas are:\n\n- a) \u0007 Winter  calm  valleys  in  the  mountains  where  sometimes layer after layer of snow accumulates on roofs without any appreciable removal of snow by wind; and\n- b) \u0007 Areas (that is, high temperature) where the maximum snow load may be the result of single snowstorm, occasionally without appreciable wind removal.\n\nIn such areas, the determination of the shape coefficients shall be based on local experience with due regard to the likelihood of wind drifting and sliding.\n\n## 6 ICE LOAD ON WIRES\n\n6.1 Ice loads are required to be taken into account in the  design  of  overhead  electrical  transmission  and communication lines, over-head contact lines for electric  traction,  aerial  masts  and  similar  structures in zones subjected to ice formation, The thickness of ice deposit around may be taken to be between 3 and 10 mm depending upon the location of the structure. The mass density of ice may be assumed to the equal to  900  kg/m 3 .  While  considering  the  wind  force  on wires and cables, the increase in diameter due to ice formation shall be taken into consideration.\n\n\n"
+    },
+    {
+     "section_id": "6.1",
+     "title": "Ice loads are required to be taken into account in",
+     "pdf_page": 10,
+     "printed_label": "8",
+     "part": "standard",
+     "text": "\n\n## IS 875 (Part 4) : 2021\n\n## 5.3 Shape Coefficients in Areas Exposed to Wind\n\nThe shape coefficients given in 5.2 and Annex B may be  reduced  by  15  percent  provided  the  designer  has demonstrated that the following conditions are fulfilled:\n\n- a)  The  building  is  located  in  an  exposed  location, such  as  open  level  terrain  with  only  scattered buildings,  trees  or  other  obstructions  so  that  the roof  is  exposed  to  the  winds  on  all  sides  and  is not  likely  to  become  shielded  in  the  future  by obstructions higher than the roof within a distance from the building equal to ten times the height of the obstruction above the roof level; and\n- b)  The roof does not have any significant projections, such  as  parapet  walls  which  may  prevent  snow from being blown off the roof.\n\nNOTE - In some areas, winter climate may not be of such a nature as to produce a significant reduction of roof loads from the snow load on the ground. These areas are:\n\n- a) \u0007 Winter  calm  valleys  in  the  mountains  where  sometimes layer after layer of snow accumulates on roofs without any appreciable removal of snow by wind; and\n- b) \u0007 Areas (that is, high temperature) where the maximum snow load may be the result of single snowstorm, occasionally without appreciable wind removal.\n\nIn such areas, the determination of the shape coefficients shall be based on local experience with due regard to the likelihood of wind drifting and sliding.\n\n## 6 ICE LOAD ON WIRES\n\n6.1 Ice loads are required to be taken into account in the  design  of  overhead  electrical  transmission  and communication lines, over-head contact lines for electric  traction,  aerial  masts  and  similar  structures in zones subjected to ice formation, The thickness of ice deposit around may be taken to be between 3 and 10 mm depending upon the location of the structure. The mass density of ice may be assumed to the equal to  900  kg/m 3 .  While  considering  the  wind  force  on wires and cables, the increase in diameter due to ice formation shall be taken into consideration.\n\n\n"
+    }
+   ],
+   "score": -14.852609302393883,
+   "source_collection": "specification",
+   "file": null,
+   "orig": null,
+   "latex": null
+  },
+  {
+   "found": true,
+   "kind": "fts",
+   "doc": "IS_875_Part_4_1987",
+   "edition": "2021",
+   "section_id": "5.1",
+   "eq_id": "",
+   "table_id": "",
+   "part": "standard",
+   "pdf_page": "4",
+   "printed_label": "2",
+   "printed_label_qualified": null,
+   "collection": "specification",
+   "corpus": "specification",
+   "authoritative": true,
+   "title": "General Principles",
+   "id": "spec:IS_875_Part_4_1987:standard:5.1:4",
+   "text": "5.1 General Principles\n\n### 5.1 General Principles\n\nIn  perfectly  calm  weather,  falling  snow  would  cover roofs and the ground with a uniform blanket of snow and  the  design  snow  load  could  be  considered  as  a uniformly  distributed load.  Truly  uniform  loading conditions,  however,  are  rare  and  have  usually  only been observed in areas that are sheltered on all sides by high trees, buildings, etc. In such a case, the shape coefficient would be equal to unity.\n\nIn most regions, snow  falls are  accompanied  or followed  by  winds.  The  winds  will  redistribute  the snow and on some roofs, especially multilevel roofs, the  accumulated  drift  load  may  reach  a  multiple  of the  ground  load.  Roofs  which  are  sheltered  by  other buildings, vegetation, etc, may collect more snow load than the ground level. The phenomenon is of the same nature as that illustrated for multilevel roofs in 5.2.4\n\nSo  far  sufficient  data  are  not  available  to  determine the shape coefficient in a statistical basis. Therefore, a nominal value is given in this standard. A representative sample  of  roof  is  shown  in 5.2 .  However,  in  special cases  such  as  strip  loading,  cleaning  of  the  roof periodically by deliberate heating of the roof, etc, have to be treated separately. However, no reduction in load of  snow  on  roof  having  underside  insulation  and/or internal heating system shall be done.\n\nThe distribution of snow in the direction parallel to the eaves is assumed to be uniform.",
+   "snippet": "5.1 General Principles\n\n### 5.1 General Principles\n\nIn  perfectly  calm  weather,  falling  >>snow<<  would  cover roofs and the ground with a uniform blanket of >>snow<< and  the  design  >>snow<<  >>load<<  could  be  considered  as  a uniformly  distributed >>load<<.  Truly...",
+   "neighbors": [
+    {
+     "section_id": "5",
+     "title": "SHAPE COEFFICIENTS",
+     "pdf_page": 4,
+     "printed_label": "2",
+     "part": "standard",
+     "text": "\n\n## IS 875 (Part 4) : 2021\n\n### 4.4 Ponding Instability\n\nRoofs shall be designed to preclude ponding instability. For flat roofs (or with a small slope), roof deflections caused  by  snow  loads  shall  be  investigated  when determining the likelihood of ponding instability from rain-on-snow or from snow meltwater.\n\n## 5 SHAPE COEFFICIENTS\n\n### 5.1 General Principles\n\nIn  perfectly  calm  weather,  falling  snow  would  cover roofs and the ground with a uniform blanket of snow and  the  design  snow  load  could  be  considered  as  a uniformly  distributed load.  Truly  uniform  loading conditions,  however,  are  rare  and  have  usually  only been observed in areas that are sheltered on all sides by high trees, buildings, etc. In such a case, the shape coefficient would be equal to unity.\n\nIn most regions, snow  falls are  accompanied  or followed  by  winds.  The  winds  will  redistribute  the snow and on some roofs, especially multilevel roofs, the  accumulated  drift  load  may  reach  a  multiple  of the  ground  load.  Roofs  which  are  sheltered  by  other buildings, vegetation, etc, may collect more snow load than the ground level. The phenomenon is of the same nature as that illustrated for multilevel roofs in 5.2.4\n\nSo  far  sufficient  data  are  not  available  to  determine the shape coefficient in a statistical basis. Therefore, a nominal value is given in this standard. A representative sample  of  roof  is  shown  in 5.2 .  However,  in  special cases  such  as  strip  loading,  cleaning  of  the  roof periodically by deliberate heating of the roof, etc, have to be treated separately. However, no reduction in load of  snow  on  roof  having  underside  insulation  and/or internal heating system shall be done.\n\nThe distribution of snow in the direction parallel to the eaves is assumed to be uniform.\n\n### 5.2 Shape Coefficients for Selected Types of Roofs\n\n- 5.2.1 Monopitched and Simple Pitched Roofs\n\n\n\n\n"
+    },
+    {
+     "section_id": "5.2",
+     "title": "Shape Coefficients for Selected Types of Roofs",
+     "pdf_page": 4,
+     "printed_label": "2",
+     "part": "standard",
+     "text": "\n\n## IS 875 (Part 4) : 2021\n\n### 4.4 Ponding Instability\n\nRoofs shall be designed to preclude ponding instability. For flat roofs (or with a small slope), roof deflections caused  by  snow  loads  shall  be  investigated  when determining the likelihood of ponding instability from rain-on-snow or from snow meltwater.\n\n## 5 SHAPE COEFFICIENTS\n\n### 5.1 General Principles\n\nIn  perfectly  calm  weather,  falling  snow  would  cover roofs and the ground with a uniform blanket of snow and  the  design  snow  load  could  be  considered  as  a uniformly  distributed load.  Truly  uniform  loading conditions,  however,  are  rare  and  have  usually  only been observed in areas that are sheltered on all sides by high trees, buildings, etc. In such a case, the shape coefficient would be equal to unity.\n\nIn most regions, snow  falls are  accompanied  or followed  by  winds.  The  winds  will  redistribute  the snow and on some roofs, especially multilevel roofs, the  accumulated  drift  load  may  reach  a  multiple  of the  ground  load.  Roofs  which  are  sheltered  by  other buildings, vegetation, etc, may collect more snow load than the ground level. The phenomenon is of the same nature as that illustrated for multilevel roofs in 5.2.4\n\nSo  far  sufficient  data  are  not  available  to  determine the shape coefficient in a statistical basis. Therefore, a nominal value is given in this standard. A representative sample  of  roof  is  shown  in 5.2 .  However,  in  special cases  such  as  strip  loading,  cleaning  of  the  roof periodically by deliberate heating of the roof, etc, have to be treated separately. However, no reduction in load of  snow  on  roof  having  underside  insulation  and/or internal heating system shall be done.\n\nThe distribution of snow in the direction parallel to the eaves is assumed to be uniform.\n\n### 5.2 Shape Coefficients for Selected Types of Roofs\n\n- 5.2.1 Monopitched and Simple Pitched Roofs\n\n\n\n\n"
+    }
+   ],
+   "score": -14.744026481682333,
+   "source_collection": "specification",
+   "file": null,
+   "orig": null,
+   "latex": null
+  }
+ ],
+ "purpose": null,
+ "want_commentary": false,
+ "qid": null,
+ "cached": false
+}

@@ -90,6 +90,8 @@ def build_report_cfs_india(name, cfg, pkg, root):
                       [(r["k"], r["z_m"], r["k2"], r["Vz_mps"], r["pz_kNm2"], r["pd_kNm2"]) for r in ws["storeys"]]))
         out.append("<p>Cpe walls (Table 5): X %s; Y %s. Wind base shear X %s kN, Y %s kN.</p>"
                    % (_e(ws.get("Cpe_X")), _e(ws.get("Cpe_Y")), _f(ws.get("VB_x_kN"), 1), _f(ws.get("VB_y_kN"), 1)))
+    if lat.get("statement"):
+        out.append("<p><b>%s</b></p>" % _e(lat["statement"]))
     if ss:
         out.append("<p>Seismic (IS 1893 (Part 1):2016 + Amd 1, 2): Z %s, I %s, R %s, soil %s, Ta %s / %s s (%s), Sa/g %s, "
                    "<b>Ah = %s</b>, W = %s kN, <b>VB = %s kN</b>; analysis %s%s.</p>"

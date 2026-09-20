@@ -1,0 +1,38 @@
+{
+ "found": true,
+ "query": "Hyderabad",
+ "type": "fts",
+ "hits": [
+  {
+   "found": true,
+   "kind": "annex_town",
+   "doc": "IS_1893_Part_1_2016",
+   "edition": "2016+A1+A2",
+   "section_id": "Annex E",
+   "eq_id": null,
+   "table_id": null,
+   "part": "standard",
+   "pdf_page": 38,
+   "printed_label": null,
+   "printed_label_qualified": null,
+   "collection": "specification",
+   "corpus": "specification",
+   "authoritative": true,
+   "title": "IS 1893 (Part 1) Annex E — zone factors for some important towns",
+   "id": "spec-page:IS_1893_Part_1_2016:standard:38",
+   "text": "\n\n\nIS 1893 (Part 1) : 2016\n\n          displacement of sand and mud; change of                         requires to be investigated specifically.\n          water level in wells; water from canals, lakes,\n          rivers, etc, thrown on land. New lakes occur.          XII Landscape Changes\n                                                                    i)    \nXI Destruction\n                                                                    ii)   Practically all structures above and below\n    i)    \n                                                                          ground are greatly damaged or destroyed.\n    ii)   Severe damage even to well built buildings,\n                                                                    iii) The surface of the ground is radically\n          bridges, water dams and railway lines.\n                                                                         changed. Considerable ground cracks with\n          Highways become useless. Underground\n                                                                         extensive vertical and horizontal movements\n          pipes destroyed.\n                                                                         are observed. Falling of rock and slumping of\n    iii) Ground considerably distorted by broad cracks                   river banks over wide areas, lakes are dammed;\n         and fissures, as well as movement in horizontal                 waterfalls appear and rivers are deflected. The\n         and vertical directions. Numerous landslips and                 intensity of the earthquake requires to be\n         falls of rocks. The intensity of the earthquake                 investigated specially.\n\n                                                     ANNEX E\n                                                     (Foreword)\n     LIST OF SOME TOWNS WITH POPULATION MORE THAN 3 LAKHS (as per CENSUS 2011)\n                        AND THEIR SEISMIC ZONE FACTOR Z\n\n  Town                       Zone               Z                 Town                        Zone               Z\n  Agra                        III             0.16                Calicut (Kozhikode)          III             0.16\n  Ahmedabad                   III             0.16                Chandigarh                   IV              0.24\n  Ajmer                        II             0.10                Chennai                      III             0.16\n  Allahabad                    II             0.10                Chitradurga                   II             0.10\n  Almora                      IV              0.24                Coimbatore                   III             0.16\n  Ambala                      IV              0.24                Cuddalore                     II             0.10\n  Amritsar                    IV              0.24                Cuttack                      III             0.16\n  Asansol                     III             0.16                Darbhanga                     V              0.36\n  Aurangabad                   II             0.10                Darjeeling                   IV              0.24\n  Bahraich                    IV              0.24                Dharwad                      III             0.16\n  Bangalore (Bengaluru)        II             0.10                Dehra Dun                    IV              0.24\n  Barauni                     IV              0.24                Dharampuri                   III             0.16\n  Bareilly                    III             0.16                Delhi                        IV              0.24\n  Belgaum                     III             0.16                Durgapur                     III             0.16\n  Bhatinda                    III             0.16                Gangtok                      IV              0.24\n  Bhilai                       II             0.10                Guwahati                      V              0.36\n  Bhopal                       II             0.10                Gulbarga                      II             0.10\n  Bhubaneswar                 III             0.16                Gaya                         III             0.16\n  Bhuj                         V              0.36                Gorakhpur                    IV              0.24\n  Bijapur                     III             0.16                Hyderabad                     II             0.10\n  Bikaner                     III             0.16                Imphal                        V              0.36\n  Bokaro                      III             0.16                Jabalpur                     III             0.16\n  Bulandshahr                 IV              0.24                Jaipur                        II             0.10\n  Burdwan                     III             0.16                Jamshedpur                    II             0.10\n\n                                                            36\n\n\n",
+   "snippet": "Bijapur                     III             0.16                Hyderabad                     II             0.10",
+   "neighbors": [],
+   "score": -100.0,
+   "source_collection": "specification",
+   "file": null,
+   "orig": null,
+   "latex": null,
+   "town_matched": "Hyderabad"
+  }
+ ],
+ "purpose": null,
+ "want_commentary": false,
+ "qid": null,
+ "cached": false
+}
