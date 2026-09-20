@@ -1,0 +1,12 @@
+Label,Designation_IS,Table,found,reason
+CWR100X50X5,100 x 50 x 5.00,4,"partial (row kept, Cw_mm6 = None)",corpus: FLAG: Cw printed 35.3 cm6 is a misprint in the standard (100x50x4.00 prints 297; geometry ~331-353) — do not use Cw for this row
+CLR70X25X10X1.6,70 x 25 x 10 x 1.60,6,"partial (row kept, ry_mm = None)",corpus: FLAG: Ryy printed 1.903 cm is a misprint in the standard (sqrt(Iyy/A) = 0.904 cm)
+CLR70X25X15X2,70 x 25 x 15 x 2.00,6,"partial (row kept, ry_mm = None)",corpus: FLAG: Ryy printed 1.948 cm is a misprint in the standard (sqrt(Iyy/A) = 0.946 cm)
+CLR180X50X20X3.15,180 x 50 x 20 x 3.15,6,"partial (row kept, J_mm4 = None)",corpus: FLAG: J printed 0.38 cm4 inconsistent with neighbours/geometry (~0.29-0.30 cm4) — probable misprint
+CLR200X80X25X4,200 x 80 x 25 x 4.00,6,"partial (row kept, Cw_mm6 = None)",corpus: FLAG: Cw printed 997 cm6 — misprint in the standard (geometry ~9 980 cm6; 200x80x20x3.15 prints 7 230)
+CLR200X80X25X5,200 x 80 x 25 x 5.00,6,"partial (row kept, Cw_mm6 = None)",corpus: FLAG: Cw printed 1190 cm6 — misprint in the standard (geometry ~11 470 cm6)
+HS30X30X10X1.6,30 x 30 x 10 x 1.60,7,"partial (row kept, Mass_kg_m = None)",corpus: FLAG: mass printed 1.26 kg/m inconsistent with A 1.54 cm2 (0.785A = 1.21; Table 5 prints 1.21 for the same strip) — misprint in the standard
+LZ120X45X20X2,120 x 45 x 20 x 2.00,10,false,corpus: FLAG: Iuu printed 144 cm4 inconsistent (neighbours 93.3/128; geometry ~114) — probable misprint; Iu+Iv 1529400 vs Ix+Iy 1227000
+LZ240X75X20X1.6,240 x 75 x 20 x 1.60,10,false,Ix 5120000 vs thin-wall 5757055 mm4 (-11.1 %); Iu+Iv 6441000 vs Ix+Iy 5841000
+LZ250X75X20X2.3,250 x 75 x 20 x 2.30,10,"partial (row kept, tan_alpha = None)",corpus: FLAG: tan(theta) printed 0.353 inconsistent (neighbours 0.255/0.252) — probable misprint
+LZ260X75X20X1.6,260 x 75 x 20 x 1.60,10,"partial (row kept, Mass_kg_m = None)",corpus: FLAG: mass printed 5.98 kg/m inconsistent with A 6.98 cm2 (0.785A = 5.48) — misprint in the standard
