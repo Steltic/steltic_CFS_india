@@ -1,0 +1,34 @@
+IN_CFS_Ex14 — medical outpatient clinic on a split-level site, hot-rolled SCBF, Coimbatore (India)
+
+Location: Coimbatore (Zone III — retrieve Z; soil — retrieve). Wind: retrieve IS 875 Part 3 (Coimbatore Vb) and
+compare to EQ. Occupancy: outpatient clinic -> importance factor I = 1.2 (IS 1893 Table 8, owner ruling D8) —
+retrieve and state.
+
+Geometry (metres):
+- Split-level: 3 storeys on the uphill face / 4 storeys on the downhill walkout; plan ~37 m x 21 m
+- Grade drop ~3.0 m N -> S; south half walkout lower level; Level-1 diaphragm over the south half only
+- Hot-rolled braced frames in BOTH directions (one system, one R — no direction-dependent R), stepped bases at
+  the end walls and a braced line at the mid-split; CFS floor joists to the grid beams; CFS studs at 400 mm,
+  non-load-bearing; imaging-suite heavy zone as a declared imposed load
+- Snow N/A for Coimbatore (found:false / N/A)
+
+Gravity (RETRIEVE IS 875 Part 1 / Part 2): outpatient clinic / exam / corridor imposed; imaging suite if applicable.
+
+Design basis (programme rulings D3 / D5 / L7 — fixed, do not substitute):
+- Lateral system: hot-rolled SCBF, R 4.5 (IS 1893 Table 9; Zone III per L7); I = 1.2 (Table 8, clinic)
+- Cold-formed members: IS 801:1975 working stress (F = 0.60 Fy; IS 875 Part 5 cl. 8.1 combinations at 1.0;
+  +33 1/3 % allowable only with WL / EL, cl. 6.1.2; effective widths at 0.75 f for those) with IS 811:1987 sections
+  (Fy declared from IS 1079 / IS 801 Table 2, never from the catalogue). They are gravity / wind members only.
+- No sheathed shear walls, strap-braced walls, gypsum walls, perforated walls or CFS bolted moment frames.
+  Do NOT cite AISI S100 / S240 / S400, ASCE 7, AISC 341 / 360 or SFIA designators.
+- IS 800:2007 / IS 18168:2023 retrieval only with purpose = lateral_frame_is800 (frame) or
+  serviceability_limits_table6 (deflection / sway limits).
+- EOR / test inputs (sheathing Kw and screw capacity per IS 801 8.1, diaphragm allowable shear, anchor embedment,
+  pedestal bearing — IS 456 not in the corpus) are declared in cfg['eor_inputs'] with source and VERIFY.
+
+Retrieve EVERY job into cfg['load_plan'] (do not invent): IS 1893 Part 1:2016 Annex E zone / Table 3 Z /
+Table 8 I / Table 9 R / Table 10 imposed share; IS 875 Part 3:2015 Annex A Vb, Table 2 k2, 6.3.4 cyclone
+belt (k4, Kd), Tables 5 / 6 Cpe, 7.3 Cpi; IS 875 Part 1 unit weights; Part 2 Tables 1 / 2 imposed;
+Part 4 snow (found:false outside the snow region); Part 5 cl. 8.1 combinations.
+Deliverable: pipeline.design_and_report -> report.html + viewer_3d.html + STATUS.md (design status by
+india_cfs_gates; drift IS 1893 7.11.1 0.004 h; Z / I / R / Sa/g / Ah / VB / T printed).

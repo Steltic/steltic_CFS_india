@@ -1,0 +1,32 @@
+IN_CFS_Ex6 — 5-storey residential CFS building, L-plan, hot-rolled SCBF, Pune (India)
+
+Location: Pune (Zone III — retrieve Z; soil — retrieve). Wind: retrieve IS 875 Part 3 (Pune Vb) and compare to EQ.
+
+Geometry (metres):
+- 5 storeys; L1 @ 3.0 m, typical upper @ 2.9 m; L-plan — north bar ~55 m x 19 m, west leg ~19 m x 27 m
+- Re-entrant corner (IS 1893 Table 5 plan irregularity — state it); stepped roof (gable one wing / flat amenity
+  deck the other)
+- Hot-rolled braced frames in both directions in each wing with a braced line at the re-entrant corner; collectors
+  across the re-entrant corner delivered by the diaphragm demands; CFS floor joists to the grid beams; CFS studs at
+  400 mm, non-load-bearing
+
+Gravity (RETRIEVE IS 875 Part 1 / Part 2): multi-family residential, corridor, roof imposed / amenity deck.
+
+Design basis (programme rulings D3 / D5 / L7 — fixed, do not substitute):
+- Lateral system: hot-rolled SCBF, R 4.5 (IS 1893 Table 9; Zone III -> SCBF per L7); one 3-D model of the whole L-plan (7.6.4 / Table 5 irregularity stated)
+- Cold-formed members: IS 801:1975 working stress (F = 0.60 Fy; IS 875 Part 5 cl. 8.1 combinations at 1.0;
+  +33 1/3 % allowable only with WL / EL, cl. 6.1.2; effective widths at 0.75 f for those) with IS 811:1987 sections
+  (Fy declared from IS 1079 / IS 801 Table 2, never from the catalogue). They are gravity / wind members only.
+- No sheathed shear walls, strap-braced walls, gypsum walls, perforated walls or CFS bolted moment frames.
+  Do NOT cite AISI S100 / S240 / S400, ASCE 7, AISC 341 / 360 or SFIA designators.
+- IS 800:2007 / IS 18168:2023 retrieval only with purpose = lateral_frame_is800 (frame) or
+  serviceability_limits_table6 (deflection / sway limits).
+- EOR / test inputs (sheathing Kw and screw capacity per IS 801 8.1, diaphragm allowable shear, anchor embedment,
+  pedestal bearing — IS 456 not in the corpus) are declared in cfg['eor_inputs'] with source and VERIFY.
+
+Retrieve EVERY job into cfg['load_plan'] (do not invent): IS 1893 Part 1:2016 Annex E zone / Table 3 Z /
+Table 8 I / Table 9 R / Table 10 imposed share; IS 875 Part 3:2015 Annex A Vb, Table 2 k2, 6.3.4 cyclone
+belt (k4, Kd), Tables 5 / 6 Cpe, 7.3 Cpi; IS 875 Part 1 unit weights; Part 2 Tables 1 / 2 imposed;
+Part 4 snow (found:false outside the snow region); Part 5 cl. 8.1 combinations.
+Deliverable: pipeline.design_and_report -> report.html + viewer_3d.html + STATUS.md (design status by
+india_cfs_gates; drift IS 1893 7.11.1 0.004 h; Z / I / R / Sa/g / Ah / VB / T printed).

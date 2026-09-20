@@ -1,0 +1,33 @@
+IN_CFS_Ex13 — 4-storey senior-living apartments with a roof step, hot-rolled SCBF, Lucknow (India)
+
+Location: Lucknow (Zone III — retrieve Z; soil — retrieve). Wind: retrieve IS 875 Part 3 (Lucknow Vb) and compare to EQ.
+
+Geometry (metres):
+- 4 storeys; L1 @ 3.2 m, typical @ 2.9 m; notched rectangle ~52 m x 20 m with an entry recess + roof step
+- East ~12 m mass only 3 storeys (flat roof); west mass 4 storeys (truss roof) — vertical irregularity (IS 1893
+  Table 6, stated); roof-step diaphragm transfer designed
+- Hot-rolled braced frames in the long walls and the party / end walls both directions; CFS floor joists to the
+  grid beams; CFS exterior studs at 400 mm with window openings framed by CFS headers, non-load-bearing
+- Snow N/A for Lucknow (found:false / N/A)
+
+Gravity (RETRIEVE IS 875 Part 1 / Part 2): senior / independent-living apartment imposed loads, corridor / dining,
+roof.
+
+Design basis (programme rulings D3 / D5 / L7 — fixed, do not substitute):
+- Lateral system: hot-rolled SCBF, R 4.5 (IS 1893 Table 9; Zone III per L7)
+- Cold-formed members: IS 801:1975 working stress (F = 0.60 Fy; IS 875 Part 5 cl. 8.1 combinations at 1.0;
+  +33 1/3 % allowable only with WL / EL, cl. 6.1.2; effective widths at 0.75 f for those) with IS 811:1987 sections
+  (Fy declared from IS 1079 / IS 801 Table 2, never from the catalogue). They are gravity / wind members only.
+- No sheathed shear walls, strap-braced walls, gypsum walls, perforated walls or CFS bolted moment frames.
+  Do NOT cite AISI S100 / S240 / S400, ASCE 7, AISC 341 / 360 or SFIA designators.
+- IS 800:2007 / IS 18168:2023 retrieval only with purpose = lateral_frame_is800 (frame) or
+  serviceability_limits_table6 (deflection / sway limits).
+- EOR / test inputs (sheathing Kw and screw capacity per IS 801 8.1, diaphragm allowable shear, anchor embedment,
+  pedestal bearing — IS 456 not in the corpus) are declared in cfg['eor_inputs'] with source and VERIFY.
+
+Retrieve EVERY job into cfg['load_plan'] (do not invent): IS 1893 Part 1:2016 Annex E zone / Table 3 Z /
+Table 8 I / Table 9 R / Table 10 imposed share; IS 875 Part 3:2015 Annex A Vb, Table 2 k2, 6.3.4 cyclone
+belt (k4, Kd), Tables 5 / 6 Cpe, 7.3 Cpi; IS 875 Part 1 unit weights; Part 2 Tables 1 / 2 imposed;
+Part 4 snow (found:false outside the snow region); Part 5 cl. 8.1 combinations.
+Deliverable: pipeline.design_and_report -> report.html + viewer_3d.html + STATUS.md (design status by
+india_cfs_gates; drift IS 1893 7.11.1 0.004 h; Z / I / R / Sa/g / Ah / VB / T printed).

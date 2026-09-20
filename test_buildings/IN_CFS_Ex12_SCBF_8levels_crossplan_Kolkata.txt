@@ -1,0 +1,33 @@
+IN_CFS_Ex12 — 8-storey dormitory, cruciform plan, hot-rolled SCBF, Kolkata (India)
+
+Location: Kolkata (Zone III — retrieve Z; soil soft / medium — retrieve). Wind: retrieve IS 875 Part 3 (Kolkata Vb);
+at ~23 m height wind may govern overturning / drift; run both hazards fully.
+
+Geometry (metres):
+- 8 storeys; L1 @ 3.0 m, typical @ 2.9 m (~23.3 m); cruciform plan — centre ~18 m x 18 m + four arms ~14 m deep x
+  18 m wide; four re-entrant corners; envelope ~46 m x 46 m with open corner courts
+- Hot-rolled braced frames in the core and in each arm in both directions (declare bays); columns stepped down
+  with height (>= 3 tiers); CFS floor joists to the grid beams; CFS studs at 400 mm, non-load-bearing
+- Diaphragm chord / collector forces at the re-entrant corners from the pipeline demands
+
+Gravity (RETRIEVE IS 875 Part 1 / Part 2): university dormitory sleeping / corridor / common imposed loads;
+imposed-load reduction only where IS 875 Part 2 allows (cite).
+
+Design basis (programme rulings D3 / D5 / L7 — fixed, do not substitute):
+- Lateral system: hot-rolled SCBF, R 4.5 (IS 1893 Table 9; Zone III per L7); RSA if 7.7.1 requires (Table 5 irregularity)
+- Cold-formed members: IS 801:1975 working stress (F = 0.60 Fy; IS 875 Part 5 cl. 8.1 combinations at 1.0;
+  +33 1/3 % allowable only with WL / EL, cl. 6.1.2; effective widths at 0.75 f for those) with IS 811:1987 sections
+  (Fy declared from IS 1079 / IS 801 Table 2, never from the catalogue). They are gravity / wind members only.
+- No sheathed shear walls, strap-braced walls, gypsum walls, perforated walls or CFS bolted moment frames.
+  Do NOT cite AISI S100 / S240 / S400, ASCE 7, AISC 341 / 360 or SFIA designators.
+- IS 800:2007 / IS 18168:2023 retrieval only with purpose = lateral_frame_is800 (frame) or
+  serviceability_limits_table6 (deflection / sway limits).
+- EOR / test inputs (sheathing Kw and screw capacity per IS 801 8.1, diaphragm allowable shear, anchor embedment,
+  pedestal bearing — IS 456 not in the corpus) are declared in cfg['eor_inputs'] with source and VERIFY.
+
+Retrieve EVERY job into cfg['load_plan'] (do not invent): IS 1893 Part 1:2016 Annex E zone / Table 3 Z /
+Table 8 I / Table 9 R / Table 10 imposed share; IS 875 Part 3:2015 Annex A Vb, Table 2 k2, 6.3.4 cyclone
+belt (k4, Kd), Tables 5 / 6 Cpe, 7.3 Cpi; IS 875 Part 1 unit weights; Part 2 Tables 1 / 2 imposed;
+Part 4 snow (found:false outside the snow region); Part 5 cl. 8.1 combinations.
+Deliverable: pipeline.design_and_report -> report.html + viewer_3d.html + STATUS.md (design status by
+india_cfs_gates; drift IS 1893 7.11.1 0.004 h; Z / I / R / Sa/g / Ah / VB / T printed).
