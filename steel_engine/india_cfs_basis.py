@@ -31,8 +31,11 @@ INCREASE_WL_EL = 4.0 / 3.0
 IS875_5_CITE = ("IS 875 (Part 5):1987 cl. 8.1: DL; DL+IL; DL+WL; DL+EL; DL+IL+WL; DL+IL+EL (Note 1 snow replaces IL; "
                 "Notes 4/5: 0.9 DL against overturning / sliding); Note 2: permissible stresses per the design code (WSM)")
 IS801_61_CITE = "IS 801:1975 6.1 F = 0.60 Fy; 6.1.2.1 / 6.1.2.2 stresses 33 1/3 percent greater for wind or earthquake"
-CAPACITY_BASES = ("IS801_allowable", "IS800_LSD", "manufacturer_ASD", "nominal", "test", "EOR_input")
-WORKING_BASES = ("IS801_allowable", "manufacturer_ASD", "test", "EOR_input")
+CAPACITY_BASES = ("IS801_allowable", "IS800_LSD", "IS800_WSM", "manufacturer_ASD", "nominal", "test", "EOR_input")
+WORKING_BASES = ("IS801_allowable", "IS800_WSM", "manufacturer_ASD", "test", "EOR_input")
+# allowable_increase permitted per basis: IS 801 6.1.2 (4/3 on W / EL) for cold-formed allowables; IS 800 11.1.4 for the
+# working-stress hot-rolled base details of the all-CFS portal (1.33 members / 1.25 anchor bolts, W / EL with imposed load only)
+INCREASES_BY_BASIS = {"IS801_allowable": (1.0, 4.0 / 3.0), "IS800_WSM": (1.0, 1.25, 1.33)}
 
 BASIS_STATEMENT = (
     "Design basis: IS 801:1975 working stress for every cold-formed member (F = 0.60 Fy; IS 875 (Part 5) cl. 8.1 "
@@ -178,9 +181,11 @@ def basis_issues(pkg) -> list:
                     issues.append("%s: working-stress demand against an IS 800 LSD capacity (mixed bases)" % path)
                 elif lvl == "LSD" and cb in WORKING_BASES:
                     issues.append("%s: LSD (factored) demand against a working-stress capacity (mixed bases)" % path)
-                if inc is not None and abs(float(inc) - 1.0) > 1e-6 and cb != "IS801_allowable":
-                    issues.append("%s: allowable_increase %s applied to a %s capacity (only IS 801 allowables take 6.1.2)"
-                                  % (path, inc, cb))
+                if inc is not None and abs(float(inc) - 1.0) > 1e-6:
+                    allowed = INCREASES_BY_BASIS.get(cb, (1.0,))
+                    if not any(abs(float(inc) - a) < 1e-3 for a in allowed):
+                        issues.append("%s: allowable_increase %s applied to a %s capacity (IS 801 6.1.2 4/3 for IS801_allowable; "
+                                      "IS 800 11.1.4 1.33 / 1.25 for IS800_WSM; none otherwise)" % (path, inc, cb))
             for k, v in obj.items():
                 if k not in ("capacity",):
                     walk(v, path + "." + str(k))

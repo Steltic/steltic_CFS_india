@@ -88,7 +88,19 @@
     "engineering_standard_IS-801": "IS_801_1975",
     "engineering_standard_IS-811": "IS_811_1987",
     "engineering_standards_IS801_1975": "IS_801_1975",
-    "engineering_standards_IS811_1987": "IS_811_1987"
+    "engineering_standards_IS811_1987": "IS_811_1987",
+    "IS800": "IS_800_2007",
+    "engineering_standards_IS800": "IS_800_2007",
+    "engineering_standard_IS800": "IS_800_2007",
+    "IS_800": "IS_800_2007",
+    "engineering_standards_IS_800": "IS_800_2007",
+    "engineering_standard_IS_800": "IS_800_2007",
+    "IS18168": "IS_18168_2023",
+    "engineering_standards_IS18168": "IS_18168_2023",
+    "engineering_standard_IS18168": "IS_18168_2023",
+    "IS_18168": "IS_18168_2023",
+    "engineering_standards_IS_18168": "IS_18168_2023",
+    "engineering_standard_IS_18168": "IS_18168_2023"
   },
   "stem_to_collection": {
     "IS_801_1975": "engineering_standards_IS801",
@@ -99,7 +111,9 @@
     "IS_875_Part_3_2015": "engineering_standards_IS875_P3",
     "IS_875_Part_4_1987": "engineering_standards_IS875_P4",
     "IS_875_Part_5_1987": "engineering_standards_IS875_P5",
-    "IS_1893_Part_1_2016": "engineering_standards_IS1893"
+    "IS_1893_Part_1_2016": "engineering_standards_IS1893",
+    "IS_800_2007": "engineering_standards_IS800",
+    "IS_18168_2023": "engineering_standards_IS18168"
   },
   "load_collections": [
     "engineering_standards_IS875_P1",
@@ -128,5 +142,10 @@
     "engineering_standard_IS-811": "IS_811_1987",
     "engineering_standards_IS801_1975": "IS_801_1975",
     "engineering_standards_IS811_1987": "IS_811_1987"
-  }
+  },
+  "lateral_frame_collections": [
+    "engineering_standards_IS800",
+    "engineering_standards_IS18168"
+  ],
+  "lateral_frame_note": "gated: india_cfs_gates.gate_is800_query -- purpose lateral_frame_is800 | serviceability_limits_table6 | gap log only"
 }

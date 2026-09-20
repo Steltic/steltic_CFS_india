@@ -67,35 +67,36 @@ TOOL_SPECS = [
     _spec("new_activity_log", "Start a fresh activity log for a design run (call ONCE first).",
           {"building": {"type": "string", "description": "building name -> jobs/<name>/"}}, []),
     _spec("search_engineering_standards",
-          "Retrieve a provision from the standards corpus (Query file manager) UNDER THE RETRIEVAL POLICY: "
-          "one document per call, an EXACT id when you know the provision (type=exact_section|exact_equation|"
-          "exact_table and query=the id ALONE, e.g. E2, G5-1, A3.1.3-1, E1.3-1), and a full-text query (type=fts) only "
+          "Retrieve a provision from the India standards corpus (Query file manager) UNDER THE RETRIEVAL POLICY: "
+          "one document per call, an EXACT id when you know the provision (type=exact_section|exact_table and "
+          "query=the id ALONE, e.g. 6.6.1.1, 5.2.1.1, 8.1, table 9), and a full-text query (type=fts) only "
           "to NAVIGATE to an id -- in the standard's own printed words, one idea, no sentences. "
-          "Good: {type:'exact_section', doc:'AISI_S100', query:'G5'}. "
-          "Bad: {query:'AISI S100 web crippling of stiffened flanges under one-flange loading G5'}. "
+          "Good: {type:'exact_section', doc:'IS_801_1975', query:'6.5'}. "
+          "Bad: {query:'IS 801 web crippling of single unreinforced webs at end reactions 6.5'}. "
           "Documents: IS_801_1975 (CFS members -- primary), IS_811_1987 (sections), "
           "LOAD stems IS_875_Part_* + IS_1893_Part_1_2016 MANDATORY every job into cfg[load_plan]; "
-          "cfs_design_examples for worked examples when available (query ALONGSIDE the spec for each "
-          "member/connection and mirror the example's method). Returns a 'disabled' note if no RAG is configured -- "
-          "then rely on your own cited IS 801/811 knowledge. Loads must still go through load_plan.",
+          "IS_800_2007 / IS_18168_2023 ONLY with purpose=lateral_frame_is800 (hot-rolled frame) or "
+          "serviceability_limits_table6. AISI / ASCE / AISC collections are refused (D3). No worked-example collection "
+          "is ingested for India. Returns a 'disabled' note if no RAG is configured -- then rely on your own cited "
+          "IS 801/811 knowledge. Loads must still go through load_plan.",
           {"query": {"type": "string", "description": "for exact types: the id only. For fts: printed spec terminology, one idea."},
            "type": {"type": "string", "enum": ["exact_section", "exact_equation", "exact_table", "fts"],
-                    "description": "exact_section (E2, G5, E3.4.2) / exact_equation (G5-1, A3.1.3-1, E1.3.1.1-1) / exact_table (E1.3-1, 12.2-1) / fts (navigation only)"},
-           "doc": {"type": "string", "description": "canonical document stem: IS_801_1975, IS_811_1987, IS_875_Part_3_2015, IS_1893_Part_1_2016. One per call."},
-           "purpose": {"type": "string", "description": "why you need it (provenance). Required allowlisted value if doc/collection is IS_800_2007: sfrs_gap_found_false | document_absence | found_false_log | eor_documented_exception (C6 hard-ban otherwise)."},
+                    "description": "exact_section (6.6.1.1, 5.2.1.1, 8.1) / exact_table (2, 9, 6) / fts (navigation only)"},
+           "doc": {"type": "string", "description": "canonical document stem: IS_801_1975, IS_811_1987, IS_875_Part_1_2026 .. IS_875_Part_5_1987, IS_1893_Part_1_2016, IS_800_2007, IS_18168_2023. One per call."},
+           "purpose": {"type": "string", "description": "why you need it (provenance). Required allowlisted value if doc/collection is IS_800_2007 / IS_18168_2023: lateral_frame_is800 | serviceability_limits_table6 | sfrs_gap_found_false | document_absence | found_false_log | eor_documented_exception (C6 refusal otherwise)."},
            "want_commentary": {"type": "boolean", "description": "default false (provisions). true only for intent/background; commentary never supplies a design value."},
            "context_neighbors": {"type": "integer", "description": "0-2: widen when an equation needs its surrounding 'where:' list"},
            "collection": {"type": "string",
-                          "description": "legacy alias of doc (engineering_standards_IS801 / _IS811 / _IS875_P* / _IS1893); cfs_design_examples for worked examples"},
+                          "description": "legacy alias of doc (engineering_standards_IS801 / _IS811 / _IS875_P* / _IS1893 / _IS800 gated)"},
            "clause": {"type": "string", "description": "legacy: an exact id sent with a sentence. Prefer type + query=id."},
-           "chapter": {"type": "string", "description": "optional: narrow an fts query to a chapter, e.g. E, G, J"},
+           "chapter": {"type": "string", "description": "optional: narrow an fts query to a top-level section, e.g. 6 (design), 7 (connections), 8 (bracing)"},
            "top_k": {"type": "integer", "description": "chunks to return (default 3, max 5)"}},
           ["query"]),
     _spec("run_python",
           "Execute Python in an ISOLATED SANDBOX with the steel engine importable and cwd=jobs/<name>/. "
           "Drive pipeline.design_and_report(name, cfg). No network, no installs.",
           {"code": {"type": "string", "description": "Python source to execute"}}, ["code"]),
-    _spec("write_file", "Write a file into the workspace (e.g. jobs/<name>/cfg.py or design/calc_package.json).",
+    _spec("write_file", "Write a file into the workspace (e.g. jobs/<name>/cfg.py). Never hand-write design/calc_package_cfs.json.",
           {"path": {"type": "string"}, "content": {"type": "string"}}, ["path", "content"]),
     _spec("read_file", "Read a file (job workspace or engine source). Returns <=600 lines; paginate with offset/limit.",
           {"path": {"type": "string"}, "offset": {"type": "integer"}, "limit": {"type": "integer"}}, ["path"]),
@@ -178,8 +179,8 @@ _R21_TABLE = ("R21 - the OpenSees docs RAG exists for exactly this. error -> cau
     "out-of-plane instability -> check supports/releases; add the missing member. Query: constraints, node/fix.\n"
     "- rigidDiaphragm/'failed to add' -> constraint-handler mismatch; master missing mass; releasing a "
     "constrained DOF -> constraints('Transformation'); do NOT release diaphragm DOFs. Query: rigidDiaphragm.\n"
-    "- KeyError 'heights_ft'/'lines_x'/cfs_sections.* -> FRAMEWORK-API guess, not OpenSees -> re-read the "
-    "wall-path cfg schema in AGENT_START and cfs_engine.py's docstring (frame path: engine3d).")
+    "- KeyError 'heights_m'/'lateral_frame'/'cfs_members'/is811_sections.* -> FRAMEWORK-API guess, not OpenSees -> re-read the "
+    "India cfg schema in AGENT_START and india_cfs_lateral / india_cfs_portal docstrings (fixtures: tests/fixtures/IN_CFS_Ex1, Ex5).")
 
 
 def _r21_track(ws, result):
@@ -212,168 +213,89 @@ def _r21_gate(ws, code):
 
 
 
-# ---------------- hardening #2: blocking completion gate (app-side, engine-free) ----------------
-def _dc_and_cite(x):
-    """(dcs, cited) across a slot's top level and its checks list."""
-    checks = [c for c in (x.get("checks") or []) if isinstance(c, dict)]
-    dcs = [d for d in [x.get("DC")] + [c.get("DC") for c in checks] if isinstance(d, (int, float))]
-    cited = bool(x.get("cited")) or any(c.get("cited") for c in checks)
-    return dcs, cited
-
-
+# ---------------- hardening #2: blocking completion gate (app-side; India package schema) ----------------
 def _completion_gate(ws):
-    """Lightweight JSON checks on jobs/<building>/design/calc_package.json before a final answer
-    is accepted. Returns a list of problems ([] = clean). Understands BOTH package shapes:
-    the CFS wall-path schema (wall_lines / holddowns / studs / collectors seeded by cfs_pipeline)
-    and the frame-path members/connections schema (portals). A slot may carry
-    {'waived': '<engineering justification>'} instead of capacities to pass explicitly."""
+    """Checks on jobs/<building>/design/calc_package_cfs.json before a final answer is accepted. Returns a list of
+    problems ([] = clean). The ONE authority is india_cfs_gates.design_status (D3 / WP3.6): the package's stored status
+    is re-derived here from the cfg snapshot and the package, so a hand-edited package cannot claim COMPLETE. A slot
+    carrying 'waived' is a problem, never a pass."""
     import pathlib
     probs = []
     try:
         jd = ws._job_dir() if hasattr(ws, "_job_dir") else None
         if not jd:
             return []
-        cp = pathlib.Path(jd) / "design" / "calc_package.json"
+        cp = pathlib.Path(jd) / "design" / "calc_package_cfs.json"
         if not cp.exists():
-            cp2 = pathlib.Path(jd) / "design" / "calc_package_cfs.json"
-            if cp2.exists():
-                cp = cp2
-            else:
-                return ["design/calc_package.json does not exist -- run pipeline.design_and_report first"]
+            if (pathlib.Path(jd) / "design" / "calc_package.json").exists():
+                return ["design/calc_package.json is the removed US wall-path package (D3) -- run pipeline.design_and_report "
+                        "with the India cfg; the India package is design/calc_package_cfs.json"]
+            return ["design/calc_package_cfs.json does not exist -- run pipeline.design_and_report first"]
         pkg = json.loads(cp.read_text(errors="replace"))
-        walls = pkg.get("wall_lines") or []
-        hds = pkg.get("holddowns") or []
-        studs = pkg.get("studs") or []
-        colls = pkg.get("collectors") or []
-        mem = pkg.get("members") or []
-        con = pkg.get("connections") or []
-        cfs = bool(walls or hds)
-        # ---- generic D/C + citation discipline on every slot type ----
-        for label, lst in (("wall", walls), ("hold-down", hds), ("stud", studs),
-                           ("collector", colls), ("member", mem), ("connection", con),
-                           ("anchorage", pkg.get("anchorage") or []),
-                           ("schedule", pkg.get("schedules") or [])):
-            for x in lst:
-                if not isinstance(x, dict) or x.get("waived"):
-                    continue
-                dcs, cited = _dc_and_cite(x)
-                if not dcs:
-                    probs.append("%s '%s' has no D/C (top-level or in checks) and no waiver"
-                                 % (label, x.get("id")))
-                elif max(dcs) > 1.001:
-                    probs.append("%s '%s' has D/C = %.3f > 1.0 -- redesign (denser fastener schedule / "
-                                 "added wall / heavier mil / rod switch) or waive with justification"
-                                 % (label, x.get("id"), max(dcs)))
-                if not cited:
-                    probs.append("%s '%s' has no cited clause (IS 801/IS 811)"
-                                 % (label, x.get("id")))
-        # ---- India C7: refuse COMPLETE if vn provisional OR R proxy ----
         try:
             import sys as _sys
             _se = str(pathlib.Path(__file__).resolve().parents[1] / "steel_engine")
             if _se not in _sys.path:
                 _sys.path.insert(0, _se)
+            import india_cfs_env  # noqa: F401
             import india_cfs_gates as _ICG
-            _cfg_path = pathlib.Path(jd) / "cfg.py"
-            _cfg = {}
-            if _cfg_path.exists():
-                import runpy
-                try:
-                    _ns = runpy.run_path(str(_cfg_path))
-                    _cfg = _ns.get("cfg") or {}
-                except Exception:
-                    _cfg = {}
-            # Also accept provenance mirrored into the package
-            if isinstance(pkg.get("cfg_snapshot"), dict):
-                _cfg = {**_cfg, **pkg["cfg_snapshot"]}
-            for k in ("wall_vn_plf_asd", "wall_vn_source", "wall_vn_cite", "wall_vn",
-                      "R", "R_source", "R_cite", "R_cfs_table9_found", "seis", "load_plan"):
-                if k in pkg and k not in _cfg:
-                    _cfg[k] = pkg[k]
-            _ok, _reasons = _ICG.complete_allowed(_cfg, pkg)
-            if not _ok:
-                for r in _reasons:
-                    probs.append("COMPLETE refused (India C7): " + r)
-                probs.append("Admin label must stay PARTIAL until wall vn source is "
-                             "manufacturer/test/documented AND R source is non-proxy")
-        except Exception as _c7e:
-            probs.append("India C7 complete gate error: %s" % _c7e)
-        # ---- CFS-specific completeness ----
-        for w in walls:
-            if isinstance(w, dict) and not w.get("waived") and \
-                    not (w.get("sheathing") and w.get("fastener_schedule")):
-                probs.append("wall slot '%s' has no sheathing + fastener_schedule -- a wall capacity "
-                             "without them is unverifiable (rubric red flag)" % w.get("id"))
-        for h in hds:
-            if isinstance(h, dict) and not h.get("waived") and h.get("DC") is None \
-                    and not (h.get("checks") or []):
-                probs.append("hold-down '%s' (T_cum = %s kip) was never designed -- size the device/rod "
-                             "for the CUMULATIVE TENSION (never the shear)" % (h.get("id"), h.get("T_cum_kip")))
-        if cfs and not con:
-            probs.append("connections list is EMPTY -- strap/uplift-clip/track-anchorage "
-                         "connections are a required deliverable")
-        if not cfs and not con:
-            probs.append("connections list is EMPTY -- connections are a required deliverable")
-        # seeded collector slots must be filled (a prose note does not count)
-        for c in list(colls) + list(con):
-            if isinstance(c, dict) and "SEEDED" in (str(c.get("type", "")) + str(c.get("basis", ""))).upper() \
-                    and c.get("DC") is None and not c.get("waived") and not (c.get("checks") or []):
-                probs.append("seeded collector slot '%s' was never designed -- collectors on "
-                             "re-entrant/step lines are REQUIRED (fill it or waive with justification)"
-                             % c.get("id"))
-        plan = ((pkg.get("framework_screen") or {}).get("plan") or {})
-        if (plan.get("reentrant") or plan.get("setback")):
-            has_coll = any(isinstance(c, dict) and "collector" in
-                           (str(c.get("id", "")) + str(c.get("type", ""))).lower() and
-                           (c.get("DC") is not None or c.get("checks") or c.get("waived"))
-                           for c in list(colls) + list(con))
-            if not has_coll:
-                probs.append("framework screen: plan is re-entrant/setback but NO designed collector "
-                             "exists in the package -- add a collector entry with demand (Om0 share), "
-                             "components and D/C (or a waiver with justification)")
-        # unresolved framework gates surfaced in the package must be addressed in prose fields
-        for key, what in (("model_vs_tributary_flags", "model-vs-tributary divergence"),
-                          ("drift_flags", "drift limit exceedance")):
-            flags = pkg.get(key) or []
-            if flags and not pkg.get(key + "_resolution"):
-                probs.append("%d unresolved %s flag(s) -- fix the design and re-run, or write the "
-                             "engineering justification into pkg['%s_resolution']"
-                             % (len(flags), what, key))
+            _cfg = pkg.get("cfg_snapshot") if isinstance(pkg.get("cfg_snapshot"), dict) else {}
+            if not _cfg:
+                _snap = pathlib.Path(jd) / "cfg_snapshot.json"
+                if _snap.exists():
+                    _cfg = json.loads(_snap.read_text(errors="replace"))
+            st = _ICG.design_status(_cfg, pkg)
+            stored = (pkg.get("design_status") or {}).get("status")
+            if stored and stored != st.get("status"):
+                probs.append("package claims design_status %r but india_cfs_gates.design_status re-derives %r -- the package "
+                             "was edited by hand; re-run pipeline.design_and_report" % (stored, st.get("status")))
+            if st.get("status") != "complete":
+                for r in (st.get("reasons") or [])[:10]:
+                    probs.append("design_status %s: %s" % (st.get("status"), r))
+        except Exception as _e:
+            probs.append("India design_status gate error: %s" % _e)
+        # ---- deliverable completeness (independent of the gate) ----
+        for label, key in (("cfs member", "cfs_members"), ("diaphragm", "diaphragm")):
+            for x in pkg.get(key) or []:
+                if isinstance(x, dict) and x.get("waived"):
+                    probs.append("%s '%s' is waived -- waivers are not permitted (fix the design)" % (label, x.get("id") or x.get("storey")))
+        lat = pkg.get("lateral_frame") or {}
+        if not lat:
+            probs.append("no lateral_frame in the package -- the D3 hot-rolled frame (or the elastic all-CFS portal) was not run")
+        elif not (lat.get("connections") or pkg.get("cfs_connections")):
+            probs.append("connections list is EMPTY -- frame / portal connections and bases are a required deliverable")
+        if not pkg.get("cfs_members"):
+            probs.append("cfs_members is EMPTY -- studs / joists / purlins / girts are the CFS deliverable")
+        if pkg.get("consistency"):
+            probs.append("consistency flags unresolved: %s" % "; ".join(map(str, pkg["consistency"][:4])))
     except Exception as e:
-        return ["completion gate could not read calc_package.json: %s" % e]
+        return ["completion gate could not read calc_package_cfs.json: %s" % e]
     return probs[:12]
 
 
 
 # hardening #7: phase-sliced contract hints -- tiny, in-context, fired at most once each.
 _PHASE_HINTS = (
-    ("feet", re.compile(r"look like FEET", re.I),
-     "UNITS: the engine is KIP-INCH. Multiply every story height / bay spacing by 12 and re-run "
-     "design_and_report BEFORE chasing analysis numbers (a feet-cfg makes every result ~12x wrong)."),
-    ("orient", re.compile(r"ORIENTATION: drift in [XY] is", re.I),
-     "ORIENTATION (frame path -- portals): a frame column's STRONG axis must lie IN its "
-     "frame's plane. Set strong_dir per line in add_column; fix strong_dir, rebuild, re-check -- "
-     "do not resize members to chase orientation drift."),
-    ("tribgate", re.compile(r"model.vs.tributary|model_vs_tributary", re.I),
-     "MODEL-VS-TRIBUTARY GATE: the OpenSees wall model and the independent tributary validator "
-     "disagree on a line's shear. Either the model is wrong (fix segments/positions/stiffness "
-     "inputs and re-run) or the divergence is real physics (open front, plan offset, mixed "
-     "diaphragms) -- then write the justification into pkg['model_vs_tributary_flags_resolution']. "
-     "Never leave the flag unaddressed."),
-    ("preflight", re.compile(r"\[preflight\] R22.*\[ERROR\]", re.S),
-     "PREFLIGHT ERRORS above are cfg mis-declarations -- fix them in cfg.py and re-run the pipeline "
-     "before doing ANY member design; every downstream number changes."),
-    ("collector", re.compile(r"SEEDED - REQUIRED", re.I),
-     "The framework SEEDED a collector slot because the footprint is irregular: design it like any "
-     "connection (Omega0 combos per ASCE 7-22 12.10.2.1, +25% if Type 2) and fill "
-     "limit_state/cited/capacity/DC -- the completion gate checks it."),
-    ("driftfail", re.compile(r"\[FAIL\] drift|drift_flags", re.I),
-     "DRIFT FAIL: stiffen the failing wall line (longer/added segments, two-sided or thicker "
-     "sheathing, denser edge fasteners, stiffer anchorage -- rod in place of a soft hold-down; the "
-     "slip and anchorage TERMS of the S400 deflection are where light-frame drift usually lives) "
-     "and re-run; frame paths: deeper/heavier members. If the failing 'story' is a declared "
-     "split-level inter-diaphragm offset, declare cfg['drift_exempt_stories']={story: 'reason'} "
-     "and design the step transfer detail instead."),
+    ("units", re.compile(r"look like FEET|look like INCHES|units.*must be 'm'", re.I),
+     "UNITS: the India cfg is METRES / kN/m2 (cfg['units']='m'); the engines convert to N-mm themselves. Fix the "
+     "cfg and re-run design_and_report BEFORE chasing analysis numbers."),
+    ("preflight", re.compile(r"\[preflight\].*\[ERROR\]", re.S),
+     "PREFLIGHT ERRORS above are cfg mis-declarations (banned US keys, a foreign lateral system, an SFIA label, a missing "
+     "site / occupancy / load or k2 table) -- fix them in cfg.py and re-run the pipeline before anything else."),
+    ("system", re.compile(r"LateralSystemError|not permitted in Zone|IS 18168", re.I),
+     "LATERAL SYSTEM: the D3 / L7 system for the zone is enforced (II OCBF R 4.0; III-V SCBF R 4.5; EBF R 5.0; SMRF "
+     "portal only h < 15 m; IS 18168 1.3 forbids SCBF in Zone V). Set lateral_frame.system / R to the resolved system."),
+    ("driftfail", re.compile(r"drift.*(fail|exceed)|0\.004", re.I),
+     "DRIFT: IS 1893 7.11.1 storey drift <= 0.004 h at VB (gamma 1.0); portals also IS 800 Table 6 h/150 at 1.0 W. "
+     "Stiffen the frame (deeper columns, X-bracing in more bays, fixed bases, knee braces on a portal); never raise "
+     "cfg['drift_limit'] and never declare a storey exempt."),
+    ("eor", re.compile(r"EOR input|not in corpus|found:false", re.I),
+     "EOR INPUT / found:false: declare the value in cfg['eor_inputs'] with its formula, source and 'VERIFY', or cite a "
+     "test / product value with basis 'test'. Never fill the gap from memory or from a foreign standard."),
+    ("brace_share", re.compile(r"brace_tension_share", re.I),
+     "The vendored IS 800 12.8.2.4 brace tension-share check fails where gravity compression dominates a light braced "
+     "bay: report it as an open engineering item for the hot-rolled lead (the check should use EQ-only brace forces); "
+     "do not waive it and do not resize braces to chase it."),
 )
 
 
@@ -611,17 +533,16 @@ def _chat_with_retry(base_url, api_key, model, messages, max_tok, reasoning=None
 
 # ---------------- main design loop ----------------
 _SEARCH_FILLER = {"strength", "section", "equation", "equations", "design", "flexural", "members",
-                  "member", "steel", "provisions", "aisc", "nominal", "compute", "calculate", "limit",
+                  "member", "steel", "provisions", "clause", "nominal", "compute", "calculate", "limit",
                   "state", "check", "value", "values", "requirement", "requirements"}
 
 def _search_anchor(query):
     """Coarse fingerprint of a RAG query so REWORDED variants of the same lookup collapse to one signature.
-    Prefer the clause code(s) (IS 801 / AISI-legacy: E2, G5, F2.1, J4 -> base 'j4'; S400: E1-E4; App-1 dotted
-    sections like 1.1); else a small set of content words."""
+    Prefer the IS dotted clause id(s) (6.6.1.1, 5.2.1.1, 8.1); else a small set of content words."""
     q = (query or "").lower()
-    codes = [re.sub(r"-\d+$", "", c) for c in re.findall(r"\b[a-k]\d+(?:\.\d+)?(?:-\d+)?\b", q)]
+    codes = re.findall(r"\b\d+\.\d+(?:\.\d+)*\b", q)         # IS dotted clause ids
     if not codes:
-        codes = re.findall(r"\b\d+\.\d+(?:\.\d+)*\b", q)     # numeric dotted sections (S100 App. 1)
+        codes = [re.sub(r"-\d+$", "", c) for c in re.findall(r"\b[a-k]\d+(?:\.\d+)?(?:-\d+)?\b", q)]
     if codes:
         return frozenset(codes[:3])                      # e.g. 'F2', 'F2-2', 'F2-5' all -> {'f2'}
     toks = [t for t in re.findall(r"[a-z]{4,}", q) if t not in _SEARCH_FILLER]
@@ -648,8 +569,8 @@ def _resume_preamble(ws, building):
         if p.exists():
             src = p.read_text(encoding="utf-8", errors="replace")[:20000]
             return ("RESUME -- a previous design for this building exists. Below is its saved cfg.py: read it, keep "
-                    "what is sound, apply any requested change, then re-run pipeline.design_and_report and update "
-                    "calc_package.json.\n\nEXISTING cfg.py:\n```python\n%s\n```\n\n" % src)
+                    "what is sound, apply any requested change, then re-run pipeline.design_and_report (which rewrites "
+                    "design/calc_package_cfs.json).\n\nEXISTING cfg.py:\n```python\n%s\n```\n\n" % src)
     except Exception:
         pass
     return ""
@@ -701,8 +622,8 @@ def run_design(ws, executor, base_url, api_key, model, building, brief, max_tok=
                 messages.append({"role": "user", "content":
                     brief + "\n\n(Apply this change to the existing design: edit jobs/" + building +
                     "/cfg.py, re-run pipeline.design_and_report for fresh demands, re-derive the affected "
-                    "IS 801 capacities/schedules into calc_package.json, run consistency.check, then re-render with "
-                    "report.build_report. Keep everything else as-is.)"})
+                    "IS 801 / IS 800 results into design/calc_package_cfs.json, read STATUS.md and iterate. Keep everything "
+                    "else as-is.)"})
                 yield {"type": "status", "text": f"continuing '{building}' with your new instruction ({len(messages)} messages in context)"}
             else:                           # empty brief -> plain resume of an interrupted run
                 yield {"type": "status", "text": f"resumed '{building}' from saved conversation ({len(messages)} messages)"}
@@ -714,14 +635,18 @@ def run_design(ws, executor, base_url, api_key, model, building, brief, max_tok=
         head = _resume_preamble(ws, building) if resume else ""
         user = head + f"BUILDING NAME: {building}\n\nDESIGN BRIEF:\n{brief}\n\nDesign this building now."
         if re.search(r"podium|\bover\b[^.\n]{0,40}(concrete|steel frame)|two.stage", brief or "", re.I):
-            user += ("\n\n[framework note] This brief looks like a PODIUM (CFS over concrete/steel). Per the "
-                     "contract you must compute two-stage ELF eligibility (12.2.3.2: >=10x stiffness, <=1.1x "
-                     "period), amplify the reactions handed to the podium by (R_upper/rho_upper)/(R_lower/"
-                     "rho_lower), and take the CFS base as the TOP of the podium for height limits and drift.")
-        if re.search(r"perforated|type\s*ii", brief or "", re.I):
-            user += ("\n\n[framework note] This brief specifies TYPE II (perforated) shear walls: show the "
-                     "adjustment-factor calculation, anchor at wall ENDS plus distributed track anchorage "
-                     "between -- hold-downs at every pier silently revert the wall to Type I (fail).")
+            user += ("\n\n[framework note] This brief looks like a PODIUM building. Under D3 there is no two-stage "
+                     "analysis: the hot-rolled braced frames run CONTINUOUS from the foundation through the podium "
+                     "storeys to the roof as ONE 3-D model (IS 1893 7.x, IS 800 Section 12); the podium storeys carry "
+                     "their own heavier loads in geometry / loads and the CFS floors above are gravity members.")
+        if re.search(r"portal", brief or "", re.I) and re.search(r"hyderabad", brief or "", re.I):
+            user += ("\n\n[framework note] This is the ONE all-CFS portal brief: cfg['all_cfs_portal'] = True, "
+                     "cfg['portal']['seismic_basis'] = 'elastic_R1' (R = 1.0 stated), IS 801 working stress, wind governs; "
+                     "see tests/fixtures/IN_CFS_Ex5/build_and_run.py for the schema.")
+        elif re.search(r"portal|warehouse|cold.?storage", brief or "", re.I):
+            user += ("\n\n[framework note] A portal brief outside Hyderabad is a HOT-ROLLED IS 800 SMF portal "
+                     "(SMRF R 5.0, h < 15 m) with cold-formed purlins / girts / mezzanine joists to IS 801; declare it "
+                     "in cfg['lateral_frame'] with system 'SMF'.")
         if images:                              # vision: attach reference image(s) as OpenAI image_url parts
             user_content = [{"type": "text", "text": user}]
             for im in images:
@@ -765,11 +690,10 @@ def run_design(ws, executor, base_url, api_key, model, building, brief, max_tok=
         if searches >= config.RAG_SEARCH_SOFTCAP and not nudged:
             nudged = True
             messages.append({"role": "user", "content":
-                "You have gathered ample IS 801/811 references -- STOP searching now and DERIVE the capacities: apply "
-                "the clauses you found to the demands and fill every seeded slot in design/calc_package.json "
-                "(wall_lines with sheathing + fastener_schedule, holddowns, studs, collectors, connections, "
-                "capacity_design), then run consistency.check and report.build_report. "
-                "Re-search only ONE specific equation if it is genuinely missing."})
+                "You have gathered ample IS 801/811/875/1893 references -- STOP searching now: write cfg.py with every "
+                "retrieval hit cited in cfg['load_plan']['retrieval'] and run pipeline.design_and_report(name, cfg); "
+                "the pipeline computes every capacity from the cited clauses. Re-search only ONE specific clause if it "
+                "is genuinely missing."})
         try:
             try:
                 out = yield from _chat_with_retry(base_url, api_key, model, messages, max_tok, rparam,
@@ -1019,7 +943,7 @@ def _milestones(name, args, result):
     if name == "write_file":
         p = (args.get("path") or "").lower()
         if p.endswith("cfg.py"): out.append("cfg.py saved")
-        elif p.endswith("calc_package.json"): out.append("Capacities written to calc_package.json")
+        elif p.endswith("calc_package_cfs.json"): out.append("WARNING: calc_package_cfs.json written by hand -- the gate re-derives the status")
     if name == "run_python" and result.get("returncode") == 0:
         c = args.get("code", "")
         if "design_and_report" in c: out.append("Model analysed — demands + figures + report generated")
@@ -1031,39 +955,23 @@ def _milestones(name, args, result):
 
 # ---------------- MOCK design (offline pipe test) ----------------
 def _mock_design(ws, executor, building, brief):
+    """Scripted run to exercise the sandbox pipe (no LLM): imports the India engines and computes one IS 801 hand value
+    (the CLR100X50X15X2 stud of the Ex1 reference building) -- no wall path, no portal LRFD combos (D3)."""
     yield {"type": "status", "text": "MOCK model -- scripted run to exercise the sandbox pipe (no LLM)"}
-    if "portal" in (brief or "").lower() or "canopy" in (brief or "").lower():
-        yield from _mock_design_portal(ws, executor, building)
-        return
     seq = [
         ("new_activity_log", {"building": building}),
         ("write_file", {"path": f"jobs/{building}/cfg.py",
-                        "content": "# MOCK CFS wall-path cfg (brief-facing feet/psf)\n"
-                                   "cfg = dict(arch='MOCK CFS walls', stories=2, "
-                                   "heights_ft=[10.0, 9.5], plan_ft=(60.0, 30.0))\n"}),
+                        "content": "# MOCK India CFS cfg (metres / kN/m2) -- see contract/AGENT_START.md for the full schema\n"
+                                   "cfg = dict(name='MOCK', jurisdiction='india', units='m', design_basis='IS801_WSM')\n"}),
         ("run_python", {"code":
-            "import cfs_systems as CS, wall_line as WL, cfs_engine as CE, cfs_pipeline as CP\n"
-            "print('cfs engine OK:', len(CS.SYSTEMS), 'systems;',\n"
-            "      'openseespy', 'PRESENT' if CE.HAVE_OPS else 'absent (pure-python path)')\n"
-            "segs = {k: [(12.0, 9.5)] for k in (1, 2)}\n"
-            "cfg = dict(stories=2, heights_ft=[10.0, 9.5], plan_ft=(60.0, 30.0),\n"
-            "           D_floor=35.0, D_roof=20.0, clad=10.0, snow=0.0, L_floor=40.0,\n"
-            "           seis=CS.seis_cfs(1.0, 0.45, 0.4, 'wsp_shearwall'), system='wsp_shearwall',\n"
-            "           risk_cat='II', structure_kind='wall', analysis_fidelity=0,\n"
-            "           diaphragm='flexible',\n"
-            "           lines_x=[WL.WallLine('A', 0.0, segs), WL.WallLine('B', 30.0, segs)],\n"
-            "           lines_y=[WL.WallLine('1', 0.0, segs), WL.WallLine('2', 60.0, segs)],\n"
-            "           wall_props=dict(chord_area_in2=1.2, Gp_kip_in=9.0, en_in=0.03,\n"
-            "                           k_anchor_kip_in=50.0))\n"
-            "res = CE.run(cfg)\n"
-            "print('ELF V = %.1f kip; Cs = %.4f' % (res['elf']['V'], res['elf']['Cs']))\n"
-            "import os\n"
-            "os.makedirs('design', exist_ok=True)\n"
-            "p, pkg = CP.write_package('MOCK', cfg, res, 'design')\n"
-            "print('seeded package:', p, '-', len(pkg['wall_lines']), 'wall slots,',\n"
-            "      len(pkg['holddowns']), 'hold-downs')\n"
-            "open('mock_marker.txt', 'w').write('sandbox ran the CFS engine')\n"
-            "print('wrote', os.path.abspath('mock_marker.txt'))\n"}),
+            "import india_cfs_env, is811_sections as S, is801_members as M, india_cfs_basis as B\n"
+            "sec = S.props('CLR100X50X15X2')\n"
+            "print('IS 811 catalogue OK:', len(S.list_labels()), 'sections;', sec['label'], 'A =', sec['A'], 'mm2')\n"
+            "r = M.compression_allowable(sec, 240.0, 3000.0, 300.0, 300.0, braced_against_twist=True)\n"
+            "print('IS 801 6.6.1.1 Fa1 = %.1f MPa (Q = %.3f)' % (r['Fa1_MPa'], r['Q']))\n"
+            "rows = B.cfs_combinations({'cfs_combinations': 'auto', 'story_forces': {'W_X': {'1': [1, 0, 0]}, 'EQ_X': {'1': [1, 0, 0]}}})\n"
+            "print('IS 875-5 8.1 combinations:', len(rows), 'rows; WL/EL increase', [x['allowable_increase'] for x in rows if x['fW']][:1])\n"
+            "open('mock_marker.txt', 'w').write('sandbox ran the India CFS engine')\n"}),
     ]
     for i, (nm, args) in enumerate(seq, 1):
         yield {"type": "tool", "step": i, "name": nm, "title": _tool_title(nm, args)}
@@ -1073,50 +981,7 @@ def _mock_design(ws, executor, building, brief):
             yield {"type": "error", "text": "sandbox run_python failed: " + _result_preview(nm, result)}
             return
     yield {"type": "assistant", "text":
-           f"MOCK run complete for '{building}'. The sandbox imported the CFS engine, ran the wall-path "
-           f"solve + package seeder, and wrote artifacts into jobs/{building}/. Wire a real LLM (set its "
+           f"MOCK run complete for '{building}'. The sandbox imported the India CFS engine (IS 811 catalogue, IS 801 "
+           f"member checks, IS 875-5 combinations) and wrote artifacts into jobs/{building}/. Wire a real LLM (set its "
            f"base-url + key in Settings) to produce an actual design. What would you like next?"}
-    yield {"type": "done", "building": ws.building}
-
-
-def _mock_design_portal(ws, executor, building):
-    """MOCK for portal/canopy briefs (Gate 4): exercises cfs_frame (LRFD combos, Tier-1
-    effective stiffness, net uplift, torsion companion when single-channel) + the portal
-    package seeder end-to-end in the sandbox."""
-    seq = [
-        ("new_activity_log", {"building": building}),
-        ("write_file", {"path": f"jobs/{building}/cfg.py",
-                        "content": "# MOCK CFS portal cfg (brief-facing feet/psf)\n"
-                                   "cfg = dict(arch='MOCK CFS portal', span_ft=40.0)\n"}),
-        ("run_python", {"code":
-            "import cfs_frame as CF, cfs_pipeline as CP\n"
-            "print('cfs_frame OK; openseespy',\n"
-            "      'PRESENT' if CF.HAVE_OPS else 'absent (pure-python path)')\n"
-            "cfg = CF._demo_cfg()\n"
-            "res = CF.run(cfg)\n"
-            "g = res['governing']\n"
-            "print('portal run: %d combos; governing col=%s raf=%s; eave sway %.2f in'\n"
-            "      % (len(res['combos']), g['col'], g['raf'],\n"
-            "         res['service']['eave_sway_in']))\n"
-            "import os\n"
-            "os.makedirs('design', exist_ok=True)\n"
-            "p, pkg = CP.write_portal_package('MOCK-portal', cfg, res, 'design')\n"
-            "print('seeded portal package:', p, '-', len(pkg['members']), 'members,',\n"
-            "      len(pkg['connections']), 'connections,', len(pkg['schedules']),\n"
-            "      'schedules; net uplift %.1f kip (%s)'\n"
-            "      % (pkg['anchorage'][0]['T_net_uplift_kip'],\n"
-            "         pkg['anchorage'][0]['uplift_combo']))\n"
-            "open('mock_marker.txt', 'w').write('sandbox ran the CFS portal engine')\n"}),
-    ]
-    for i, (nm, args) in enumerate(seq, 1):
-        yield {"type": "tool", "step": i, "name": nm, "title": _tool_title(nm, args)}
-        result = dispatch(nm, args, ws, executor)
-        yield {"type": "tool_result", "step": i, "name": nm, "summary": _result_preview(nm, result)}
-        if nm == "run_python" and isinstance(result, dict) and result.get("returncode") not in (0, None):
-            yield {"type": "error", "text": "sandbox run_python failed: " + _result_preview(nm, result)}
-            return
-    yield {"type": "assistant", "text":
-           f"MOCK portal run complete for '{building}'. The sandbox ran the cfs_frame portal solve "
-           f"(LRFD combos, Tier-1 effective stiffness, net-uplift case) and seeded the portal "
-           f"calc package. Wire a real LLM to produce an actual design."}
     yield {"type": "done", "building": ws.building}

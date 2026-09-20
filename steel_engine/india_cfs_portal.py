@@ -588,14 +588,29 @@ def bolt_group_75(fy, t_sheet, bolts, M_Nmm, V_N, N_N, wind_eq, n_ply):
     return out
 
 
-def base_check(cfg, base, R_N, wind_eq):
+IS800_1114_CITE = ("IS 800:2007 11.1.4: permissible stresses may be increased by 33 percent in combinations involving wind or "
+                   "seismic loads; anchor bolts limited to 25 percent; no increase when the wind / seismic load is the major load "
+                   "(acting with dead load alone)")
+
+
+def is800_wsm_increase(wind_eq, with_imposed, anchor=False):
+    """IS 800:2007 11.1.4 (corpus exact_section 11.1.4): 1.33 members / 1.25 anchor bolts in W / EL combinations that also
+    carry imposed load; 1.0 when W / EL acts with dead load alone (the 'major load' rule) and for gravity combinations."""
+    if not wind_eq or not with_imposed:
+        return 1.0
+    return 1.25 if anchor else 1.33
+
+
+def base_check(cfg, base, R_N, wind_eq, with_imposed=True):
     """Column base under working reactions (H, V, Mz): anchor bolts IS 800 11.6.2 (0.6 x 10.3 nominal), plate bending
-    11.4.1(c) 0.75 fy, concrete bearing = EOR input (IS 456 not in the corpus)."""
+    11.4.1(c) 0.75 fy, concrete bearing = EOR input (IS 456 not in the corpus).  Increases per IS 800 11.1.4 (not IS 801
+    6.1.2): 33 % plate / 25 % anchors only when W / EL acts together with imposed load."""
     H, V, Mz = R_N
     B_, L_, t = float(base["B_mm"]), float(base["L_mm"]), float(base["t_plate_mm"])
     fyp = float(base["fy_plate_MPa"])
     an = base["anchors"]; n = int(an["n_total"]); nt = int(an["n_tension"]); d = float(an["d_mm"])
-    inc = B.INCREASE_WL_EL if wind_eq else 1.0
+    inc = is800_wsm_increase(wind_eq, with_imposed, anchor=False)
+    inc_a = is800_wsm_increase(wind_eq, with_imposed, anchor=True)
     checks = {}
     # bearing pressure (linear) on the plate: q = V/(B L) +- 6 M/(B L^2); uplift when V < 0
     q_max = max(V, 0.0) / (B_ * L_) + 6.0 * abs(Mz) / (B_ * L_ ** 2)
@@ -621,11 +636,11 @@ def base_check(cfg, base, R_N, wind_eq):
                                 p_mm=float(an.get("pitch_mm", 3 * d)), d0_mm=d + 2.0)
     if bc.get("Tnb_N") and bc.get("Vnsb_N"):
         Asb = bc["Asb_mm2"]
-        fatb = 0.60 * bc["Tnb_N"] / Asb * inc; fasb = 0.60 * bc["Vnsb_N"] / Asb * inc
-        checks["anchor tension 11.6.2.3"] = M._rec(T_bolt / Asb, fatb, "IS 800:2007 11.6.2.3", "fatb = 0.60 Tnb/Asb (working stress)",
-                                                  capacity_basis="IS800_WSM", allowable_increase=inc, T_bolt_N=T_bolt)
-        checks["anchor shear 11.6.2.1"] = M._rec(V_bolt / Asb, fasb, "IS 800:2007 11.6.2.1", "fasb = 0.60 Vnsb/Asb (working stress)",
-                                                capacity_basis="IS800_WSM", allowable_increase=inc, V_bolt_N=V_bolt)
+        fatb = 0.60 * bc["Tnb_N"] / Asb * inc_a; fasb = 0.60 * bc["Vnsb_N"] / Asb * inc_a
+        checks["anchor tension 11.6.2.3"] = M._rec(T_bolt / Asb, fatb, "IS 800:2007 11.6.2.3", "fatb = 0.60 Tnb/Asb (working stress); " + IS800_1114_CITE,
+                                                  capacity_basis="IS800_WSM", allowable_increase=inc_a, T_bolt_N=T_bolt)
+        checks["anchor shear 11.6.2.1"] = M._rec(V_bolt / Asb, fasb, "IS 800:2007 11.6.2.1", "fasb = 0.60 Vnsb/Asb (working stress); " + IS800_1114_CITE,
+                                                capacity_basis="IS800_WSM", allowable_increase=inc_a, V_bolt_N=V_bolt)
         comb = (T_bolt / Asb / fatb) ** 2 + (V_bolt / Asb / fasb) ** 2
         checks["anchor combined"] = M._rec(comb, 1.0, "IS 800:2007 11.6.3 / 10.3.6 form", "(f/fa)^2 + (v/va)^2 <= 1 at working stress",
                                           capacity_basis="IS800_WSM", allowable_increase=1.0)
@@ -633,13 +648,13 @@ def base_check(cfg, base, R_N, wind_eq):
     a = float(base.get("a_mm", (L_ - float(base.get("col_d_mm", L_ / 2.0))) / 2.0))
     Mstrip = q_max * a ** 2 / 2.0                                  # N-mm per mm width
     fb = 6.0 * Mstrip / t ** 2
-    checks["plate bending 11.4.1(c)"] = M._rec(fb, 0.75 * fyp * inc, "IS 800:2007 11.4.1 (c)", "solid plates bending: fab = 0.75 fy",
+    checks["plate bending 11.4.1(c)"] = M._rec(fb, 0.75 * fyp * inc, "IS 800:2007 11.4.1 (c)", "solid plates bending: fab = 0.75 fy; " + IS800_1114_CITE,
                                               capacity_basis="IS800_WSM", allowable_increase=inc, a_mm=a, q_max_MPa=q_max)
     if T_total > 0:
         # uplift side: plate bending from the anchor pull over the same cantilever (per tension row)
         Mt = T_total * a / (B_)
         checks["plate bending (uplift side)"] = M._rec(6.0 * Mt / t ** 2, 0.75 * fyp * inc, "IS 800:2007 11.4.1 (c)",
-                                                      "solid plates bending: fab = 0.75 fy", capacity_basis="IS800_WSM", allowable_increase=inc)
+                                                      "solid plates bending: fab = 0.75 fy; " + IS800_1114_CITE, capacity_basis="IS800_WSM", allowable_increase=inc)
     dcs = [c["dc"] for c in checks.values() if isinstance(c.get("dc"), (int, float))]
     return {"checks": checks, "dc": max(dcs) if dcs else None, "ok": (None if any(c.get("ok") is None for c in checks.values())
                                                                        else all(c.get("ok") for c in checks.values())),
@@ -740,7 +755,7 @@ def run(cfg, root):
                            snow_summary={"applicable": float(cfg["loads"].get("snow", 0.0)) > 0})
     combos = B.cfs_combinations(plan_for_combos, cfg)
     has_mezz = bool(cfg.get("mezzanine"))
-    results = {}; wind_eq = {}
+    results = {}; wind_eq = {}; with_imposed = {}
     for c in combos:
         fac = {"D": c["fD"], "Lr": c["fL"] if not c.get("fS") else 0.0, "S": c.get("fS", 0.0), "mezzD": c["fD"] if has_mezz else 0.0,
                "mezzL": (c["fL"] if has_mezz else 0.0), "E": c["fE"]}
@@ -755,6 +770,7 @@ def run(cfg, root):
         results[c["label"]] = {"forces": mf, "reactions": sol["reactions"], "u": sol["u"], "pdelta": sol["pdelta"], "factors": fac,
                                "meta": meta}
         wind_eq[c["label"]] = bool(c["wind_eq"])
+        with_imposed[c["label"]] = bool(c["fL"]) or bool(c.get("fS"))     # IS 800 11.1.4 'major load' rule for the WSM bases
     # ---- K (IS 800 Annex D, sway) ----
     Lc = meta0["He"]; Lr = meta0["raf_len_half"]
     K_ext, b1, b2 = sway_K(secs["col"]["Ix"], Lc, secs["raf"]["Ix"] / Lr, meta0["fixed_base"])
@@ -869,14 +885,14 @@ def run(cfg, root):
         worst = None
         for cl, r in results.items():
             for t, R_ in r["reactions"].items():
-                bc = base_check(cfg, base, R_, wind_eq[cl])
+                bc = base_check(cfg, base, R_, wind_eq[cl], with_imposed.get(cl, False))
                 if worst is None or (bc["dc"] or 0) > (worst[1]["dc"] or 0):
                     worst = (cl, bc, t)
         cl, bc, t = worst
         conns.append({"id": "column-base", "type": "base plate %sx%sx%s, %d anchors M%d" % (base["B_mm"], base["L_mm"], base["t_plate_mm"], base["anchors"]["n_total"], base["anchors"]["d_mm"]),
                       "checks": [_mrow(cl, k, v) for k, v in bc["checks"].items()], "value": bc["reactions"]["V_N"], "limit": None,
                       "dc": bc["dc"], "ok": bc["ok"], "governing_combo": cl, "reactions": bc["reactions"], "T_uplift_N": bc["T_total_N"],
-                      "clause": "IS 800:2007 11.6.2 / 11.4.1 (c) working stress; concrete bearing EOR input", "capacity_basis": "IS800_WSM",
+                      "clause": "IS 800:2007 11.6.2 / 11.4.1 (c) working stress (11.1.4 increases); concrete bearing EOR input", "capacity_basis": "IS800_WSM",
                       "allowable_increase": 1.0, "demand_level": "working"})
     else:
         conns.append({"id": "column-base", "type": "base", "value": None, "limit": None, "dc": None, "ok": None, "clause": "IS 800 11.6.2",

@@ -37,6 +37,11 @@ COLLECTION_TO_STEM: dict[str, str] = {
     "IS_1893": "IS_1893_Part_1_2016",
     "IS1893_P1": "IS_1893_Part_1_2016",
     "IS1893_PART1": "IS_1893_Part_1_2016",
+    # Hot-rolled lateral frame (D3) -- GATED by india_cfs_gates.gate_is800_query (purpose allowlist)
+    "IS800": "IS_800_2007",
+    "IS_800": "IS_800_2007",
+    "IS18168": "IS_18168_2023",
+    "IS_18168": "IS_18168_2023",
 }
 
 for _k, _v in list(COLLECTION_TO_STEM.items()):
@@ -58,6 +63,8 @@ STEM_TO_COLLECTION: dict[str, str] = {
     "IS_875_Part_4_1987": "engineering_standards_IS875_P4",
     "IS_875_Part_5_1987": "engineering_standards_IS875_P5",
     "IS_1893_Part_1_2016": "engineering_standards_IS1893",
+    "IS_800_2007": "engineering_standards_IS800",
+    "IS_18168_2023": "engineering_standards_IS18168",
 }
 
 INDIA_CORPUS_ROOT = "/workspace/engineering_rag_india"
@@ -76,6 +83,12 @@ DESIGN_COLLECTIONS = [
     "engineering_standards_IS801",
     "engineering_standards_IS811",
     "engineering_standards_IS811_Amd1",
+]
+
+# Hot-rolled lateral frame only (D3 / L7): allowed with purpose lateral_frame_is800 / serviceability_limits_table6.
+LATERAL_FRAME_COLLECTIONS = [
+    "engineering_standards_IS800",
+    "engineering_standards_IS18168",
 ]
 
 
@@ -108,8 +121,17 @@ def is_india_spec_collection(name: str) -> bool:
     if stem_for_collection(name):
         return True
     return "engineering_standard" in c or any(
-        t in c for t in ("is801", "is811", "is875", "is1893", "aisi", "s100", "s240", "s400", "asce")
+        t in c for t in ("is801", "is811", "is875", "is1893", "is800", "is18168")
     )
+
+
+US_COLLECTION_MARKERS = ("aisi", "s100", "s240", "s400", "asce", "aisc", "sdpws")
+
+
+def is_us_collection(name: str) -> bool:
+    """AISI / ASCE / AISC collections are not a design basis on the India programme (D3): refuse them."""
+    c = (name or "").lower().replace("-", "_")
+    return any(t in c for t in US_COLLECTION_MARKERS)
 
 
 # Extra hosted-registry aliases (rag_server naming drift + hyphenated / short forms)

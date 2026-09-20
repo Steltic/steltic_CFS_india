@@ -192,8 +192,9 @@ class JobWorkspace:
         "IS_875_Part_4_1987": "engineering_standards_IS875_P4",
         "IS_875_Part_5_1987": "engineering_standards_IS875_P5",
         "IS_1893_Part_1_2016": "engineering_standards_IS1893", "IS1893": "engineering_standards_IS1893",
-        "AISI_S100": "engineering_standards_S100", "AISI_S240": "engineering_standards_S240",
-        "AISI_S400_20": "engineering_standards_S400", "ASCE7": "engineering_standards_ASCE7",
+        # hot-rolled lateral frame only -- gated by india_cfs_gates.gate_is800_query (purpose allowlist, C6)
+        "IS_800_2007": "engineering_standards_IS800", "IS800": "engineering_standards_IS800",
+        "IS_18168_2023": "engineering_standards_IS18168", "IS18168": "engineering_standards_IS18168",
     }
 
     def _policy_plan(self, query: str, clause: str, chapter: str, qtype: str) -> dict:
@@ -253,6 +254,17 @@ class JobWorkspace:
         if doc and str(doc).strip():                  # the policy names ONE document by its canonical stem
             d = str(doc).strip()
             collection = self.DOC_COLLECTIONS.get(d.upper(), self.DOC_COLLECTIONS.get(d, collection if d.lower().startswith("engineering_standards") else f"engineering_standards_{d}"))
+        # ---- D3: AISI / ASCE / AISC collections are not a design basis on the India programme ----
+        try:
+            from .india_collections import is_us_collection as _is_us
+            if _is_us(collection) or _is_us(doc or ""):
+                self.log("search_engineering_standards", f"[{collection}] refused US collection: {query}", "refused")
+                return {"results": [], "found": False, "refused": True, "collection": collection, "query": query,
+                        "note": "REFUSED: AISI / ASCE / AISC collections are not a design basis on the India programme (D3). "
+                                "CFS members: IS_801_1975 / IS_811_1987; loads: IS_875_Part_* / IS_1893_Part_1_2016; "
+                                "hot-rolled lateral frame: IS_800_2007 / IS_18168_2023 with purpose=lateral_frame_is800."}
+        except ImportError:
+            pass
         # ---- C6: hard-ban IS_800_2007 on CFS India unless allowlisted purpose ----
         try:
             import sys as _sys
@@ -762,10 +774,10 @@ class JobWorkspace:
         return self._maybe_honest_amd1(collection, out)
 
     # ---------------- RAG-to-file: keep raw chunks on disk, out of the agent's context ----------------
-    _CLAUSE_RE = re.compile(r"\b[A-N]\d+(?:\.\d+)*(?:-\d+[a-z]?)?\b")   # AISI-style clause/eq codes: E2, F2.1, G5-1, H1-1, J4.3 (S100 mirrors AISC lettering)
+    _CLAUSE_RE = re.compile(r"\b(?:[A-N]\d+(?:\.\d+)*(?:-\d+[a-z]?)?|\d+\.\d+(?:\.\d+)*)\b")   # IS dotted clause ids (6.6.1.2, 5.2.1.1) + lettered/eq forms kept for the QFM
 
     def _is_spec_collection(self, collection: str) -> bool:
-        """RAG-to-file applies only to the SPECIFICATION corpora (AISI/ASCE). OpenSees/example RAGs
+        """RAG-to-file applies only to the SPECIFICATION corpora (IS 801 / 811 / 875 / 1893 / 800). OpenSees/example RAGs
         stay inline -- those return short usage examples the agent should see directly."""
         c = (collection or "").lower()
         if "opensees" in c:
@@ -777,7 +789,7 @@ class JobWorkspace:
         except Exception:
             pass
         return "engineering_standard" in c or any(
-            t in c for t in ("is801", "is811", "is875", "is1893", "s100", "s240", "s400", "aisi", "asce")
+            t in c for t in ("is801", "is811", "is875", "is1893", "is800", "is18168")
         )
 
     def _collection_stem(self, collection: str):
