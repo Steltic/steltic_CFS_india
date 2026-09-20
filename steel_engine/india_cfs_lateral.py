@@ -243,9 +243,16 @@ def diaphragm_demands(cfg, lateral):
             v_unit = F / 1e3 / (2.0 * B)      # kN/m along each of the two extreme frame lines (length B across the span)
             M = F * Lspan / 8.0               # N-m: simple-span diaphragm between the two extreme lines
             chord = M / B                     # N
+            dcap = cfg.get("diaphragm_capacity") or {}
+            cap = dcap.get("v_allow_kN_per_m")
+            rec_cap = {"capacity": None, "capacity_basis": "test", "allowable_increase": 1.0, "dc": None, "ok": None, "found": False}
+            if cap:
+                inc = float(dcap.get("allowable_increase", 1.0))
+                rec_cap = {"capacity": float(cap) * inc, "value": v_unit, "limit": float(cap) * inc, "capacity_basis": dcap.get("basis", "test"),
+                           "allowable_increase": inc, "dc": v_unit / (float(cap) * inc), "ok": v_unit <= float(cap) * inc, "found": True,
+                           "capacity_cite": dcap.get("cite"), "capacity_source": dcap.get("source")}
             rows.append({"storey": k, "dir": d, "F_EQ_N": Fe, "F_W_N": Fw, "governing": gov, "F_N": F,
-                         "v_unit_kN_per_m": v_unit, "chord_force_kN": chord / 1e3, "span_m": Lspan, "depth_m": B,
-                         "capacity": None, "capacity_basis": "test", "allowable_increase": 1.0, "dc": None, "ok": None, "found": False,
+                         "v_unit_kN_per_m": v_unit, "chord_force_kN": chord / 1e3, "span_m": Lspan, "depth_m": B, **rec_cap,
                          "clause": "IS 1893 7.6.3 storey force (gamma 1.0) / IS 875-3 storey wind; diaphragm shear = F/(2 B) per unit "
                                    "length of the two extreme frame lines, chord = F L/(8 B)",
                          "note": "diaphragm shear capacity requires a cited test / product value for the deck or sheathing "

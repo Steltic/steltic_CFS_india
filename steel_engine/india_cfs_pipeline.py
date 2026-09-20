@@ -95,7 +95,24 @@ def design_and_report(name, cfg, outdir=None, do_report=True):
         pkg["lateral_frame"] = por.get("lateral_summary")
         pkg["cfs_members"] = por.get("members") or []
         pkg["cfs_connections"] = por.get("connections") or []
-        cfg["load_plan"]["wind_summary"] = por.get("wind_summary") or cfg["load_plan"].get("wind_summary")
+        ws = por.get("wind_summary") or {}
+        cfg["load_plan"]["wind_summary"] = ws
+        cfg["load_plan"]["seismic_summary"] = por.get("seismic_summary")
+        # secondary members (purlins / girts / mezzanine joists) with the member-level pressures of the portal patterns
+        cm = cfg.get("cfs_members") or {}
+        pats = ws.get("patterns") or []
+        if cm.get("purlins") and pats:
+            roof = [p["roof_windward_kNm2"] for p in pats] + [p["roof_leeward_kNm2"] for p in pats]
+            cm["purlins"]["wind_uplift_kNm2"] = min(roof)          # most negative net (suction)
+            cm["purlins"]["wind_pressure_kNm2"] = max(max(roof), 0.0)
+        if cm.get("girts") and pats:
+            walls = [p["wall_windward_kNm2"] for p in pats] + [p["wall_leeward_kNm2"] for p in pats]
+            cm["girts"]["wind_suction_kNm2"] = -min(min(walls), 0.0)
+            cm["girts"]["wind_pressure_kNm2"] = max(walls)
+        if cm.get("joists") and cfg.get("mezzanine"):
+            cfg["loads"]["D_floor"] = cfg["mezzanine"]["D_kNm2"]; cfg["loads"]["L_floor"] = cfg["mezzanine"]["L_kNm2"]
+        pkg["cfs_members"] += CM.design_all(dict(cfg, cfs_members={k: v for k, v in cm.items() if k in ("Fy_MPa", "grade_cite", "purlins", "girts", "joists")}))
+        pkg["diaphragm"] = []
     else:
         lat = L.run_lateral(cfg, os.path.join(root, "lateral"), name=name + "_lateral")
         hr_plan = json.load(open(os.path.join(lat["root"], "load_plan.json"))) if os.path.exists(os.path.join(lat["root"], "load_plan.json")) else {}
@@ -149,9 +166,16 @@ def design_and_report(name, cfg, outdir=None, do_report=True):
         out.update(status=st["status"], n_reasons=st["n_reasons"], reasons=st["reasons"], consistency=issues)
         json.dump(_jsonable(pkg), open(os.path.join(root, "design", "calc_package_cfs.json"), "w"), indent=1)
         out["report_html"] = R.build_report_cfs_india(name, cfg, pkg, root)
+    eor = list(cfg.get("eor_inputs") or [])
+    if eor:
+        json.dump(_jsonable(eor), open(os.path.join(root, "EOR_inputs.json"), "w"), indent=1)
     with open(os.path.join(root, "STATUS.md"), "w") as f:
-        f.write("# %s -- design status: %s\n\nAuthority: %s\nVendored HR engine: %s\n\nOpen reasons (%d):\n%s"
-                % (name, st["status"].upper(), st["authority"], (pkg.get("lateral_frame") or {}).get("vendored_commit"),
+        f.write("# %s -- design status: %s\n\nAuthority: %s\nVendored HR engine: %s\n\n%s\n\nOpen reasons (%d):\n%s"
+                % (name, st["status"].upper(), st["authority"], (pkg.get("lateral_frame") or {}).get("vendored_commit"), B.BASIS_STATEMENT,
                    len(st["reasons"]), "".join("- %s\n" % r for r in st["reasons"])))
+        if eor:
+            f.write("\nEOR inputs relied upon (EOR_inputs.json, lead ruling L5 -- every number EOR-supplied, VERIFY):\n")
+            for e in eor:
+                f.write("- %s: %s (%s)\n" % (e.get("item"), e.get("value"), e.get("source")))
     print("[%s] status %s (%d reasons)" % (name, st["status"], st["n_reasons"]))
     return out
