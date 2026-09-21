@@ -65,7 +65,8 @@ def test_ex1_lateral_frame_numbers(ex1):
     dcs = {m["role"]: m["DC"] for m in lat["members"]}
     assert all(v <= 1.0 for v in dcs.values()) and {"brace", "lateral_col", "gravity_col", "floor", "roof"} <= set(dcs)
     assert all(c["DC"] <= 1.0 for c in lat["connections"])
-    assert lat["vendored_commit"].startswith("9279923")
+    import india_cfs_env
+    assert lat["vendored_commit"] == india_cfs_env.vendored_commit() and len(lat["vendored_commit"]) >= 7
 
 
 def test_ex1_cfs_members_and_basis(ex1):
@@ -84,11 +85,12 @@ def test_ex1_cfs_members_and_basis(ex1):
     assert not pkg["consistency"]
 
 
-def test_ex1_status_only_open_item_is_vendored_tension_share(ex1):
+def test_ex1_status_complete_after_tension_share_fix(ex1):
+    """WP6-fix 922d24a in steltic_india: 12.8.2.4 tension share on the lateral load only -> Ex1 is COMPLETE."""
     out, pkg, root = ex1
     st = pkg["design_status"]
-    assert st["status"] == "partial"
-    assert all("brace_tension_share" in r for r in st["reasons"]), st["reasons"]
+    assert st["status"] == "complete", st["reasons"]
+    assert not st["reasons"]
 
 
 def test_ex1_report_is_india_only(ex1):

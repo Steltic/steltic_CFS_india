@@ -96,6 +96,26 @@ def _end_rel(relz, rely, end):
     return ("J" if relz in ("J", "both") else "none", "J" if rely in ("J", "both") else "none")
 
 
+def grid_ijk_from_coords(cfg, x, y, z, dirn, tol=1.0):
+    """(i, j, k) of the column-grid bay a beam piece lies in, from its coordinates -- for beams whose I-node is
+    NOT a column-grid node (EBF link / beam-outside-link pieces, brace work points at the link ends, WP6).
+    i (X beam) is the grid line at or just below min x; j is the grid line at y (nearest); k from z."""
+    NX, NY = cfg["NX"], cfg["NY"]
+    xs = [_XY(cfg, i, 0)[0] for i in range(NX + 1)]
+    ys = [_XY(cfg, 0, j)[1] for j in range(NY + 1)]
+    zs = zlevels(cfg)
+    k = min(range(len(zs)), key=lambda kk: abs(zs[kk] - z))
+    if dirn == "X":
+        i = max([ii for ii in range(NX + 1) if xs[ii] <= x + tol] or [0])
+        i = min(i, NX - 1)
+        j = min(range(NY + 1), key=lambda jj: abs(ys[jj] - y))
+    else:
+        j = max([jj for jj in range(NY + 1) if ys[jj] <= y + tol] or [0])
+        j = min(j, NY - 1)
+        i = min(range(NX + 1), key=lambda ii: abs(xs[ii] - x))
+    return i, j, k
+
+
 def _staticize_custom(cfg, transf="PDelta", nseg=10):
     """Distribute gravity over an AGENT-BUILT (custom_build) model. We RECORD every OpenSees call the
     custom_build makes, then REPLAY it with the beams sub-divided into `nseg` elements so the true
@@ -130,8 +150,13 @@ def _staticize_custom(cfg, transf="PDelta", nseg=10):
     for idx, a in enumerate(rec["element"]):
         kind = einfos[idx][1] if idx < len(einfos) else None
         sec = einfos[idx][2] if idx < len(einfos) else None
-        if a[0] == "elasticBeamColumn" and kind == "beam":
-            n1, n2 = a[2], a[3]; props = a[4:10]; ttag = a[10]; relz, rely = _parse_rel(a[11:])
+        if a[0] in ("elasticBeamColumn", "ElasticTimoshenkoBeam") and kind == "beam":
+            n1, n2 = a[2], a[3]
+            if a[0] == "ElasticTimoshenkoBeam":
+                # EBF shear link (WP6): E, G, A, Jx, Iy, Iz, Avy, Avz, transf -- shear deformation kept, no releases
+                props = a[4:12]; ttag = a[12]; relz, rely = "none", "none"
+            else:
+                props = a[4:10]; ttag = a[10]; relz, rely = _parse_rel(a[11:])
             (x1, y1, z1) = coord[n1]; (x2, y2, z2) = coord[n2]
             L = ((x2-x1)**2 + (y2-y1)**2 + (z2-z1)**2) ** 0.5
             chain = [n1]
@@ -145,15 +170,20 @@ def _staticize_custom(cfg, transf="PDelta", nseg=10):
                 if sgi == 0: ra += eng.release_args(*_end_rel(relz, rely, "I"))
                 if sgi == nseg-1: ra += eng.release_args(*_end_rel(relz, rely, "J"))
                 te = sub_ele; sub_ele += 1
-                ops.element("elasticBeamColumn", te, chain[sgi], chain[sgi+1], *props, ttag, *ra); segs.append(te)
+                ops.element(a[0], te, chain[sgi], chain[sgi+1], *props, ttag, *ra); segs.append(te)
             i, j, k = dec(n1); dirn = "X" if abs(x2-x1) >= abs(y2-y1) else "Y"
+            if not (0 <= i <= cfg["NX"] and 0 <= j <= cfg["NY"] and n1 == ntag(i, j, k)):
+                # beam piece starting at an off-grid work point (EBF link ends): locate its bay from the
+                # coordinates so it carries its share of the floor load like any other beam (WP6)
+                i, j, k = grid_ijk_from_coords(cfg, min(x1, x2), min(y1, y2), z1, dirn)
             beams.append({"i": i, "j": j, "k": k, "dir": dirn, "L": L, "A": n1, "B": n2,
                           "nodes": chain, "segs": segs, "sec": sec, "relz": relz, "rely": rely})
         else:
             ops.element(*a)
             if kind == "col":
                 i, j, k = dec(a[2]); cols.append({"tag": a[1], "sec": sec, "n1": a[2], "n2": a[3],
-                                                  "i": i, "j": j, "k": k, "axis": "col"})
+                                                  "i": i, "j": j, "k": k, "axis": "col",
+                                                  "transf": (a[10] if a[0] == "elasticBeamColumn" and len(a) > 10 else None)})
             elif kind == "brace":
                 braces.append({"tag": a[1], "sec": sec, "n1": a[2], "n2": a[3]})
     for a in rec["rigidDiaphragm"]:
@@ -615,7 +645,8 @@ def _beam_floor_width(model, b, cfg):
     return nb, nb * other / 2.0
 
 
-def apply_gravity_state(cfg, model, fD, fL, fLr, fS=0.0, fC=0.0, fEv=0.0, self_weight=True, crane_pattern=None):
+def apply_gravity_state(cfg, model, fD, fL, fLr, fS=0.0, fC=0.0, fEv=0.0, self_weight=True, crane_pattern=None,
+                        snow_pattern=None):
     """SI gravity for one gravity state; returns {level: total vertical load N}.
 
     * floor pressure p = fD D + fL L + fLr Lr + fS S + fEv (D + Table-10 share of L)   [kN/m2]
@@ -628,12 +659,21 @@ def apply_gravity_state(cfg, model, fD, fL, fLr, fS=0.0, fC=0.0, fEv=0.0, self_w
     ds = _deck_span(cfg)
     lev = {k: 0.0 for k in range(1, NF + 1)}
     fdead = fD + fEv
+    # IS 875 (Part 4):2021 4.3 partial snow: snow_pattern = (axis, 'lo'|'hi') keeps the roof snow on the half of the
+    # plan below / above the mid-line normal to `axis` (zero snow on the other half; WP6-fix)
+    sp_axis, sp_side, sp_mid = None, None, None
+    if snow_pattern:
+        sp_axis = 0 if str(snow_pattern[0]).upper() == "X" else 1
+        sp_side = str(snow_pattern[1]).lower()
+        crd_all = [ops.nodeCoord(n) for n in ops.getNodeTags()]
+        sp_mid = 0.5 * (min(c[sp_axis] for c in crd_all) + max(c[sp_axis] for c in crd_all))
     for b in model["beams"]:
         i, j, k, dirn, L = b["i"], b["j"], b["k"], b["dir"], b["L"]
         if not (1 <= k <= NF):
             continue
         D, Lf, Lr, S = floor_pressures(cfg, k)
         p = fD * D + fL * Lf + fLr * Lr + fS * S + fEv * (D + _table10_fraction(Lf) * Lf)
+        p_nosnow = p - fS * S
         nb, trib1 = _beam_floor_width(model, b, cfg)
         other = cfg["SY"] if dirn == "X" else cfg["SX"]
         wcap = other / 2.0
@@ -656,7 +696,14 @@ def apply_gravity_state(cfg, model, fD, fL, fLr, fS=0.0, fC=0.0, fEv=0.0, self_w
                 width_mm = 0.0                       # beam parallel to the deck span carries no deck load
             else:
                 width_mm = trib1
-            w = p * (width_mm / 1000.0) + wclad + wsw
+            pp = p
+            if sp_axis is not None and k == NF and S:
+                ca_, cb_ = ops.nodeCoord(b["A"]), ops.nodeCoord(b["B"])
+                xm = ca_[sp_axis] + (cb_[sp_axis] - ca_[sp_axis]) * (smid / L)
+                loaded = (xm <= sp_mid + 1e-6) if sp_side == "lo" else (xm >= sp_mid - 1e-6)
+                if not loaded:
+                    pp = p_nosnow
+            w = pp * (width_mm / 1000.0) + wclad + wsw
             ops.eleLoad("-ele", tag, "-type", "-beamUniform", 0.0, -w, 0.0)
             lev[k] += w * (s1 - s0)
     for c in model["cols"]:
@@ -693,6 +740,31 @@ def apply_gravity_state(cfg, model, fD, fL, fLr, fS=0.0, fC=0.0, fEv=0.0, self_w
                 kk = nd // 100000
                 if kk in lev:
                     lev[kk] += 0.5 * W
+    # declared permanent nodal loads (WP6-fix): gantry girder + rail reactions on crane brackets, hung equipment --
+    # cfg['nodal_dead_loads'] = [{node, Fz_N (down < 0), Mx_Nmm, My_Nmm, level, note}], factored with the dead load
+    for nl in (cfg.get("nodal_dead_loads") or []):
+        try:
+            nd = int(nl["node"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        Fz = float(nl.get("Fz_N") or 0.0)
+        ops.load(nd, 0.0, 0.0, fdead * Fz, fdead * float(nl.get("Mx_Nmm") or 0.0), fdead * float(nl.get("My_Nmm") or 0.0), 0.0)
+        kk = nl.get("level")
+        if kk in lev:
+            lev[kk] += -fdead * Fz
+    # declared snow point loads (WP6-fix): reactions of an attached lower roof (lean-to drift, IS 875-4 5.2.4) on the
+    # main columns -- cfg['nodal_snow_loads'] = [{node, Fz_N (down < 0), Mx_Nmm, My_Nmm, level}], factored with fS
+    if fS:
+        for nl in (cfg.get("nodal_snow_loads") or []):
+            try:
+                nd = int(nl["node"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            Fz = float(nl.get("Fz_N") or 0.0)
+            ops.load(nd, 0.0, 0.0, fS * Fz, fS * float(nl.get("Mx_Nmm") or 0.0), fS * float(nl.get("My_Nmm") or 0.0), 0.0)
+            kk = nl.get("level")
+            if kk in lev:
+                lev[kk] += -fS * Fz
     if fC:
         apply_crane_loads(cfg, model, fC, crane_pattern)
     return lev
@@ -736,25 +808,56 @@ def member_wind_loads(cfg, model, pat, f):
     qw, ql = pat.get("wall_windward_kNm2"), pat.get("wall_leeward_kNm2")
     if qw is not None and ql is not None:
         oth = 1 - ax
-        for k in range(1, NF + 1):
-            h_t = cfg["heights"][k - 1] / 2.0 + (cfg["heights"][k] / 2.0 if k < NF else 0.0)
-            alln = set(ops.getNodeTags())
-            lvl = [ntag(i, j, k) for (i, j) in (model.get("present") or {}).get(k, ())]
-            crd = {n: ops.nodeCoord(n) for n in lvl if n in alln}
-            if not crd:
-                continue
-            for edge, q, sgn in ((min(c[ax] for c in crd.values()), qw, 1.0),
-                                 (max(c[ax] for c in crd.values()), ql, -1.0)):
-                on = [n for n, c in crd.items() if abs(c[ax] - edge) < 1e-6]
-                if len(on) < 1:
+        # wall pressure as a DISTRIBUTED load on the edge-line column elements (every piece of the column, full
+        # height): a portal column bends under the wall wind along its height and the lower half of the wall load
+        # reaches the base through the column shear, not as a nodal force at the roof (WP6-fix, HREX3-Ex14-02);
+        # nodal fallback (tributary storey height at the level's grid nodes) when no column element is on the line
+        xs_all = [c[ax] for c in nodes]
+        edge_lo, edge_hi = min(xs_all), max(xs_all)
+        by_edge = {}
+        for c in model["cols"]:
+            c1, c2 = ops.nodeCoord(c["n1"]), ops.nodeCoord(c["n2"])
+            xe = 0.5 * (c1[ax] + c2[ax])
+            for edge in (edge_lo, edge_hi):
+                if abs(xe - edge) < 1e-6:
+                    by_edge.setdefault(edge, []).append((c, c1, c2))
+        if by_edge and all(c.get("transf") in (1, 2) for lst in by_edge.values() for (c, _, _) in lst):
+            for edge, q, sgn in ((edge_lo, qw, 1.0), (edge_hi, ql, -1.0)):
+                lst = by_edge.get(edge) or []
+                if not lst:
                     continue
-                ys = [crd[n][oth] for n in on]
-                Lw = (max(ys) - min(ys)) or (cfg["SY"] if ax == 0 else cfg["SX"])
-                Ftot = f * float(q) * Lw * h_t / 1000.0 * sgn          # N along +axis
-                for n in on:
-                    v = [0.0] * 6; v[ax] = Ftot / len(on)
-                    ops.load(n, *v)
-                tot["wall_N"] += Ftot
+                lines = sorted({round(c1[oth], 3) for (c, c1, c2) in lst})
+                Lw = (lines[-1] - lines[0]) if len(lines) > 1 else (cfg["SY"] if ax == 0 else cfg["SX"])
+                w_line = f * float(q) * (Lw / len(lines)) / 1000.0 * sgn      # N/mm along +axis per column line
+                for (c, c1, c2) in lst:
+                    F = w_line
+                    # column local axes: x up; transf 2 (vecxz 0,1,0): y_l = +X, z_l = +Y; transf 1 (vecxz 1,0,0): y_l = -Y, z_l = +X
+                    if c["transf"] == 2:
+                        Wy, Wz = (F, 0.0) if ax == 0 else (0.0, F)
+                    else:
+                        Wy, Wz = (0.0, F) if ax == 0 else (-F, 0.0)
+                    ops.eleLoad("-ele", c["tag"], "-type", "-beamUniform", Wy, Wz)
+                    tot["wall_N"] += F * abs(c2[2] - c1[2])
+        else:
+            for k in range(1, NF + 1):
+                h_t = cfg["heights"][k - 1] / 2.0 + (cfg["heights"][k] / 2.0 if k < NF else 0.0)
+                alln = set(ops.getNodeTags())
+                lvl = [ntag(i, j, k) for (i, j) in (model.get("present") or {}).get(k, ())]
+                crd = {n: ops.nodeCoord(n) for n in lvl if n in alln}
+                if not crd:
+                    continue
+                for edge, q, sgn in ((min(c[ax] for c in crd.values()), qw, 1.0),
+                                     (max(c[ax] for c in crd.values()), ql, -1.0)):
+                    on = [n for n, c in crd.items() if abs(c[ax] - edge) < 1e-6]
+                    if len(on) < 1:
+                        continue
+                    ys = [crd[n][oth] for n in on]
+                    Lw = (max(ys) - min(ys)) or (cfg["SY"] if ax == 0 else cfg["SX"])
+                    Ftot = f * float(q) * Lw * h_t / 1000.0 * sgn          # N along +axis
+                    for n in on:
+                        v = [0.0] * 6; v[ax] = Ftot / len(on)
+                        ops.load(n, *v)
+                    tot["wall_N"] += Ftot
     return tot
 
 
@@ -807,7 +910,8 @@ def _grav_state_key(c):
     m = getattr(c, "meta", {}) or {}
     return (round(float(c[1]), 6), round(float(c[2]), 6), round(float(c[3]), 6),
             round(float(m.get("fS") or 0.0), 6), round(float(m.get("fC") or 0.0), 6),
-            round(float(m.get("fEv") or 0.0), 9), tuple(m.get("crane_pattern") or ()))
+            round(float(m.get("fEv") or 0.0), 9), tuple(m.get("crane_pattern") or ()),
+            tuple(m.get("snow_pattern") or ()))
 
 
 def one_way_gravity(cfg, b, fD, fL, fLr, fS=0.0, fEv=0.0):
@@ -827,7 +931,26 @@ def one_way_gravity(cfg, b, fD, fL, fLr, fS=0.0, fEv=0.0):
     return w * L * L / 8.0, w * L / 2.0
 
 
-REC_FIELDS = ("N", "Mmaj", "Mmin", "V", "Mmaj_i", "Mmaj_j", "Mmin_i", "Mmin_j", "Mmaj_sag_max", "Vmaj", "Vmin")
+REC_FIELDS = ("N", "Mmaj", "Mmin", "V", "Mmaj_i", "Mmaj_j", "Mmin_i", "Mmin_j", "Mmaj_sag_max", "Vmaj", "Vmin",
+              "N_LAT", "V_LAT")
+# N_LAT / V_LAT (WP6, EBF): the LATERAL-load part of the member axial force / major shear in this combination
+# (static lateral increment or fLat x RSA response) -- the EL share that IS 18168 12.3.2.2 / 12.3.4.5 amplify to
+# the link overstrength. Zero on gravity-only combinations; records without the field read as 0.0.
+
+
+def _lateral_axial_shear(model, RL):
+    """{fset: (N_LAT, V_LAT)} from a lateral-only response dict (same element responses as member_records)."""
+    out = {}
+    for c in model["cols"]:
+        lf = RL[c["tag"]]
+        out[frozenset((c["n1"], c["n2"]))] = (float(lf[6]), max(abs(lf[1]), abs(lf[7])))
+    for b in model["braces"]:
+        out[frozenset((b["n1"], b["n2"]))] = (float(RL[b["tag"]][0]), 0.0)
+    for b in model["beams"]:
+        segs = b["segs"]
+        out[frozenset((b["A"], b["B"]))] = (float(RL[segs[0]][6]),
+                                           max(max(abs(RL[t][2]), abs(RL[t][8])) for t in segs))
+    return out
 
 
 def member_records(model, R, cfg, case_grav, floor_system):
@@ -883,10 +1006,45 @@ def combo_forces_for_member_check(records, kind):
         r = list(r) + [0.0] * (len(REC_FIELDS) - len(r))
         d = dict(zip(REC_FIELDS, r))
         cf = {"combo": lab, "P_N": -d["N"], "Mz_i_Nmm": d["Mmaj_i"], "Mz_j_Nmm": d["Mmaj_j"],
-              "My_i_Nmm": d["Mmin_i"], "My_j_Nmm": d["Mmin_j"], "Vy_N": d["Vmaj"], "Vz_N": d["Vmin"]}
+              "My_i_Nmm": d["Mmin_i"], "My_j_Nmm": d["Mmin_j"], "Vy_N": d["Vmaj"], "Vz_N": d["Vmin"],
+              "P_LAT_N": -d["N_LAT"], "V_LAT_N": d["V_LAT"]}
         if kind == "beam":
             cf["Mz_mid_Nmm"] = d["Mmaj_sag_max"]
         out.append(cf)
+    return out
+
+
+# IS 875 (Part 2):1987 3.2.1 (corpus: spec:IS_875_Part_2_1987:standard:3.2.1, pdf p. 14) -- reduction in the total
+# distributed imposed load on all floors carried by a column, by the number of floors (including the roof) carried:
+IS875_2_321_REDUCTION = ((1, 0.0), (2, 0.10), (3, 0.20), (4, 0.30), (10, 0.40), (10 ** 6, 0.50))
+IS875_2_321_CITE = ("IS 875 (Part 2):1987 3.2.1: reduction in total distributed imposed load on all floors carried by "
+                    "a column: 1 floor 0 %, 2 10 %, 3 20 %, 4 30 %, 5-10 40 %, over 10 50 % (not for storage / "
+                    "warehouses / garages, 3.2.1.1; not for partitions, plant or machinery)")
+
+
+def imposed_load_reduction_321(n_floors):
+    n = int(n_floors)
+    for lim, r in IS875_2_321_REDUCTION:
+        if n <= lim:
+            return r
+    return 0.50
+
+
+def column_imposed_load_reduction_factors(cfg):
+    """{column element tag: r} for cfg['column_imposed_load_reduction'] (opt-in, IS 875-2 3.2.1): a column between
+    levels k-1 and k carries the floors k .. NF (the roof counts as a floor).  Storage buildings are refused
+    (3.2.1.1)."""
+    if not cfg.get("column_imposed_load_reduction"):
+        return {}
+    if cfg.get("storage") or cfg.get("storage_levels"):
+        raise ValueError("IS 875-2 3.2.1.1: no imposed-load reduction for storage buildings / warehouses")
+    NF = len(cfg["heights"])
+    out = {}
+    info = eng.build(cfg, "Linear")
+    for (t, kind, sec, n1, n2) in info["ele"]:
+        if kind == "col":
+            k_top = max(n1, n2) // 100000
+            out[t] = imposed_load_reduction_321(NF - k_top + 1)
     return out
 
 
@@ -904,14 +1062,29 @@ def solve_cases_si(cfg, cases, nseg=6, floor_system="one-way", rsa=None, keep_re
             continue
         groups.setdefault(_grav_state_key(c), []).append(c)
     kinds = None
+    llr = column_imposed_load_reduction_factors(cfg)          # IS 875-2 3.2.1 (opt-in), {column tag: r}
     for gk, cs in groups.items():
-        fD, fL, fLr, fS, fC, fEv, cpat = gk
+        fD, fL, fLr, fS, fC, fEv, cpat, spat = gk
         model = build_static(cfg, "PDelta", nseg)
         if kinds is None:
             kinds = _member_kinds(model)
+        N_LL = {}
+        if llr and fL:
+            # imposed FLOOR load alone (no partitions, cladding, self-weight, roof imposed): the part of the column
+            # axial force that IS 875-2 3.2.1 lets the designer reduce by the number of floors carried
+            c2 = dict(cfg, partition_load_kNm2=0.0, clad=0.0)
+            ops.timeSeries("Linear", 1); ops.pattern("Plain", 1, 1)
+            apply_gravity_state(c2, model, 0.0, fL, 0.0, 0.0, 0.0, 0.0, self_weight=False)
+            if _solve_newton() != 0:
+                raise RuntimeError("imposed-load state %s did not converge" % (gk,))
+            RLL = _responses(model)
+            N_LL = {c["tag"]: float(RLL[c["tag"]][6]) for c in model["cols"]}
+            ops.wipe()
+            model = build_static(cfg, "PDelta", nseg)
         ops.timeSeries("Linear", 1); ops.pattern("Plain", 1, 1)
         lev = apply_gravity_state(cfg, model, fD, fL, fLr, fS, fC, fEv,
-                                  self_weight=cfg.get("self_weight", True), crane_pattern=cpat or None)
+                                  self_weight=cfg.get("self_weight", True), crane_pattern=cpat or None,
+                                  snow_pattern=spat or None)
         ok = _solve_newton()
         if ok != 0:
             raise RuntimeError("gravity state %s did not converge (P-Delta)" % (gk,))
@@ -955,7 +1128,18 @@ def solve_cases_si(cfg, cases, nseg=6, floor_system="one-way", rsa=None, keep_re
                     for t in RC:
                         if t in E_:
                             RC[t] = RC[t] + float(f) * E_[t]
-            per_case[c[0]] = member_records(model, RC, cfg, gk, floor_system)
+            recs = member_records(model, RC, cfg, gk, floor_system)
+            if RC is not RG:
+                lat = _lateral_axial_shear(model, {t: RC[t] - RG[t] for t in RG})
+                recs = {fs: tuple(r) + lat.get(fs, (0.0, 0.0)) for fs, r in recs.items()}
+            if N_LL:
+                # IS 875-2 3.2.1: column axial = N - r x N_imposed (tension-positive records; only the axial force)
+                for col in model["cols"]:
+                    r_ = llr.get(col["tag"], 0.0)
+                    fs = frozenset((col["n1"], col["n2"]))
+                    if r_ and fs in recs:
+                        rec = list(recs[fs]); rec[0] = rec[0] - r_ * N_LL[col["tag"]]; recs[fs] = tuple(rec)
+            per_case[c[0]] = recs
     return per_case, kinds or {}, info
 
 

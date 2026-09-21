@@ -51,7 +51,20 @@ NO_BASIS = "no Indian basis"
 
 def normalize_system(system):
     s = str(system or "").upper().replace("-", "").replace("_", "").replace(" ", "")
+    if "+" in s:
+        s = s.split("+", 1)[0]                     # mixed per-direction system 'OMF+OCBF': the primary (first) one
     return _ALIASES.get(s)
+
+
+def system_components(system):
+    """Canonical components of a system string: 'OMF+OCBF' -> ['OMF', 'OCBF'] (WP6-fix: a transverse moment frame
+    with longitudinal braced bays is checked under BOTH Section 12 branches)."""
+    out = []
+    for part in str(system or "").upper().replace("-", "").replace("_", "").replace(" ", "").split("+"):
+        c = _ALIASES.get(part)
+        if c and c not in out:
+            out.append(c)
+    return out
 
 
 _AUTO = object()
@@ -291,6 +304,31 @@ def brace_connection_force(system, m, model_data, *, conn=None, cfg=None):
             clause += " + IS 18168:2023 10.4.1"
         if sys_max:
             cands["system maximum (12.8.3.1b / IS 18168 10.4.1b)"] = float(sys_max)
+    elif sysn == "EBF":
+        # IS 18168:2023 12.3.2.2: connections are capacity-protected for the link overstrength 1.1 Ry Sh Vd; 5.5(d):
+        # all connections for the Omega 2.5 combinations; 10.4.1 tension (expected brace yield) as the upper bound
+        # (the brace cannot deliver more than its own expected strength). IS 800 12.9 refers to specialist literature.
+        cands = {}
+        f55 = [abs(f.get("P_N", 0.0)) for f in _forces(model_data, m["id"]) if f.get("family") == "12.2.3"]
+        if f55:
+            cands["IS 18168 5.5 overstrength combination (Omega 2.5)"] = max(f55)
+        over = _link_overstrength_for_brace(model_data, m["id"])
+        if over:
+            fs = [f for f in _forces(model_data, m["id"]) if f.get("P_EL_N") is not None]
+            if fs:
+                cands["IS 18168 12.3.2.2 link overstrength 1.1 Ry Sh Vd (amplification %.2f)" % over["amp"]] = \
+                    max(abs(f.get("P_N", 0.0) - f["P_EL_N"] + over["amp"] * f["P_EL_N"]) for f in fs)
+        if not cands:
+            return {"found": False, "demand_N": None, "reason": "no 5.5 / link-overstrength brace forces"}
+        gov = max(cands, key=cands.get)
+        ry, ry_note = _ry(m, p)
+        cap = 1.1 * ry * fy * Ag
+        D = min(cands[gov], cap)
+        return {"found": True, "demand_N": D, "basis": gov if D < cap else "expected brace yield 1.1 Ry fy Ag (IS 18168 10.4.1a) "
+                "caps the capacity-design force", "candidates": dict(cands, **{"1.1 Ry fy Ag cap (10.4.1a)": cap}),
+                "clause": "IS 18168:2023 12.3.2.2 / 5.5(d) / 10.4.1", "Ag_mm2": Ag, "fy_MPa": fy,
+                "cite": "EBF brace connections: larger of the 5.5 overstrength and 12.3.2.2 link-overstrength forces, "
+                        "not more than the expected brace strength"}
     else:
         base = 1.2 * fy * Ag
         cands = {"1.2 fy Ag (12.7.3.1a)": base}
@@ -305,10 +343,64 @@ def brace_connection_force(system, m, model_data, *, conn=None, cfg=None):
             "Ag_mm2": Ag, "fy_MPa": fy, "cite": "bracing end connections designed for the minimum of the listed forces"}
 
 
+def _link_overstrength_for_brace(model_data, brace_id):
+    """{amp, link_id} of the link this brace frames into (set by section12_checks after ebf_link_checks)."""
+    for ln in model_data.get("links") or []:
+        ov = ln.get("_overstrength")
+        if ov and brace_id in (ln.get("brace_ids") or []) and ov.get("amplification_braces") is not None:
+            return {"amp": max(ov["amplification_braces"], ov.get("amplification_capacity_protected") or 0.0),
+                    "link_id": ln.get("id")}
+    return None
+
+
+def ebf_brace_checks(m, model_data, cfg):
+    """IS 18168:2023 EBF braces: 5.2 material (Ry), Table 2 (iii) width-thickness (12.3.4.1), 12.3.4.5 tension yield /
+    compression buckling at the 1.2 Ry Vd link shear (the axial check itself is ebf_capacity_protected_checks) and
+    brace slenderness (IS 800 Table 3 / IS 18168 10.2 as the stricter braced-frame limit, both cited)."""
+    out = []
+    try:
+        p = _props(m)
+    except KeyError as e:
+        return [_na("brace_section", clause="IS 18168:2023 12.3.4", cite="section", member=m.get("id"), reason=str(e))]
+    out.append(material_gate(m, clause="IS 18168:2023 5.2", props=p))
+    fy, fu = _fy(m, p)
+    if not fy:
+        return out + [_na("brace_fy", clause="IS 18168:2023 12.3.4.5", cite="fy from grade", member=m["id"],
+                          reason="grade not resolved")]
+    ry, _ = _ry(m, p)
+    if p.get("section_type") == "I":
+        out.append(dict(I18.table2_check("brace", p, fy, ry, member=m["id"]),
+                        cite="12.3.4.1: braces satisfy the Table 2 (iii) width-to-thickness limits"))
+    L = m.get("L_mm")
+    K = max(m.get("Kz") or 1.0, m.get("Ky") or 1.0)
+    rmin = p.get("r_min") or min(p["rx"], p["ry"])
+    klr = K * L / rmin if L else None
+    out.append(_chk("brace_KL_r", klr, I18.BRACE_KLR_LIMIT, clause="IS 18168:2023 10.2 (braced frames) / IS 800:2007 Table 3",
+                    member=m["id"], cite=I18.CITE_10_2 + " (applied to EBF braces as the braced-frame limit; IS 800 "
+                    "Table 3 gives 180)", ok=(klr < I18.BRACE_KLR_LIMIT) if klr else None, K=K, L_mm=L, r_min_mm=rmin))
+    over = _link_overstrength_for_brace(model_data, m["id"])
+    fs = [f for f in _forces(model_data, m["id"]) if f.get("P_EL_N") is not None]
+    if over and fs:
+        Tmax = max(-(f.get("P_N", 0.0) - f["P_EL_N"] + over["amp"] * f["P_EL_N"]) for f in fs)
+        Tmin2 = max(-(f.get("P_N", 0.0) - f["P_EL_N"] - over["amp"] * f["P_EL_N"]) for f in fs)
+        T = max(Tmax, Tmin2, 0.0)
+        Td = I8.tension_capacity(p["A"], fy, None)
+        out.append(_chk("12.3.4.5_brace_tension", T, Td["Td_N"], clause="IS 18168:2023 12.3.4.5", member=m["id"],
+                        cite="braces shall not yield in tension at 1.2 Ry x the link design strength (6.2 yield)"))
+    else:
+        out.append(_na("12.3.4.5_brace_tension", clause="IS 18168:2023 12.3.4.5", member=m["id"],
+                       cite="tension at 1.2 Ry Vd", reason="link overstrength / EL split unavailable"))
+    return out
+
+
 def brace_connection_checks(system, m, conn, model_data, cfg):
     sysn = normalize_system(system)
     out = []
     pre = "12.7.3" if sysn == "OCBF" else "12.8.3"
+    if sysn == "EBF":
+        # IS 800 12.9 -> specialist literature; the connection limit states are IS 800 Section 10 / 6.4.1 at the
+        # IS 18168 12.3.2.2 / 5.5(d) force (brace_connection_force), gusset rules as for SCBF (engineering practice)
+        pre = "12.8.3 (as EBF practice; IS 18168 12.3.4.6)"
     if conn is None:
         return [_na("brace_connection", clause="IS 800:2007 " + pre, cite="brace end connection", member=m["id"],
                     reason="no connection data for brace")]
@@ -384,8 +476,15 @@ def brace_connection_checks(system, m, conn, model_data, cfg):
     else:
         out.append(_na("gusset_out_of_plane_buckling", clause="IS 800:2007 %s.4" % pre, cite="gusset buckling",
                        member=m["id"], reason="Whitmore geometry or brace Pd missing"))
-    # 12.x.3.3 1.2 Mp about the (critical) buckling axis
-    if fy:
+    # 12.x.3.3 1.2 Mp about the (critical) buckling axis (SCBF/OCBF; EBF braces pinned to the link -- 12.3.4.6 needs a
+    # fully restrained connection only where the brace resists part of the link end moment)
+    if fy and sysn == "EBF":
+        out.append(_chk("brace_conn_pinned_12.3.4.6", bool(conn.get("resists_link_end_moment")), False,
+                        clause="IS 18168:2023 12.3.4.6", member=m["id"], dc=None, gate=True,
+                        ok=not conn.get("resists_link_end_moment"),
+                        cite="brace connection declared pinned (no share of the link end moment); a moment-sharing "
+                             "brace connection must be fully restrained"))
+    elif fy:
         axis = "y" if (p.get("ry") or 1e9) <= (p.get("rx") or 1e9) else "z"
         Zp = p["Zy"] if axis == "y" else p["Zx"]
         Mdem = 1.2 * Zp * fy
@@ -804,9 +903,11 @@ def smf_joint_checks(joint, model_data, cfg, *, system="SMF"):
         typ = str(conn.get("type") or "").lower()
         if "weld" in typ:
             tcp, tfb = joint.get("continuity_plate_t_mm"), (Mp_list[0][2]["tf"] if Mp_list else None)
+            # provided-vs-required row: D/C = required / provided (dc=None would form provided / required, WP6-fix)
+            dc_cp = (float(tfb) / float(tcp)) if (tcp and tfb) else None
             out.append(_chk("12.10.2.5_continuity_plates", tcp, tfb, clause="IS 800:2007 12.10.2.5",
                             member=joint.get("id"), cite="continuity plates t >= beam flange t (rigid welded)",
-                            ok=None if (tcp is None or tfb is None) else tcp >= tfb, dc=None))
+                            ok=None if (tcp is None or tfb is None) else tcp >= tfb, dc=dc_cp))
     if conn:
         out.append(dict(C.cjp_weld_gate(conn.get("weld_type"), location="beam_column",
                                         eor_exception=(cfg or {}).get("eor_weld_exception")),
@@ -843,6 +944,9 @@ def joints_from_model(nodes, elements, *, frame_members=None):
             if e.get("role") == "column":
                 cols.append({"member_id": e["id"], "position": "above" if z1 > z0 else "below"})
             elif e.get("role") == "beam":
+                rel = e.get("release_major") or "none"
+                if rel == "both" or (rel == "I" and e["node_i"] == nid) or (rel == "J" and e["node_j"] == nid):
+                    continue          # pinned at this end: delivers no moment to the joint (WP6-fix)
                 d = "X" if abs(x1 - x0) >= abs(y1 - y0) else "Y"
                 beams[d].append({"member_id": e["id"], "L_clear_mm": e.get("L_clear_mm"),
                                  "V_gravity_N": e.get("V_gravity_N")})
@@ -894,6 +998,9 @@ def ebf_link_checks(link, model_data=None, cfg=None):
     Sh = IS18168_SH["I"] if st == "I" else IS18168_SH["box"]
     gm0 = 1.1
     d, tf, tw = p["d"], p["tf"], p["tw"]
+    if Ry and st == "I":
+        out.append(dict(I18.table2_check("link", p, fy, Ry, member=lid),
+                        cite="11.1: flange and web width-to-thickness less than Table 2 (iv) links"))
     AwL = (d - 2 * tf) * tw
     Py = fy * p["A"]
     Pu = abs(float(link.get("Pu_N") or 0.0))
@@ -1002,6 +1109,66 @@ def ebf_capacity_protected_checks(link_result, model_data, link):
     return out
 
 
+def ebf_beam_column_checks(links, model_data, cfg):
+    """IS 18168:2023 12.3.4.4: where a brace / gusset connects to both members at a beam-to-column connection, the
+    connection assembly resists the beam moment 1.1 Ry fyb Zpb (a fully restrained CJP-welded connection, whose
+    welds are parent metal per IS 800 10.5.7.1.2, develops the beam at its expected strength) and the sum of the
+    expected column flexural strengths at the joint exceeds 1.1 Ry fyb Zpb.  Joints are read from model_data
+    ['joints'] (joints_from_model) for the beams outside the links; the expected column flexural strength is
+    Ry Zpc fyc (the clause names no axial reduction; Pu/Py of the columns is recorded for information)."""
+    out = []
+    beam_ids = set()
+    for ln in links:
+        beam_ids.update(ln.get("beam_ids") or [])
+    if not beam_ids:
+        return out
+    joints = [j for j in (model_data.get("joints") or []) if any(b["member_id"] in beam_ids for b in j.get("beams") or [])]
+    if not joints:
+        return [_na("12.3.4.4_beam_column", clause="IS 18168:2023 12.3.4.4", cite="brace-gusset beam-column joints",
+                    reason="no beam-column joints found for the beams outside the links (rigid joints expected)")]
+    for j in joints:
+        bl = [b for b in j.get("beams") or [] if b["member_id"] in beam_ids]
+        mb = _member(model_data, bl[0]["member_id"])
+        pb = _props(mb); fyb, _ = _fy(mb, pb)
+        ryb, _ = _ry(mb, pb)
+        Mdem = 1.1 * ryb * fyb * pb["Zx"]
+        cn = j.get("connection") or {}
+        typ = str(cn.get("type") or "").lower()
+        wt = str(cn.get("weld_type") or "").lower()
+        cap = cn.get("moment_capacity_Nmm")
+        develops = typ in ("welded", "cjp") and wt == "cjp"
+        if develops:
+            out.append(_chk("12.3.4.4_connection_moment", Mdem, Mdem, clause="IS 18168:2023 12.3.4.4", member=j.get("id"),
+                            ok=True, dc=None, connection=typ,
+                            cite="fully restrained CJP flange + web welds: parent metal (IS 800 10.5.7.1.2) develops the "
+                                 "beam at 1.1 Ry fyb Zpb"))
+        elif cap:
+            out.append(_chk("12.3.4.4_connection_moment", Mdem, cap, clause="IS 18168:2023 12.3.4.4", member=j.get("id"),
+                            cite="connection assembly moment capacity vs 1.1 Ry fyb Zpb", connection=typ))
+        else:
+            out.append(_na("12.3.4.4_connection_moment", clause="IS 18168:2023 12.3.4.4", member=j.get("id"),
+                           cite="1.1 Ry fyb Zpb", reason="no beam_column connection declared for %s" % mb["section"]))
+        Ssum = 0.0
+        pupy = []
+        for c in j.get("columns") or []:
+            mc = _member(model_data, c["member_id"])
+            if not mc:
+                continue
+            pc = _props(mc); fyc, _ = _fy(mc, pc); ryc, _ = _ry(mc, pc)
+            Pu = max([abs(f.get("P_N", 0.0)) for f in _forces(model_data, mc["id"]) if f.get("family") == "table4"] + [0.0])
+            Py = fyc * pc["A"]
+            pupy.append(round(Pu / Py, 3))
+            Zpc = pc["Zx"] if (mc.get("major_axis_plane") in (None, j.get("frame_dir"))) else pc["Zy"]
+            Ssum += ryc * fyc * Zpc
+        out.append(_chk("12.3.4.4_column_strength", Mdem, Ssum, clause="IS 18168:2023 12.3.4.4", member=j.get("id"),
+                        Pu_over_Py=pupy,
+                        cite="sum of the expected column flexural strengths Ry fyc Zpc (about the frame axis) exceeds "
+                             "1.1 Ry fyb Zpb of the beam outside the link (no axial reduction in the clause; Pu/Py recorded)") if Ssum > 0 else
+                   _na("12.3.4.4_column_strength", clause="IS 18168:2023 12.3.4.4", member=j.get("id"),
+                       cite="expected column strengths", reason="no columns at the joint"))
+    return out
+
+
 # ------------------------------------------------------------------------------------------ entry point
 def section12_checks(system, model_data, cfg=None):
     """IS 800:2007 Section 12 (and IS 18168:2023 for EBF) system checks. See module docstring for inputs."""
@@ -1015,9 +1182,20 @@ def section12_checks(system, model_data, cfg=None):
                 "note": "Decision D3: BRBF, SPSW, dual, IMF and other systems have no Indian design basis."}
     checks: List[Dict[str, Any]] = []
     advisories: List[Dict[str, Any]] = []
-    zg = zone_gate(sysn, cfg)
-    if zg:
-        checks.append(zg)
+    comps = system_components(system) or [sysn]
+    for cs_ in comps:
+        zg = zone_gate(cs_, cfg)
+        if zg:
+            checks.append(zg)
+    has_braces = any(c in ("OCBF", "SCBF") for c in comps)
+    has_joints = any(c in ("OMF", "SMF") for c in comps)
+    sys_br = next((c for c in comps if c in ("OCBF", "SCBF")), None)
+    sys_mf = next((c for c in comps if c in ("OMF", "SMF")), None)
+    if len(comps) > 1:
+        advisories.append({"clause": "IS 800:2007 12 / IS 1893 Table 9", "applies": True,
+                           "note": "mixed per-direction system %s: brace rules (12.7 / 12.8) for the braced bays and "
+                                   "moment-frame joint rules (12.10 / 12.11) for the portal joints; column / base rules of "
+                                   "the primary system %s; R = min over the components" % (" + ".join(comps), sysn)})
     a18 = is18168_status(sysn, cfg)
     if a18["applies"]:
         g = I18.system_gate(sysn, cfg.get("zone") or cfg.get("Z"), cfg.get("height_m"))
@@ -1039,9 +1217,37 @@ def section12_checks(system, model_data, cfg=None):
     checks += column_checks(sysn, model_data, cfg)
     checks += base_checks(sysn, model_data, cfg)
     conns = {c.get("member_id"): c for c in (model_data.get("connections") or []) if c.get("kind") == "brace_end"}
-    if sysn in ("OCBF", "SCBF"):
+    if a18["applies"] and sysn in ("SCBF", "SMF") and not cfg.get("is18168_table2"):
+        advisories.append({"clause": "IS 18168:2023 5.3 / Table 2", "applies": True, "live": False,
+                           "note": "width-to-thickness limits of the SFRS sections (Table 2 x eps/sqrt(Ry): beams 9.0/44.5, columns "
+                                   "9.0/72.7(1-1.04Ca), braces 11.3/44.4) are NOT enforced on this job -- set cfg['is18168_table2'] = "
+                                   "True to run them as live checks (rolled NPB webs d/tw > ~38 and WPB flanges b/tf > ~7.8 fail; WP6)"})
+    if a18["applies"] and sysn in ("SCBF", "SMF") and cfg.get("is18168_table2"):
+        # IS 18168:2023 5.3 / Table 2: width-to-thickness limits of the lateral load resisting system's sections
+        # (braces (iii), columns (ii) with Ca, SFRS beams (i)); EBF members are checked in their own branch (WP6).
+        # Opt-in on SCBF / SMF jobs (cfg['is18168_table2']) so the wave-2 fixtures keep their status; EBF always.
+        for m in _members(model_data):
+            if m.get("role") not in ("brace", "column", "beam") or (m.get("role") == "beam" and not m.get("sfrs")):
+                continue
+            try:
+                pm = _props(m)
+            except KeyError:
+                continue
+            fym, _ = _fy(m, pm)
+            if not fym or pm.get("section_type") != "I":
+                continue
+            comp = {"brace": "brace", "column": "column", "beam": "beam"}[m["role"]]
+            Ca = None
+            if comp == "column":
+                Py = fym * pm["A"] / I8.GAMMA_M0_DEFAULT
+                Ca = max([abs(f.get("P_N", 0.0)) for f in _forces(model_data, m["id"])] + [0.0]) / Py
+            checks.append(dict(I18.table2_check(comp, pm, fym, _ry(m, pm)[0], Ca=Ca, member=m["id"]),
+                               cite="IS 18168:2023 5.3: sections of the lateral load resisting system within Table 2 (%s)"
+                                    % {"brace": "iii", "column": "ii", "beam": "i"}[comp]))
+    if has_braces:
+        sysn_b = sys_br
         cfgb = str(cfg.get("brace_config") or "").lower()
-        cl = "IS 800:2007 12.7.1.2" if sysn == "OCBF" else "IS 800:2007 12.8.1.2"
+        cl = "IS 800:2007 12.7.1.2" if sysn_b == "OCBF" else "IS 800:2007 12.8.1.2"
         if not cfgb:
             checks.append(_na("brace_configuration", clause=cl, cite="diagonal and X-bracing only",
                               reason="brace_config not declared"))
@@ -1054,27 +1260,53 @@ def section12_checks(system, model_data, cfg=None):
         if not braces:
             checks.append(_na("braces", clause=cl, cite="brace members", reason="no brace members in model_data"))
         for m in braces:
-            checks += brace_member_checks(sysn, m, model_data, cfg)
-            checks += brace_connection_checks(sysn, m, conns.get(m["id"]), model_data, cfg)
-        checks += tension_share_checks(sysn, model_data)
-    elif sysn == "EBF":
+            checks += brace_member_checks(sysn_b, m, model_data, cfg)
+            checks += brace_connection_checks(sysn_b, m, conns.get(m["id"]), model_data, cfg)
+        checks += tension_share_checks(sysn_b, model_data)
+    if sysn == "EBF":
         links = model_data.get("links") or []
         if not links:
             checks.append(_na("ebf_links", clause="IS 18168:2023 11 / 12.3", cite="links modelled and designed",
                               reason="no links in model_data (an EBF analysed without links is not an EBF)"))
         for ln in links:
             lr = ebf_link_checks(ln, model_data, cfg)
+            ln["_overstrength"] = next((c for c in lr if c["id"] == "12.3.2.2_link_overstrength"), None)
             checks += lr
             checks += ebf_capacity_protected_checks(lr, model_data, ln)
+        # 12.3.4.1 width-thickness (Table 2) of the beams outside the links and the SFRS columns
+        seen = set()
+        for ln in links:
+            for bid in ln.get("beam_ids") or []:
+                if bid in seen:
+                    continue
+                seen.add(bid)
+                mb = _member(model_data, bid)
+                if not mb:
+                    continue
+                pb = _props(mb); fyb, _ = _fy(mb, pb)
+                if fyb and pb.get("section_type") == "I":
+                    checks.append(dict(I18.table2_check("beam", pb, fyb, _ry(mb, pb)[0], member=bid),
+                                       cite="12.3.4.1: beams outside the links satisfy Table 2 (i)"))
+        for mc in _members(model_data, "column"):
+            pc = _props(mc); fyc, _ = _fy(mc, pc)
+            if fyc and pc.get("section_type") == "I":
+                Py = fyc * pc["A"] / I8.GAMMA_M0_DEFAULT
+                Pu = max([abs(f.get("P_N", 0.0)) for f in _forces(model_data, mc["id"])] + [0.0])
+                checks.append(dict(I18.table2_check("column", pc, fyc, _ry(mc, pc)[0], Ca=Pu / Py, member=mc["id"]),
+                                   cite="12.3.4.1: columns satisfy Table 2 (ii), Ca = Pu/(Py/gamma_m0)"))
+        for m in _members(model_data, "brace"):
+            checks += ebf_brace_checks(m, model_data, cfg)
+            checks += brace_connection_checks(sysn, m, conns.get(m["id"]), model_data, cfg)
+        checks += ebf_beam_column_checks(links, model_data, cfg)
         advisories.append({"note": "IS 800:2007 12.9 refers EBF to specialist literature; IS 18168:2023 cl. 11/12.3 "
                                    "applied (decision D2)."})
-    elif sysn in ("OMF", "SMF"):
+    if has_joints:
         joints = model_data.get("joints") or []
         if not joints:
             checks.append(_na("moment_frame_joints", clause="IS 800:2007 12.11 / 12.10",
                               cite="every frame joint from model connectivity", reason="no joints in model_data"))
         for j in joints:
-            checks += smf_joint_checks(j, model_data, cfg, system=sysn)
+            checks += smf_joint_checks(j, model_data, cfg, system=sys_mf)
     # IS 18168:2023 advisories (governs over IS 800 Section 12 where applicable - lead/EOR decision)
     zone = _zone_roman(cfg.get("zone") or cfg.get("Z"))
     if a18["applies"]:

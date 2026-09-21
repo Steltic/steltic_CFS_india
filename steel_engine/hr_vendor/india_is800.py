@@ -2188,6 +2188,26 @@ def section_class_table2(sec, fy_MPa, *, P_N=0.0, welded=False, gamma_m0=GAMMA_M
         else:
             el += [dict(element="angle b/t (bending)", ratio=b / t, limits=(9.4 * eps, 10.5 * eps, 15.7 * eps)),
                    dict(element="angle d/t (bending)", ratio=d / t, limits=(9.4 * eps, 10.5 * eps, 15.7 * eps))]
+    elif st == "box":
+        # WP6-fix: built-up welded box -- Table 2 internal elements: compression flange between the webs
+        # (29.3 / 33.5 / 42 eps) and the webs as internal elements in bending / with axial (same rows as I webs)
+        D, B, tw, tf = p["d"], p["bf"], p["tw"], p["tf"]
+        el.append(dict(element="box flange internal element (b - 2 tw)/tf", ratio=(B - 2.0 * tw) / tf,
+                       limits=(29.3 * eps, 33.5 * eps, 42 * eps)))
+        d = D - 2.0 * tf
+        P = float(P_N or 0.0)
+        if abs(P) < 1e-9:
+            el.append(dict(element="box web d/tw (neutral axis at mid-depth)", ratio=d / tw,
+                           limits=(84 * eps, 105 * eps, 126 * eps)))
+        else:
+            fcd = float(fy_MPa) / float(gamma_m0)
+            r1 = (P / (2.0 * d * tw)) / fcd
+            r2 = (P / p["A"]) / fcd
+            lp = max(84 * eps / (1 + r1), 42 * eps)
+            lc = max((105 * eps / (1 + r1)) if r1 < 0 else (105 * eps / (1 + 1.5 * r1)), 42 * eps)
+            ls = max(126 * eps / (1 + 2 * r2), 42 * eps)
+            el.append(dict(element="box web d/tw (generally, r1=%.3f, r2=%.3f)" % (r1, r2), ratio=d / tw,
+                           limits=(lp, lc, ls), r1=r1, r2=r2))
     else:
         D, B, tw, tf = p["d"], p["bf"], p["tw"], p["tf"]
         R1 = p.get("R1") or 0.0
@@ -2286,6 +2306,11 @@ def buckling_class_for_section(sec, axis, *, process=None, welded=False):
         return buckling_class("angle", axis=axis)
     if st == "channel":
         return buckling_class("channel", axis=axis)
+    if st == "box":
+        # Table 10 welded box: 'generally b'; 'thick welds and b/tf < 30 (z-z) / h/tw < 30 (y-y): c' -- the
+        # conservative row c is taken for every built-up box (WP6-fix)
+        return buckling_class("box", axis=axis, welded=True, tw=p["tw"], h=p["d"], b=p["bf"], tf=p["tf"],
+                              thick_welds=True)
     return buckling_class("welded_I" if welded else "I", h=p["d"], b=p["bf"], tf=p["tf"], axis=axis, welded=welded)
 
 
@@ -2413,7 +2438,7 @@ def ltb_moment_capacity(sec, LLT_mm, fy_MPa, *, welded=False, section_class=None
     Ze = p["Sx"] if axis == "z" else p["Sy"]
     base = design_moment_8_2_1(Zp, Ze, fy_MPa, section_class, support=support, gamma_m0=gamma_m0)
     st = p.get("section_type")
-    if axis != "z" or st == "CHS":
+    if axis != "z" or st in ("CHS", "box"):
         base.update(ltb="not applicable (8.2.2 a/b: minor-axis bending or hollow section)", lambda_LT=None,
                     chi_LT=1.0, cite=cite)
         return base
@@ -2462,6 +2487,9 @@ def shear_capacity(sec, fy_MPa, *, axis="z", welded=False, stiffener_spacing_mm=
     if st == "CHS":
         Av = 2.0 * p["A"] / math.pi
         basis = "circular hollow tube: 2A/pi"
+    elif st == "box":
+        Av = (2.0 * (p["d"] - 2 * p["tf"]) * p["tw"]) if axis == "z" else (2.0 * p["bf"] * p["tf"])
+        basis = "welded box: two webs d tw (major) / two flanges b tf (minor) (8.4.1.1 welded plate elements)"
     elif axis == "z":
         tf = p["tf"]
         Av = (p["d"] * p["tw"]) if not welded else (p["d"] - 2 * tf) * p["tw"]
@@ -2474,7 +2502,7 @@ def shear_capacity(sec, fy_MPa, *, axis="z", welded=False, stiffener_spacing_mm=
     Vn = Vp
     if st not in ("CHS",) and axis == "z":
         R1 = p.get("R1") or 0.0
-        d = p["d"] - 2 * p["tf"] - (0.0 if welded else 2 * R1)
+        d = p["d"] - 2 * p["tf"] - (0.0 if (welded or st == "box") else 2 * R1)
         dtw = d / p["tw"]
         if stiffener_spacing_mm:
             cd = float(stiffener_spacing_mm) / d
@@ -2791,10 +2819,6 @@ def member_check_is800(member, combo_forces, *, cfg=None):
     res["capacities"] = {"compression": comp, "shear_z": shz, "shear_y": shy, "Mdy": Md_y, "Mdz_section": Md_z_sec,
                          "section_class": sc0, "tension": Td}
     klr = comp.get("KL_over_r_max")
-    if klr is not None:
-        lim = TABLE3_LIMITS["compression_WL_EL_only"] if member.get("compression_only_from_WL_EL") else TABLE3_LIMITS["compression_DL_LL"]
-        res["table3_slenderness"] = {"value": klr, "limit": lim, "dc": klr / lim, "ok": klr <= lim,
-                                     "clause": "IS 800:2007 3.8 / Table 3", "cite": "Table 3 maximum KL/r"}
     per = []
     for cf in combo_forces or []:
         P = float(cf.get("P_N") or 0.0)
@@ -2851,6 +2875,29 @@ def member_check_is800(member, combo_forces, *, cfg=None):
             rec["ok"] = rec["dc"] <= 1.0
         per.append(rec)
     res["per_combo"] = per
+    # IS 800 Table 3 (3.8) maximum effective slenderness -- the row depends on what the member carries (WP6-fix):
+    # (i) 180 for compression from DL + LL; (iii) 250 when the compression arises only in WL / EL combinations;
+    # (iv) 300 on the compression flange of a beam (LLT / ry) when the member carries no axial compression at all
+    # (an 8.5 m NPB450 floor beam is not a "member carrying compressive loads": row (i) must not fail it).
+    if klr is not None:
+        Ps = [(r["P_N"], str(r.get("combo") or "")) for r in per]
+        Pmax = max([P for P, _ in Ps] or [0.0])
+        is_beam = str(member.get("role") or "").lower() == "beam"
+        comp_only_lat = Pmax > 1e-6 and all(P <= 1e-6 or ("EQ" in lab or "W_" in lab or "WL" in lab or "EL" in lab)
+                                            for P, lab in Ps)
+        if is_beam and Pmax <= 1e-6:
+            ry = comp.get("axes", {}).get("y", {}).get("r_mm") or p.get("ry") or p.get("r_min")
+            LLTs = [v for v in (member.get("LLT_sag_mm"), member.get("LLT_hog_mm")) if v]
+            v3 = (max(LLTs) if LLTs else L) / float(ry) if ry else None
+            lim = TABLE3_LIMITS["beam_compression_flange_LTB"]
+            row = "(iv) compression flange of a beam against LTB: LLT / ry"
+        elif comp_only_lat or member.get("compression_only_from_WL_EL"):
+            v3, lim, row = klr, TABLE3_LIMITS["compression_WL_EL_only"], "(iii) compression only from WL / EL combinations"
+        else:
+            v3, lim, row = klr, TABLE3_LIMITS["compression_DL_LL"], "(i) compression from DL + LL"
+        if v3 is not None:
+            res["table3_slenderness"] = {"value": v3, "limit": lim, "dc": v3 / lim, "ok": v3 <= lim,
+                                         "clause": "IS 800:2007 3.8 / Table 3", "cite": "Table 3 %s <= %d" % (row, lim)}
     if not per:
         res.update(found=False, ok=None, dc=None, reason="no combination forces")
         return res

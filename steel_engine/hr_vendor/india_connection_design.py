@@ -31,7 +31,7 @@ def spec_for(cfg, kind, section, role=None):
     specs = ((cfg or {}).get("connections") or {}).get(kind) or {}
     if not isinstance(specs, dict):
         return None
-    for key in ((role, section), section, role, "default"):
+    for key in ((role, section), "%s:%s" % (role, section), section, role, "default"):
         if key in specs and isinstance(specs[key], dict):
             return dict(specs[key])
     return None
@@ -111,7 +111,7 @@ def beam_column_connection(cfg, beam_member, p_beam, fy_beam, *, col_props=None)
             r = C.fin_plate_shear_checks(V_N=1.0, **sh)
             out["shear_capacity_N"] = r.get("capacity_N")
             out["shear_detail"] = r
-    for k in ("continuity_plates", "doubler_t_mm", "max_deliverable_moment_Nmm", "rbs"):
+    for k in ("continuity_plates", "continuity_plate_t_mm", "doubler_t_mm", "max_deliverable_moment_Nmm", "rbs"):
         if k in sp:
             out[k] = sp[k]
     return out
@@ -131,7 +131,9 @@ def beam_shear_connection_checks(cfg, beam_member, V_N, *, sfrs=False):
 # ------------------------------------------------------------------------------------------ column bases / splices
 def base_entry(cfg, col_member, load_cases):
     """model_data 'bases' entry with the declared base geometry and the per-combination (P, M, V) of the column."""
-    sp = spec_for(cfg, "column_base", col_member["section"], "column")
+    # keyed by 'lateral_col:<section>' / 'gravity_col:<section>' (role group) before the bare section (WP6: one rolled
+    # section can serve both an SFRS column with a fixed base and a gravity column with a pinned base)
+    sp = spec_for(cfg, "column_base", col_member["section"], col_member.get("role_group") or "column")
     if not sp:
         return None
     b = {"id": "base-%s" % col_member["id"], "column_member_id": col_member["id"], "fixed": bool(sp.get("fixed", True)),
@@ -157,7 +159,7 @@ def base_load_cases(records, *, kind="col", major_plane_is_frame=True):
 
 
 def column_splice(cfg, col_member, p, fy, records, *, sfrs):
-    sp = spec_for(cfg, "column_splice", col_member["section"], "column")
+    sp = spec_for(cfg, "column_splice", col_member["section"], col_member.get("role_group") or "column")
     if not sp:
         return None
     if sp.get("none"):
@@ -205,10 +207,12 @@ def hsfg_slip_checks(bolts, bolt_type, V_service_N, V_ultimate_N=None, *, slip_s
 
 
 # ------------------------------------------------------------------------------------------ composite (WP2.9)
-def composite_design_record(cfg, pkg_members):
+def composite_design_record(cfg, pkg_members, beam_dirs=None):
     """WP2.9: IS 11384 is not in the corpus -> found:false slots; scope 'bare_steel' is satisfied by the IS 800 8.2 /
     9.3 member checks already in the package plus a construction-stage (unshored wet concrete) check of the floor
-    beams with the compression flange unrestrained until the deck is fixed (cfg['construction_stage'])."""
+    beams with the compression flange unrestrained until the deck is fixed (cfg['construction_stage']).
+    beam_dirs = {section: {'X','Y'}} (WP6-fix): with cfg['deck_span'] declared, a beam group parallel to the deck span
+    carries no wet-deck load and is not wet-stage checked; the others take the full bay width (conservative)."""
     rec = I8.composite_is11384_worksheet_stubs(cfg)
     scope = str(cfg.get("composite_scope") or "").lower()
     if scope not in ("bare_steel", "bare-steel"):
@@ -227,12 +231,19 @@ def composite_design_record(cfg, pkg_members):
                              "LLT_mm (compression-flange restraint before the deck is fixed)}")
                 continue
             worst = None
+            ds = str(cfg.get("deck_span") or "").upper()
             for m in pkg_members:
                 if m["inputs"].get("role") != "floor":
                     continue
                 sec = m["inputs"]["section"]
+                dirs = (beam_dirs or {}).get(sec)
+                if ds in ("X", "Y") and dirs and set(dirs) <= {ds}:
+                    continue                                    # parallel to the deck span: no wet-deck load
                 L = float(m["inputs"]["length_mm"])
-                trib = float(cs.get("trib_mm") or min(cfg["SX"], cfg["SY"]))
+                if ds in ("X", "Y") and dirs:
+                    trib = float(cs.get("trib_mm") or (cfg["SY"] if ds == "Y" else cfg["SX"]))   # one-way: the bay across
+                else:
+                    trib = float(cs.get("trib_mm") or min(cfg["SX"], cfg["SY"]))
                 w = (1.5 * float(cs["D_wet_kNm2"]) + 1.5 * float(cs.get("L_const_kNm2") or 0.0)) * trib / 1000.0
                 M = w * L * L / 8.0
                 res = I8.member_check_is800({"id": "wet-" + sec, "section": sec, "grade": cfg.get("steel_grade"),

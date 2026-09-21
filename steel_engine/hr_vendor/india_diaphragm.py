@@ -89,17 +89,27 @@ def collector_forces(cfg, kind="EQ"):
                     r[nd] = r.get(nd, 0.0) + gf[off + di]
         # sign: make the level total positive along +d
         ax = 0 if d == "X" else 1           # coordinate along the force
+        zlev = E.zlevels(cfg)
         for k in range(1, NF + 1):
             nodes = [E.ntag(i, j, k) for (i, j) in info["present"][k]]
             crd = {n: ops.nodeCoord(n) for n in nodes}
+            # off-grid work points at this level (EBF link ends, WP6): the braces deliver their storey shear
+            # to the diaphragm THERE, on the frame line, so they are part of the line's node set
+            gridset = set(nodes)
+            for n in r:
+                if n in gridset or n == E.mtag(k) or n >= 9_000_000:
+                    continue
+                c = ops.nodeCoord(n)
+                if abs(c[2] - zlev[k]) < 1e-6:
+                    nodes.append(n); crd[n] = c
             tot = sum(r.get(n, 0.0) for n in nodes)
             if abs(tot) < 1e-6:
                 continue
             sg = 1.0 if tot > 0 else -1.0
             lines = {}
+            # line key = the coordinate normal to the force (grid nodes and work points on one line share it)
             for n in nodes:
-                i, j = _ij(n)
-                lines.setdefault(j if d == "X" else i, []).append(n)
+                lines.setdefault(round(crd[n][1 if d == "X" else 0], 1), []).append(n)
             reac = []
             for key, ln in lines.items():
                 ln.sort(key=lambda n: crd[n][ax])
@@ -217,7 +227,7 @@ CITE_7_6_4 = ("IS 1893 (Part 1):2016 7.6.4: 'flexible, if ... the maximum latera
 
 
 def classify_7_6_4(*, delta_max_from_chord_mm=None, delta_avg_mm=None, declared=None, rc_slab=None,
-                   screed_mm=None, roof=False, plan_aspect_ratio=None):
+                   screed_mm=None, roof=False, plan_aspect_ratio=None, basis=None):
     """Rigid / flexible per 7.6.4.  With measured deflections: flexible when delta_max(chord) > 1.2 x average.
     Without them, the 'usually rigid' rule (RC monolithic slab, or precast with >= 50 mm floor / 75 mm roof screed,
     plan aspect ratio < 3) classifies as rigid; a bare metal deck / braced roof with no such data must be DECLARED
@@ -237,6 +247,8 @@ def classify_7_6_4(*, delta_max_from_chord_mm=None, delta_avg_mm=None, declared=
     if declared in ("flexible", "rigid"):
         out.update(method="declared by the EOR (7.6.4 basis to be recorded)", classification=declared,
                    flexible=declared == "flexible", ok=True)
+        if basis:
+            out["basis"] = str(basis)                    # the EOR's recorded 7.6.4 basis (WP6-fix: was rejected)
         return out
     out.update(method=None, classification=None, flexible=None, ok=None,
                reason="7.6.4 classification needs the diaphragm deflection ratio, an RC/screeded slab, or a declaration")

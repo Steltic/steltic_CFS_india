@@ -179,6 +179,13 @@ def Ipack(name):
     """
     key = str(name).upper().replace(" ", "").strip()
     if _UNIT_SYSTEM == "N-mm":
+        try:
+            import sections as _SEC
+            c = _SEC.CUSTOM.get(_SEC.normalize_label(name))      # WP6-fix: built-up box sections (register_box)
+        except Exception:
+            c = None
+        if c is not None:
+            return (c["A"], c["Ix"], c["Iy"], c["J"])
         s = _shapes_csv_si().get(key)
         if s is not None:
             return s
@@ -264,6 +271,9 @@ def build(cfg,transf="Linear"):
     engine/example_build.py for a complete worked reference to copy.  When no custom_build is given
     (the built-in B-archetypes and quick self-checks) the model is built by example_build()."""
     cb = cfg.get("custom_build")
+    if cfg.get("custom_sections"):
+        import sections as _SEC
+        _SEC.register_custom_sections(cfg)             # WP6-fix: built-up box sections declared by the job
     if cb is not None and "present" not in cfg:
         # PROBE build: run the custom builder once, throw the ops domain away, and capture the
         # per-level footprint into cfg['present'] so grid()/floor_area/perim/wind/masses all see
@@ -1121,8 +1131,29 @@ def india_drift(cfg, eccentricity=None, gravity=(1.0, 1.0)):
         best = best or base
         best["ratio"] = [max(a, b) for a, b in zip(best["ratio"], base["ratio"])]
         best["drift_cm_no_torsion"] = base["drift_cm"]
+        # Table 6(i) (Amd 2) storey lateral stiffness = storey shear / inter-storey drift under the design
+        # lateral-force distribution.  Stiffness is a property of the structure, so it is taken from a FIRST-ORDER
+        # solve of the lateral forces alone: the gravity P-Delta amplification of the drift check above is larger in
+        # the lower storeys and would read as a 1-2 % "soft storey" in every uniform frame (WP6-fix, L3).
+        info = build(cfg, "Linear"); NF = info["NF"]
+        ops.timeSeries("Linear", 1); ops.pattern("Plain", 1, 1)
+        for k in range(1, NF + 1):
+            fx, fy, mz = F.get(k, (0.0, 0.0, 0.0))
+            ops.load(mtag(k), fx, fy, 0.0, 0.0, 0.0, mz)
+        ops.constraints("Transformation"); ops.numberer("RCM"); ops.system("UmfPack")
+        ops.test("NormDispIncr", 1e-9, 20); ops.algorithm("Linear")
+        ops.integrator("LoadControl", 1.0); ops.analysis("Static")
+        if ops.analyze(1) != 0:
+            raise RuntimeError("first-order stiffness analysis (%s) did not converge" % d)
+        di = 0 if d == "X" else 1
+        um1 = [ops.nodeDisp(mtag(k), di + 1) for k in range(1, NF + 1)]
+        dcm1 = [abs(um1[k] - (um1[k - 1] if k else 0.0)) / cfg["heights"][k] for k in range(NF)]
+        best["drift_cm_first_order"] = dcm1
         best["stiffness_N_per_mm"] = [(V / (dc * h)) if dc > 0 else float("inf")
-                                      for V, dc, h in zip(base["storey_shear_N"], base["drift_cm"], cfg["heights"])]
+                                      for V, dc, h in zip(base["storey_shear_N"], dcm1, cfg["heights"])]
+        best["stiffness_basis"] = ("IS 1893 Table 6(i) (Amd 2): storey shear / inter-storey drift at the CM under the "
+                                   "design lateral-force distribution, first-order (no gravity P-Delta); the drift "
+                                   "check itself is second-order with 1.0 DL + 1.0 LL")
         out[d] = best
     return out
 
@@ -1262,6 +1293,20 @@ def india_dynamic_wind_gate(cfg, f1_hz):
     return not bad, bad, True
 
 
+def _bays_adjacent(present_k, i, j, dirn):
+    """How many present bays bound this beam (1 perimeter, 2 interior) -- mirrors static_model._bays_adjacent."""
+    n = 0
+    if dirn == "X":
+        for jj in (j - 1, j):
+            if all(c in present_k for c in ((i, jj), (i + 1, jj), (i, jj + 1), (i + 1, jj + 1))):
+                n += 1
+    else:
+        for ii in (i - 1, i):
+            if all(c in present_k for c in ((ii, j), (ii + 1, j), (ii, j + 1), (ii + 1, j + 1))):
+                n += 1
+    return n
+
+
 def beam_deflection_si(cfg):
     """IS 800 Table 6 live-load deflection of every beam group (SI), simply supported w L^4 check
     on the actual section.  Returns (worst ratio to limit, n evaluated, rows).  n == 0 -> the gate
@@ -1281,7 +1326,13 @@ def beam_deflection_si(cfg):
             continue
         dirn = "X" if Lx >= Ly else "Y"
         roof = (n1 // 100000) >= NF
-        trib = 0.0 if (ds in ("X", "Y") and dirn == ds) else (cfg["SY"] if dirn == "X" else cfg["SX"])
+        # tributary width by the bays actually bounding the beam (edge beam: one bay -> half the bay width;
+        # interior: two half bays) -- the full-bay width on every group over-read edge-beam deflections (WP6-fix)
+        k_ = n1 // 100000
+        i_, j_ = (min(n1, n2) % 100000) // 100, min(n1, n2) % 100
+        nb = _bays_adjacent(info.get("present", {}).get(k_, set()), i_, j_, dirn)
+        other = cfg["SY"] if dirn == "X" else cfg["SX"]
+        trib = 0.0 if (ds in ("X", "Y") and dirn == ds) else (nb * other / 2.0 if nb else other)
         key = (str(sec), round(L, 0), roof, dirn)
         if key not in groups or trib > groups[key][1]:
             groups[key] = (L, trib, roof, sec)
@@ -1293,6 +1344,10 @@ def beam_deflection_si(cfg):
             continue
         A, Ix, Iy, J = Ipack(sec)
         delta = 5.0 * w * L ** 4 / (384.0 * E * Ix)
+        if roof and cfg.get("deflection_key_roof"):
+            div, cite = IL.floor_deflection_limit(cfg, roof=True)     # declared Table 6 roof row (e.g. rafter, WP6-fix)
+        else:
+            div, cite = IL.floor_deflection_limit(cfg)
         lim = L / div
         r = delta / lim
         rows.append({"section": sec, "span_mm": round(L, 0), "roof": roof, "w_LL_N_per_mm": round(w, 3),
@@ -1819,6 +1874,33 @@ def floor_beam_gaps(cfg, transf="Linear"):
     for t, c in coord.items():
         if c and c[2] > zmin + 1e-6 and _isgrid(t):
             byz[round(c[2], 3)].append((c[0], c[1], t))
+    # horizontal-element adjacency: a column-line beam may be modelled as a CHAIN of collinear pieces
+    # through off-grid work points (EBF link + beams outside the link, WP6) -- walk the chain
+    adj = defaultdict(set)
+    for fs in modelled:
+        a, b = tuple(fs)
+        adj[a].add(b); adj[b].add(a)
+    def _chained(t, tb):
+        ca, cb = coord[t], coord[tb]
+        seen = {t}; stack = [t]
+        while stack:
+            n = stack.pop()
+            for m in adj[n]:
+                if m == tb:
+                    return True
+                if m in seen:
+                    continue
+                cm_ = coord.get(m)
+                if not cm_ or abs(cm_[2] - ca[2]) > 1e-6:
+                    continue
+                # m must lie strictly inside the straight segment a-b
+                dx, dy = cb[0] - ca[0], cb[1] - ca[1]
+                ex, ey = cm_[0] - ca[0], cm_[1] - ca[1]
+                cross = abs(dx * ey - dy * ex); dot = dx * ex + dy * ey; L2 = dx * dx + dy * dy
+                if cross > 1e-3 * math.sqrt(L2) or dot <= 0 or dot >= L2:
+                    continue
+                seen.add(m); stack.append(m)
+        return False
     gaps = []
     for z, pts in byz.items():
         xs = sorted({round(p[0], 3) for p in pts}); ys = sorted({round(p[1], 3) for p in pts})
@@ -1827,7 +1909,7 @@ def floor_beam_gaps(cfg, transf="Linear"):
         for (gi, gj), (x, y, t) in at.items():
             for (di, dj) in ((1, 0), (0, 1)):
                 nb = at.get((gi+di, gj+dj))
-                if nb and frozenset((t, nb[2])) not in modelled:
+                if nb and frozenset((t, nb[2])) not in modelled and not _chained(t, nb[2]):
                     gaps.append((z, (x, y), (nb[0], nb[1])))
     return gaps
 
