@@ -400,7 +400,8 @@ def bending_allowable(sec, Fy_MPa, L_unbraced_mm, Cb=1.0, wind_eq=False, compres
     return {"Fb_kgf_cm2": Fb, "Fb_MPa": Fb * KGF_CM2, "Fb1_kgf_cm2": fb1, "Fb1_MPa": fb1 * KGF_CM2,
             "Sxc_cm3": Sxc, "Sx_eff_cm3": Sx_eff, "Iyc_cm4": Iyc, "Cb": Cb, "ltb_clause": ltb_cl, "notes": notes,
             "lip_5221": lip, "allowable_increase": inc, "Fb_design_MPa": Fb * KGF_CM2 * inc,
-            "Ma_Nmm": Fb * Sx_eff * inc * 9.80665 * 1e3, "Ma_kNm": Fb * Sx_eff * inc * 9.80665 / 1e3,
+            # kgf/cm2 x cm3 = kgf-cm; 1 kgf-cm = 9.80665 N x 10 mm = 98.0665 N-mm (WP6-fix: the x 1e3 factor gave 100 x Ma)
+            "Ma_Nmm": Fb * Sx_eff * inc * 98.0665, "Ma_kNm": Fb * Sx_eff * inc * 98.0665 / 1e6,
             "capacity_basis": "IS801_allowable", "clause": "IS 801 6.1 / 6.2 / 6.3 / 5.2.1.1 / 6.1.2",
             "cite": "Fb = 0.6 pi^2 E Cb d Iyc/(L^2 Sxc) when L^2 Sxc/(d Iyc) >= 1.8 pi^2 E Cb/Fy", "source": SRC, "ok": True}
 

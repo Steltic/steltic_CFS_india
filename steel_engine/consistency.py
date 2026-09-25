@@ -63,7 +63,12 @@ def _system_issues(pkg, root):
         sc, cd = hr.get("seismic_calc") or {}, hr.get("capacity_design") or {}
         for key, a, b in (("system", lat.get("system"), sc.get("system")), ("R", lat.get("R"), sc.get("R")),
                           ("system", lat.get("system"), cd.get("system")), ("R", lat.get("R"), cd.get("R"))):
-            if a is not None and b is not None and str(a).upper() != str(b).upper():
+            if a is None or b is None:
+                continue
+            # a mixed system (L7 portals: 'SMF+SCBF', the least R declared as lateral_frame.system / R) matches when the declared
+            # least-R system is one of the '+'-joined parts of the HR package's system label
+            parts = [x.strip().upper() for x in str(b).split("+")]
+            if str(a).upper() != str(b).upper() and str(a).upper() not in parts:
                 out.append("lateral_frame.%s %s != HR package %s" % (key, a, b))
     return out
 

@@ -50,3 +50,36 @@ def test_ebf_links_and_moment_lines():
     assert len(info["links"]) == 2 and all(abs(l["e_mm"] - 900.0) < 1e-9 for l in info["links"])
     assert cfg["sway_frame"] is True and cfg["brace_config"] == "chevron"
     assert info["bases"][(1, 1)] == "pinned" and info["bases"][(0, 0)] == "fixed"    # SFRS column fixed, gravity column pinned
+
+
+def test_builder_module_load_does_not_shadow_hr_modules(tmp_path):
+    """The runner runs the HR engine only; loading the CFS builder by name must not put steel_engine on sys.path
+    (the CFS preflight / pipeline would shadow the HR ones)."""
+    import hr_vendor_runner as RN
+    gold = {"col_sec": {"lateral": {"1-2": "WPB200X200X50.92"}, "gravity": {"1-2": "WPB200X200X42.26"}},
+            "beam_sec": {"floor_X": "NPB300X165X39.88", "floor_Y": "NPB200X130X27.37", "roof_X": "NPB300X165X39.88", "roof_Y": "NPB200X130X27.37"},
+            "xbays": {"1-2": [["X", 0, 0]]}, "brace_sec": {"1-2": "WPB200X200X50.92"}}
+    before = list(sys.path)
+    RN.build_cfg(_spec(gold))
+    assert os.path.join(ROOT, "steel_engine") not in [p for p in sys.path if p not in before]
+
+
+def test_split_level_stepped_bases():
+    """Split-level site: the north half (j = 2) is founded on the grade at level 1; its columns start there (fixed), the level-1
+    floor plate is the south half only, and the grade nodes stay outside the level-1 diaphragm constraint."""
+    import hr_vendor_runner as RN
+    import engine3d as E
+    south = [[i, j] for i in range(3) for j in range(2)]
+    full = [[i, j] for i in range(3) for j in range(3)]
+    gold = {"present": {"0": full, "1": south, "2": full}, "stepped_bases": {"1": [[i, 2] for i in range(3)]}, "omit_beams_at": {"1": [[i, 2] for i in range(3)]},
+            "xbays": {"1-2": [["X", 0, 0]]}, "brace_sec": {"1-2": "WPB200X200X50.92"}, "gravity_base": "fixed",
+            "col_sec": {"lateral": {"1-2": "WPB200X200X50.92"}, "gravity": {"1-2": "WPB200X200X42.26"}},
+            "beam_sec": {"floor_X": "NPB300X165X39.88", "floor_Y": "NPB200X130X27.37", "roof_X": "NPB300X165X39.88", "roof_Y": "NPB200X130X27.37"}}
+    cfg, _ = RN.build_cfg(_spec(gold))
+    info = E.build(cfg, "Linear")
+    assert len(info["present"][1]) == 6 and len(info["present"][2]) == 9
+    assert info["bases"][(0, 2)] == "fixed@L1" and info["bases"][(0, 0)] == "fixed"
+    cols = [e for e in info["ele"] if e[1] == "col"]
+    assert len(cols) == 9 + 9                      # storey 1: south half + the three retained basement stubs; storey 2: all nine
+    beams1 = [e for e in info["ele"] if e[1] == "beam" and e[3] // 100000 == 1]
+    assert len(beams1) == 3 + 4                    # level 1: south plate only (3 X beams + 4 Y beams), none into the grade nodes

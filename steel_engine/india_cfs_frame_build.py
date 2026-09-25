@@ -9,8 +9,10 @@ module or a job-local .py path).  Nothing in steel_engine/hr_vendor is touched.
 spec["gold"] = {
   "xcoords_m": [...], "ycoords_m": [...],            # optional non-uniform grid (else i * bay_x, j * bay_y)
   "present": {"default": [[i, j], ...], "1": [...], "3-5": [...]},   # column nodes present at storey k (k = 0 -> storey 1)
+  "stepped_bases": {"1": [[i, j], ...]},               # split-level site: these columns are founded on the grade at level k (fixed there,
+                                                        # outside that level's diaphragm); "omit_beams_at": {"1": [...]} = no beams into them
   "xbays": {"1-4": [["X", i, j], ...]},              # concentric X-braced bays (both diagonals) per storey range
-  "ebf_bays": {"1-4": [["X", i, j], ...]}, "e_link_mm": 900.0,
+  "ebf_bays": {"1-4": [["X", i, j], ...]}, "e_link_mm": 900.0, "ebf_beam_column_pinned": false,
   "ebf_beam_sec": {"X": {"1-4": sec}, "Y": {...}}, "ebf_link_sec": {...}, "ebf_brace_sec": {"1-4": sec},
   "brace_sec": {"1-4": sec},
   "moment_lines": [["X", j], ["Y", i]],             # rigid beam-column joints along a frame line
@@ -40,7 +42,7 @@ def make_gold(spec):
     pres_spec = g.get("present") or {"default": full}
 
     def present(k):
-        kk = 1 if k == 0 else k
+        kk = k if (k == 0 and "0" in pres_spec) else (1 if k == 0 else k)      # an explicit "0" key = the base (foundation) node set
         P = _rng_pick(pres_spec, kk)
         if P is None:
             P = pres_spec.get("default", full)
@@ -95,11 +97,14 @@ def make_gold(spec):
     def brace_sec(k):
         return _rng_pick(g.get("brace_sec"), k) or spec.get("brace")
 
+    stepped = {int(k): {tuple(p) for p in v} for k, v in (g.get("stepped_bases") or {}).items()}   # split-level: supports at level k
+    omit = {int(k): {tuple(p) for p in v} for k, v in (g.get("omit_beams_at") or {}).items()}      # no beams into these nodes at level k
+
     out = {"present": present, "sfrs_col": sfrs_col, "col_sec": col_sec, "beam_sec": beam_sec, "col_strong": col_strong,
            "releases": releases, "xbays": xbays, "brace_sec": brace_sec, "gravity_base": g.get("gravity_base", "pinned"),
-           "lateral_cols": lateral_cols}
+           "lateral_cols": lateral_cols, "stepped_bases": stepped, "omit_beams_at": omit}
     if g.get("ebf_bays"):
-        out.update({"ebf_bays": ebf_bays, "e_link_mm": float(g["e_link_mm"]),
+        out.update({"ebf_bays": ebf_bays, "e_link_mm": float(g["e_link_mm"]), "ebf_beam_column_pinned": bool(g.get("ebf_beam_column_pinned")),
                     "ebf_beam_sec": lambda dirn, k: _rng_pick((g.get("ebf_beam_sec") or {}).get(dirn), k),
                     "ebf_link_sec": lambda dirn, k: _rng_pick((g.get("ebf_link_sec") or {}).get(dirn), k),
                     "ebf_brace_sec": lambda k: _rng_pick(g.get("ebf_brace_sec"), k)})
@@ -143,18 +148,28 @@ def frame_build(cfg, transf="PDelta"):
     NF = len(cfg["heights"]); NX, NY = cfg["NX"], cfg["NY"]
     z = E.zlevels(cfg)
     XY = lambda i, j: _xy(cfg, i, j)
-    pres = {k: set(g["present"](k)) for k in range(NF + 1)}
+    pres = {k: set(g["present"](k)) for k in range(NF + 1)}          # floor plates (areas / masses / diaphragms)
+    stepped = g.get("stepped_bases") or {}
+    node_sets = {k: pres[k] | (stepped.get(k) or set()) for k in range(NF + 1)}   # + grade supports of a split-level site
     for k in range(NF + 1):
-        for (i, j) in pres[k]:
+        for (i, j) in node_sets[k]:
             x, y = XY(i, j); ops.node(E.ntag(i, j, k), x, y, z[k])
     bases = {}
     for (i, j) in pres[0]:
         fixed = g["sfrs_col"](i, j) or g.get("gravity_base", "pinned") == "fixed"
         ops.fix(E.ntag(i, j, 0), 1, 1, 1, *((1, 1, 1) if fixed else (0, 0, 0)))
         bases[(i, j)] = "fixed" if fixed else "pinned"
+    grade_nodes = set()
+    for kb, pts_b in stepped.items():                       # split-level site: columns founded on the uphill grade at level kb
+        for (i, j) in pts_b:                                # (a column stub below it, if declared in present "0", is a retained basement stub)
+            fixed = g["sfrs_col"](i, j) or g.get("gravity_base", "pinned") == "fixed"
+            ops.fix(E.ntag(i, j, kb), 1, 1, 1, *((1, 1, 1) if fixed else (0, 0, 0)))
+            bases[(i, j)] = ("fixed" if fixed else "pinned") + "@L%d" % kb
+            grade_nodes.add(E.ntag(i, j, kb))
+    omit = g.get("omit_beams_at") or {}
     cm = {}
     for k in range(1, NF + 1):
-        pts = pres[k]
+        pts = [p for p in pres[k] if E.ntag(*p, k) not in grade_nodes] or list(pres[k])
         cx = sum(XY(i, j)[0] for i, j in pts) / len(pts); cy = sum(XY(i, j)[1] for i, j in pts) / len(pts)
         cm[k] = (cx, cy); ops.node(E.mtag(k), cx, cy, z[k]); ops.fix(E.mtag(k), 0, 0, 1, 1, 1, 0)
     et = 1; eles = []; links = []; col_tag = {}
@@ -162,7 +177,7 @@ def frame_build(cfg, transf="PDelta"):
         for j in range(NY + 1):
             sd = g["col_strong"](i, j)
             for k in range(NF):
-                if (i, j) in pres[k] and (i, j) in pres[k + 1]:
+                if (i, j) in node_sets[k] and (i, j) in node_sets[k + 1]:
                     sec = g["col_sec"](i, j, k + 1)
                     E.add_column(et, E.ntag(i, j, k), E.ntag(i, j, k + 1), sec, sd)
                     eles.append((et, "col", sec, E.ntag(i, j, k), E.ntag(i, j, k + 1))); col_tag[(i, j, k + 1)] = et; et += 1
@@ -171,33 +186,38 @@ def frame_build(cfg, transf="PDelta"):
     eb = g.get("ebf_bays") or (lambda k: [])
     e_link = float(g.get("e_link_mm") or 0.0)
     for k in range(1, NF + 1):
-        P = pres[k]
+        P = node_sets[k]
         ebays = set(eb(k)); xbays = set(xb(k))
         for dirn in ("X", "Y"):
             rng = [(i, j) for j in range(NY + 1) for i in range(NX)] if dirn == "X" else \
                   [(i, j) for i in range(NX + 1) for j in range(NY)]
             for (i, j) in rng:
                 b = (i + 1, j) if dirn == "X" else (i, j + 1)
-                if (i, j) not in P or b not in P:
+                if (i, j) not in P or b not in P or (i, j) in omit.get(k, set()) or b in omit.get(k, set()):
                     continue
                 A, B = E.ntag(i, j, k), E.ntag(*b, k)
                 if (dirn, i, j) in ebays:
                     xa, ya = XY(i, j); xb_, yb_ = XY(*b)
                     L = (xb_ - xa) if dirn == "X" else (yb_ - ya)
                     s1 = (L - e_link) / 2.0; s2 = (L + e_link) / 2.0
+                    # link-end node tags in their own 10 000 blocks (the (50 + i) * 100 scheme of gold_common collided for i >= 10)
                     if dirn == "X":
-                        L1 = k * 100000 + (50 + i) * 100 + j; L2 = k * 100000 + (60 + i) * 100 + j
+                        L1 = k * 100000 + 50000 + i * 100 + j; L2 = k * 100000 + 60000 + i * 100 + j
                         ops.node(L1, xa + s1, ya, z[k]); ops.node(L2, xa + s2, ya, z[k])
                     else:
-                        L1 = k * 100000 + (70 + j) * 100 + i; L2 = k * 100000 + (80 + j) * 100 + i
+                        L1 = k * 100000 + 70000 + j * 100 + i; L2 = k * 100000 + 80000 + j * 100 + i
                         ops.node(L1, xa, ya + s1, z[k]); ops.node(L2, xa, ya + s2, z[k])
                     bsec, lsec, brs = g["ebf_beam_sec"](dirn, k), g["ebf_link_sec"](dirn, k), g["ebf_brace_sec"](k)
-                    E.add_beam(et, A, L1, bsec, releases=("none", "none")); eles.append((et, "beam", bsec, A, L1)); tb1 = et; et += 1
+                    # centre-link chevron EBF: the beam-to-column joint may be a simple (pinned) connection -- the link is not
+                    # adjacent to the column (IS 18168 12.3.4.4 FR joints are for column links); default rigid as in gold_common
+                    relA = ("I", "none") if g.get("ebf_beam_column_pinned") else ("none", "none")
+                    relB = ("J", "none") if g.get("ebf_beam_column_pinned") else ("none", "none")
+                    E.add_beam(et, A, L1, bsec, releases=relA); eles.append((et, "beam", bsec, A, L1)); tb1 = et; et += 1
                     p = S.props(lsec)
                     Avz = (p["d"] - 2 * p["tf"]) * p["tw"]; Avy = 2 * p["bf"] * p["tf"]
                     ops.element("ElasticTimoshenkoBeam", et, L1, L2, E.E, E.Gmod, p["A"], p["J"], p["Ix"], p["Iy"], Avy, Avz, 3)
                     eles.append((et, "beam", lsec, L1, L2)); tl = et; et += 1
-                    E.add_beam(et, L2, B, bsec, releases=("none", "none")); eles.append((et, "beam", bsec, L2, B)); tb2 = et; et += 1
+                    E.add_beam(et, L2, B, bsec, releases=relB); eles.append((et, "beam", bsec, L2, B)); tb2 = et; et += 1
                     brA = S.props(brs)["A"]
                     ops.element("Truss", et, E.ntag(i, j, k - 1), L1, brA, 1); eles.append((et, "brace", brs, E.ntag(i, j, k - 1), L1)); tr1 = et; et += 1
                     ops.element("Truss", et, E.ntag(*b, k - 1), L2, brA, 1); eles.append((et, "brace", brs, E.ntag(*b, k - 1), L2)); tr2 = et; et += 1
@@ -216,10 +236,10 @@ def frame_build(cfg, transf="PDelta"):
         for (dirn, i, j) in xbays:
             a = (i, j); b = (i + 1, j) if dirn == "X" else (i, j + 1)
             brs = g["brace_sec"](k); brA = S.props(brs)["A"]
-            if a in pres[k - 1] and b in pres[k]:
+            if a in node_sets[k - 1] and b in node_sets[k]:
                 ops.element("Truss", et, E.ntag(*a, k - 1), E.ntag(*b, k), brA, 1)
                 eles.append((et, "brace", brs, E.ntag(*a, k - 1), E.ntag(*b, k))); et += 1
-            if a in pres[k] and b in pres[k - 1]:
+            if a in node_sets[k] and b in node_sets[k - 1]:
                 ops.element("Truss", et, E.ntag(*a, k), E.ntag(*b, k - 1), brA, 1)
                 eles.append((et, "brace", brs, E.ntag(*a, k), E.ntag(*b, k - 1))); et += 1
     info = {"cm": cm, "present": pres, "z": z, "NF": NF, "ele": eles, "links": links, "bases": bases}
@@ -229,10 +249,13 @@ def frame_build(cfg, transf="PDelta"):
             if t == ln["tag"]:
                 link_nodes.setdefault(ln["storey"], []).extend([n1, n2])
     for k in range(1, NF + 1):
-        sl = [E.ntag(i, j, k) for (i, j) in pres[k]] + link_nodes.get(k, [])
+        # grade-level support nodes of a split-level site stay out of the diaphragm constraint (they are fixed)
+        sl = [E.ntag(i, j, k) for (i, j) in pres[k] if E.ntag(i, j, k) not in grade_nodes] + link_nodes.get(k, [])
         ops.rigidDiaphragm(3, E.mtag(k), *sl)
         w = E.floor_w(cfg, k); m = w / E.g
         pts = pres[k]; xs = [XY(i, j)[0] for i, j in pts]; ys = [XY(i, j)[1] for i, j in pts]
-        Bx = max(xs) - min(xs) + cfg["SX"]; By = max(ys) - min(ys) + cfg["SY"]
+        # rotational inertia of the floor plate: the plan extents between the perimeter columns (the +SX / +SY of the HR
+        # gold_common version doubled the depth of a single-bay portal and over-stated its torsional period)
+        Bx = max(xs) - min(xs); By = max(ys) - min(ys)
         ops.mass(E.mtag(k), m, m, 0.0, 0.0, 0.0, m * (Bx ** 2 + By ** 2) / 12.0)
     return info

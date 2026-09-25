@@ -138,3 +138,25 @@ def test_diaphragm_demands_three_lines(tmp_path):
     rx = [r for r in L.diaphragm_demands(cfg, {"root": str(root)}) if r["dir"] == "X"][0]
     assert rx["n_lines"] == 3 and abs(rx["v_unit_kN_per_m"] - 24.0 / 36.0) < 1e-9
     assert abs(rx["panel_span_m"] - 4.0) < 1e-9 and abs(rx["chord_force_kN"] - 0.5) < 1e-9
+
+
+def test_consistency_accepts_mixed_system_label(tmp_path):
+    """WP6: an L7 portal declares the least-R system (SCBF 4.5) while the HR package label is 'SMF+SCBF' -- not an issue."""
+    import json, os, importlib.util
+    sp_ = importlib.util.spec_from_file_location("cfs_consistency_under_test", os.path.join(ROOT, "steel_engine", "consistency.py"))
+    CC = importlib.util.module_from_spec(sp_); sp_.loader.exec_module(CC)          # the CFS module by path (not the vendored HR one)
+    root = tmp_path / "job"; lat = root / "lateral" / "job_lateral" / "design"; lat.mkdir(parents=True)
+    json.dump({"seismic_calc": {"system": "SMF+SCBF", "R": 4.5}, "capacity_design": {"system": "SMF+SCBF", "R": 4.5}}, open(lat / "calc_package.json", "w"))
+    pkg = {"lateral_frame": {"name": "job_lateral", "system": "SCBF", "R": 4.5}}
+    assert CC._system_issues(pkg, str(root)) == []
+    pkg["lateral_frame"]["system"] = "OCBF"
+    assert CC._system_issues(pkg, str(root))
+
+
+def test_wind_summary_carries_the_k4_structure_class():
+    """The HR preflight re-derives k4 from the class; the CFS wind summary must carry it (industrial in the belt -> 1.15)."""
+    import india_cfs_lateral as L
+    cfg = {"site": {"Vb": 50.0, "k2_table": {10: 1.0, 15: 1.05, 20: 1.07}, "cyclone_belt": True, "wind_structure_class": "industrial", "terrain_category": 2},
+           "geometry": {"plan_x_m": 48.0, "plan_y_m": 18.0, "heights_m": [6.0]}, "lateral_frame": {"bay_x_m": 6.0, "bay_y_m": 18.0}}
+    ws, forces = L.wind_story_forces(cfg)
+    assert ws["structure_class"] == "industrial" and abs(ws["k4"] - 1.15) < 1e-9 and ws["Kd"] == 1.0

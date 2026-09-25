@@ -140,25 +140,28 @@ def build_cfg(spec):
     if spec.get("custom_build_module"):
         # WP6: a job-local builder (irregular plan / EBF links / moment lines) declared by the CFS spec; the module's
         # attach(cfg, spec) wires cfg['custom_build'] / cfg['plan'] / cfg['xcoords'] from the JSON spec['gold'] block
-        import importlib, importlib.util
+        import importlib.util
         cbm = str(spec["custom_build_module"])
-        if cbm.endswith(".py"):
-            sp_ = importlib.util.spec_from_file_location("cfs_job_frame_build", cbm)
-            mod = importlib.util.module_from_spec(sp_); sp_.loader.exec_module(mod)
-        else:
-            sys.path.insert(0, HERE); mod = importlib.import_module(cbm)      # e.g. india_cfs_frame_build (CFS-only module)
+        if not cbm.endswith(".py"):
+            cbm = os.path.join(HERE, cbm + ".py")          # e.g. india_cfs_frame_build (CFS-only module, loaded by path:
+        sp_ = importlib.util.spec_from_file_location("cfs_job_frame_build", cbm)   # steel_engine must NOT enter sys.path here)
+        mod = importlib.util.module_from_spec(sp_); sp_.loader.exec_module(mod)
         mod.attach(cfg, spec)
     # ---- IS 1893 seismic summary from the engine weights (W = model mass, WP1.6) ----
     h = sum(heights)
     dx = float(spec.get("d_x_m") or spec["NX"] * spec["bay_x_m"]); dy = float(spec.get("d_y_m") or spec["NY"] * spec["bay_y_m"])
     Ta = {"X": 0.09 * h / math.sqrt(dx), "Y": 0.09 * h / math.sqrt(dy)}      # 7.6.2(c) all other buildings
+    ta_formula = "0.09 h/sqrt(d) (IS 1893 7.6.2(c) all other buildings; braced / CFS-clad frame is not a bare MRF)"
+    if spec.get("Ta_override"):                                              # e.g. 7.6.2(a) 0.085 h^0.75 on a moment-frame direction
+        to = spec["Ta_override"]
+        Ta = {"X": float(to.get("X", Ta["X"])), "Y": float(to.get("Y", Ta["Y"]))}
+        ta_formula = str(to.get("formula") or ta_formula)
     r = E.esm_from_model(cfg, Ta, soil=spec["soil"])
     plan = cfg["load_plan"]
     ss = plan.setdefault("seismic_summary", {})
     ss.update(r["seismic_summary"])
     ss.update(system=spec["system"], zone=spec["zone"], Z=spec["Z"], I=spec["I"], R=spec["R"], soil=spec["soil"],
-              Ta_formula="0.09 h/sqrt(d) (IS 1893 7.6.2(c) all other buildings; braced / CFS-clad frame is not a bare MRF)",
-              Ta_x_s=Ta["X"], Ta_y_s=Ta["Y"], d_x_m=dx, d_y_m=dy)
+              Ta_formula=ta_formula, Ta_x_s=Ta["X"], Ta_y_s=Ta["Y"], d_x_m=dx, d_y_m=dy)
     plan.setdefault("story_forces", {})
     for d in ("X", "Y"):
         plan["story_forces"]["EQ_" + d] = r["story_forces"]["EQ_" + d]

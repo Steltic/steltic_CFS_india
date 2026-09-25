@@ -93,7 +93,8 @@ def wind_story_forces(cfg):
     k4 = req["k4"]; Kd = 1.0 if cb else float(site.get("Kd", 0.9))
     Kc = float(site.get("Kc", 1.0))
     out = {"code": "IS 875 (Part 3):2015", "Vb_mps": Vb, "Vb_source": site.get("Vb_source", "Annex A"), "k1": k1, "k3": k3,
-           "k4": k4, "Kd": Kd, "Kc": Kc, "cyclone_belt": bool(cb), "cyclone_belt_cite": site.get("cyclone_belt_cite"),
+           "k4": k4, "k4_cite": req.get("cite"), "structure_class": req.get("class") or str(site.get("wind_structure_class") or "other"),
+           "Kd": Kd, "Kc": Kc, "cyclone_belt": bool(cb), "cyclone_belt_cite": site.get("cyclone_belt_cite"),
            "terrain_category": site.get("terrain_category"), "Ka_basis": "frame_tributary", "storeys": []}
     hs = []
     z = 0.0
@@ -194,7 +195,7 @@ def build_hr_spec(cfg, name):
         "LLT_sag_mm": lf.get("LLT_sag_mm"), "LLT_hog_mm": lf.get("LLT_hog_mm"), "collector_basis": lf.get("collector_basis"),
         "occupancy": cfg.get("occupancy"), "load_plan": plan, "diaphragm_7_6_4": lf.get("diaphragm_7_6_4"),
         "gold": lf.get("gold"), "custom_build_module": lf.get("custom_build_module"),      # job-local builder (irregular plans)
-        "d_x_m": lf.get("d_x_m"), "d_y_m": lf.get("d_y_m"), "default_strong": lf.get("default_strong"),
+        "d_x_m": lf.get("d_x_m"), "d_y_m": lf.get("d_y_m"), "default_strong": lf.get("default_strong"), "Ta_override": lf.get("Ta_override"),
         "hr_cfg_extra": lf.get("hr_cfg_extra") or {},       # declared HR cfg keys passed through verbatim (e.g. is18168_table2,
                                                             # grade_by_section, custom_sections, column_imposed_load_reduction)
         "notes": "%s: hot-rolled %s lateral frame (R %s) of a CFS building; CFS members gravity / wind only (D3)"

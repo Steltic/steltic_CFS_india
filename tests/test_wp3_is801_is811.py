@@ -113,3 +113,17 @@ def test_wall_stud_81_and_connections():
     b = M.bolted_connection_75(250.0, 2.0, 12.0, 3000.0, 2, 25.0, 50.0, T_member_N=6000.0)
     assert set(b["checks"]) >= {"7.5.1 edge / spacing", "7.5.3 bearing", "7.5.4 bolt shear", "7.5.2 net section"}
     assert M.interconnection_73(3000.0, 18.4, 60.0)["Smax_mm"] == pytest.approx(3000.0 * 18.4 / 120.0)
+
+
+def test_bending_allowable_moment_units_hand_value():
+    """WP6-fix: CLR250X80X25X5 (IS 811 Zx 148 cm3), Fy 240, compression flange restrained: Fb = 0.6 Fy = 144 MPa
+    (1468 kgf/cm2 for a fully effective flange) -> Ma = Fb Sx = 1468 x 148 kgf-cm = 217 264 kgf-cm = 21.3 kN-m
+    (2.13e7 N-mm).  The kgf-cm -> N-mm factor is 98.07, not 9807 (the old x 1e3 returned 2.1e9 N-mm)."""
+    import is801_members as M
+    import is811_sections as S
+    sec = S.props("CLR250X80X25X5")
+    b = M.bending_allowable(sec, 240.0, 0.0, Cb=1.0, wind_eq=False, compression_flange_restrained=True)
+    assert 130.0 <= b["Fb_MPa"] <= 144.5
+    assert 1.5e7 <= b["Ma_Nmm"] <= 2.2e7
+    assert abs(b["Ma_kNm"] - b["Ma_Nmm"] / 1e6) < 1e-9
+    assert abs(b["Ma_Nmm"] - b["Fb_MPa"] * b["Sx_eff_cm3"] * 1e3) / b["Ma_Nmm"] < 0.01
