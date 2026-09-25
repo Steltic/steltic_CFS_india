@@ -124,6 +124,12 @@ def build_cfg(spec):
     }
     if spec.get("diaphragm_7_6_4"):
         cfg["diaphragm_7_6_4"] = spec["diaphragm_7_6_4"]
+    if spec.get("default_strong"):
+        cfg["default_strong"] = spec["default_strong"]
+    cfg.update(spec.get("hr_cfg_extra") or {})              # declared HR cfg keys (WP6 gold packages), verbatim
+    for key in ("D_by_level", "L_by_level"):                # per-level pressures (podium / mezzanine): int level keys after JSON
+        if cfg.get(key):
+            cfg[key] = {int(k): float(v) for k, v in dict(cfg[key]).items()}
     IU.apply_si_geometry(cfg)
     IU.apply_metric_pressures(cfg)
     if cfg.get("SX", 0) < 100:
@@ -131,9 +137,20 @@ def build_cfg(spec):
         cfg["SY"] = float(spec["bay_y_m"]) * 1000.0
     IU.activate_si()
     E.activate_si_units()
+    if spec.get("custom_build_module"):
+        # WP6: a job-local builder (irregular plan / EBF links / moment lines) declared by the CFS spec; the module's
+        # attach(cfg, spec) wires cfg['custom_build'] / cfg['plan'] / cfg['xcoords'] from the JSON spec['gold'] block
+        import importlib, importlib.util
+        cbm = str(spec["custom_build_module"])
+        if cbm.endswith(".py"):
+            sp_ = importlib.util.spec_from_file_location("cfs_job_frame_build", cbm)
+            mod = importlib.util.module_from_spec(sp_); sp_.loader.exec_module(mod)
+        else:
+            sys.path.insert(0, HERE); mod = importlib.import_module(cbm)      # e.g. india_cfs_frame_build (CFS-only module)
+        mod.attach(cfg, spec)
     # ---- IS 1893 seismic summary from the engine weights (W = model mass, WP1.6) ----
     h = sum(heights)
-    dx, dy = spec["NX"] * spec["bay_x_m"], spec["NY"] * spec["bay_y_m"]
+    dx = float(spec.get("d_x_m") or spec["NX"] * spec["bay_x_m"]); dy = float(spec.get("d_y_m") or spec["NY"] * spec["bay_y_m"])
     Ta = {"X": 0.09 * h / math.sqrt(dx), "Y": 0.09 * h / math.sqrt(dy)}      # 7.6.2(c) all other buildings
     r = E.esm_from_model(cfg, Ta, soil=spec["soil"])
     plan = cfg["load_plan"]

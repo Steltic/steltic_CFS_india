@@ -193,6 +193,10 @@ def build_hr_spec(cfg, name):
         "section12_inputs": lf.get("section12_inputs") or {}, "K_factors": lf.get("K_factors"),
         "LLT_sag_mm": lf.get("LLT_sag_mm"), "LLT_hog_mm": lf.get("LLT_hog_mm"), "collector_basis": lf.get("collector_basis"),
         "occupancy": cfg.get("occupancy"), "load_plan": plan, "diaphragm_7_6_4": lf.get("diaphragm_7_6_4"),
+        "gold": lf.get("gold"), "custom_build_module": lf.get("custom_build_module"),      # job-local builder (irregular plans)
+        "d_x_m": lf.get("d_x_m"), "d_y_m": lf.get("d_y_m"), "default_strong": lf.get("default_strong"),
+        "hr_cfg_extra": lf.get("hr_cfg_extra") or {},       # declared HR cfg keys passed through verbatim (e.g. is18168_table2,
+                                                            # grade_by_section, custom_sections, column_imposed_load_reduction)
         "notes": "%s: hot-rolled %s lateral frame (R %s) of a CFS building; CFS members gravity / wind only (D3)"
                  % (name, sysn, R),
     }
@@ -233,15 +237,36 @@ def diaphragm_demands(cfg, lateral):
     sf = lp.get("story_forces") or {}
     lf = cfg.get("lateral_frame") or {}
     NX, NY = int(lf["NX"]), int(lf["NY"])
+    # braced lines per direction (a line = a grid line with at least one braced bay); "perimeter" / "core" as in build_hr_spec
+    bays = lf.get("braced_bays", "perimeter")
+    if bays == "perimeter":
+        bays = [["X", i, 0] for i in range(NX)] + [["X", i, NY] for i in range(NX)] + [["Y", 0, j] for j in range(NY)] + [["Y", NX, j] for j in range(NY)]
+    elif bays == "core":
+        bays = [["X", NX // 2, NY // 2], ["Y", NX // 2, NY // 2]]
+    lines = {"X": sorted({int(b[2]) for b in bays if b[0] == "X"}), "Y": sorted({int(b[1]) for b in bays if b[0] == "Y"})}
+    for d in ("X", "Y"):
+        for (dd, kk) in (lf.get("moment_lines") or []):
+            if dd == d:
+                lines[d] = sorted(set(lines[d]) | {int(kk)})
     rows = []
     for k in range(1, len(H) + 1):
-        for d, B, Lspan, nlines in (("X", Ly, Lx, NY + 1), ("Y", Lx, Ly, NX + 1)):
+        # storey force along X is resisted by the frame lines that run along X (y = const, length Lx = the diaphragm
+        # depth B); with n equal lines at spacing s = Lspan / (n - 1) the rigid diaphragm hands F / n to each line:
+        # v = F / (n B); chord = w s^2 / (8 B) with w = F / Lspan (continuous-diaphragm approximation; n = 2 is the
+        # simple span F / (2 B), F Lspan / (8 B)).  WP6-fix: B and Lspan were swapped (B = Ly for X), which under-stated
+        # v for the long direction of a rectangle; the line count was ignored.
+        for d, B, Lspan in (("X", Lx, Ly), ("Y", Ly, Lx)):
+            # non-rectangular plans: depth (line length) and span declared per direction
+            B = float(geo.get("diaphragm_depth_%s_m" % d) or B)
+            Lspan = float(geo.get("diaphragm_span_%s_m" % d) or Lspan)
+            nlines = max(2, int(geo.get("diaphragm_lines_%s" % d) or len(lines[d]) or 2))
+            s_span = Lspan / (nlines - 1)
             Fe = abs(float((sf.get("EQ_" + d) or {}).get(str(k), [0, 0, 0])[0 if d == "X" else 1]))
             Fw = abs(float((sf.get("W_" + d) or {}).get(str(k), [0, 0, 0])[0 if d == "X" else 1]))
             F = max(Fe, Fw); gov = "EQ" if Fe >= Fw else "W"
             # flexible-diaphragm tributary share to the two extreme frame lines (perimeter braced bays) or equal split
-            v_unit = F / 1e3 / (2.0 * B)      # kN/m along each of the two extreme frame lines (length B across the span)
-            M = F * Lspan / 8.0               # N-m: simple-span diaphragm between the two extreme lines
+            v_unit = F / 1e3 / (nlines * B)   # kN/m along each of the n frame lines (length B = diaphragm depth)
+            M = (F / Lspan) * s_span ** 2 / 8.0   # N-m: diaphragm panel of span s between adjacent lines
             chord = M / B                     # N
             dcap = cfg.get("diaphragm_capacity") or {}
             cap = dcap.get("v_allow_kN_per_m")
@@ -251,10 +276,10 @@ def diaphragm_demands(cfg, lateral):
                 rec_cap = {"capacity": float(cap) * inc, "value": v_unit, "limit": float(cap) * inc, "capacity_basis": dcap.get("basis", "test"),
                            "allowable_increase": inc, "dc": v_unit / (float(cap) * inc), "ok": v_unit <= float(cap) * inc, "found": True,
                            "capacity_cite": dcap.get("cite"), "capacity_source": dcap.get("source")}
-            rows.append({"storey": k, "dir": d, "F_EQ_N": Fe, "F_W_N": Fw, "governing": gov, "F_N": F,
-                         "v_unit_kN_per_m": v_unit, "chord_force_kN": chord / 1e3, "span_m": Lspan, "depth_m": B, **rec_cap,
-                         "clause": "IS 1893 7.6.3 storey force (gamma 1.0) / IS 875-3 storey wind; diaphragm shear = F/(2 B) per unit "
-                                   "length of the two extreme frame lines, chord = F L/(8 B)",
+            rows.append({"storey": k, "dir": d, "F_EQ_N": Fe, "F_W_N": Fw, "governing": gov, "F_N": F, "n_lines": nlines,
+                         "v_unit_kN_per_m": v_unit, "chord_force_kN": chord / 1e3, "span_m": Lspan, "panel_span_m": s_span, "depth_m": B, **rec_cap,
+                         "clause": "IS 1893 7.6.3 storey force (gamma 1.0) / IS 875-3 storey wind; rigid diaphragm on n equal frame lines: "
+                                   "shear = F/(n B) per unit length of line, chord = (F/L) s^2/(8 B), s = L/(n - 1)",
                          "note": "diaphragm shear capacity requires a cited test / product value for the deck or sheathing "
                                  "(IS 801 9.1.4 excludes diaphragms; no Indian table) -- EOR input"})
     return rows

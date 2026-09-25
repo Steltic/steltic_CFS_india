@@ -105,3 +105,36 @@ def test_no_waivers_and_dc_recomputed():
     assert any("D/C = 1.500" in r for r in st["reasons"])          # recomputed 3/2, not the stored 0.5
     pkg["cfs_members"][0]["waived"] = True
     assert any("waived" in r for r in G.design_status(cfg, pkg)["reasons"])
+
+
+def test_diaphragm_demands_depth_and_span_hand_value(tmp_path):
+    """WP6-fix: a 12 m x 8 m plate, storey force 24 kN along X, resisted by the two lines that run along X (length 12 m):
+    v = 24 / (2 x 12) = 1.0 kN/m, chord = (24 x 8 / 8) / 12 = 2.0 kN.  Along Y (lines of length 8 m, span 12 m):
+    v = 24 / 16 = 1.5 kN/m, chord = 24 x 12 / (8 x 8) = 4.5 kN.  (B and the span were swapped before the fix.)"""
+    import json, os
+    import india_cfs_lateral as L
+    root = tmp_path / "lat"; root.mkdir()
+    json.dump({"story_forces": {"EQ_X": {"1": [24000.0, 0.0, 0.0]}, "EQ_Y": {"1": [0.0, 24000.0, 0.0]},
+                                "W_X": {"1": [0.0, 0.0, 0.0]}, "W_Y": {"1": [0.0, 0.0, 0.0]}}}, open(root / "load_plan.json", "w"))
+    cfg = {"geometry": {"plan_x_m": 12.0, "plan_y_m": 8.0, "heights_m": [3.0]}, "lateral_frame": {"NX": 2, "NY": 2},
+           "diaphragm_capacity": {"v_allow_kN_per_m": 6.0}}
+    rows = L.diaphragm_demands(cfg, {"root": str(root)})
+    rx = [r for r in rows if r["dir"] == "X"][0]; ry = [r for r in rows if r["dir"] == "Y"][0]
+    assert abs(rx["v_unit_kN_per_m"] - 1.0) < 1e-9 and abs(rx["chord_force_kN"] - 2.0) < 1e-9
+    assert abs(ry["v_unit_kN_per_m"] - 1.5) < 1e-9 and abs(ry["chord_force_kN"] - 4.5) < 1e-9
+    assert rx["depth_m"] == 12.0 and rx["span_m"] == 8.0
+
+
+def test_diaphragm_demands_three_lines(tmp_path):
+    """Three equal braced lines along X (j = 0, 1, 2 of a 12 x 8 plate): v = F / (3 B) = 24 / 36 kN/m, panel span 4 m,
+    chord = (F / L) s^2 / (8 B) = (24 / 8) x 16 / 96 = 0.5 kN."""
+    import json
+    import india_cfs_lateral as L
+    root = tmp_path / "lat"; root.mkdir()
+    json.dump({"story_forces": {"EQ_X": {"1": [24000.0, 0.0, 0.0]}, "EQ_Y": {"1": [0.0, 0.0, 0.0]}}}, open(root / "load_plan.json", "w"))
+    cfg = {"geometry": {"plan_x_m": 12.0, "plan_y_m": 8.0, "heights_m": [3.0]},
+           "lateral_frame": {"NX": 2, "NY": 2, "braced_bays": [["X", 0, 0], ["X", 1, 1], ["X", 0, 2], ["Y", 0, 0], ["Y", 2, 1]]},
+           "diaphragm_capacity": {"v_allow_kN_per_m": 6.0}}
+    rx = [r for r in L.diaphragm_demands(cfg, {"root": str(root)}) if r["dir"] == "X"][0]
+    assert rx["n_lines"] == 3 and abs(rx["v_unit_kN_per_m"] - 24.0 / 36.0) < 1e-9
+    assert abs(rx["panel_span_m"] - 4.0) < 1e-9 and abs(rx["chord_force_kN"] - 0.5) < 1e-9
