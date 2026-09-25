@@ -142,3 +142,23 @@ def test_ex5_fails_closed_without_pressures_or_combinations(ex5):
     c2 = copy.deepcopy(cfg); c2["load_plan"]["cfs_combinations"] = None
     with pytest.raises(PO.PortalError):
         PO.run(c2, JOBS)
+
+
+def test_ex5_portal_rerun_in_place_regenerates_its_viewer(ex5):
+    """WP6-fix: a second design_and_report into the same outdir (the gold-standard packages are re-run in place) must not
+    trip over the existing viewer_3d.html -- the portal path has no HR lateral root, so its SVG viewer is rebuilt."""
+    import copy
+    fix = os.path.join(ROOT, "tests", "fixtures", "IN_CFS_Ex5")
+    sys.path.insert(0, fix); sys.modules.pop("build_and_run", None)
+    import build_and_run as Bx
+    sys.path.remove(fix)
+    out, pkg, root = ex5
+    cwd = os.getcwd()
+    os.chdir(root)                                     # the failing case: cwd == outdir and viewer_3d.html already there
+    try:
+        import india_cfs_pipeline as CP
+        out2 = CP.design_and_report(Bx.NAME, copy.deepcopy(Bx.build_cfg()), outdir=root)
+    finally:
+        os.chdir(cwd)
+    assert out2["status"] == out["status"]
+    assert os.path.getsize(os.path.join(root, "viewer_3d.html")) > 1000

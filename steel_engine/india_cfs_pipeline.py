@@ -213,8 +213,9 @@ def design_and_report(name, cfg, outdir=None, do_report=True):
            "lateral_status": (pkg.get("lateral_frame") or {}).get("status")}
     if do_report:
         out["report_html"] = R.build_report_cfs_india(name, cfg, pkg, root)
-        v = os.path.join((pkg.get("lateral_frame") or {}).get("root") or "", "viewer_3d.html")
-        if os.path.exists(v):
+        lroot = (pkg.get("lateral_frame") or {}).get("root")          # HR lateral run (absent on the all-CFS portal path)
+        v = os.path.join(lroot, "viewer_3d.html") if lroot else None
+        if v and os.path.exists(v):
             shutil.copy(v, os.path.join(root, "viewer_3d.html"))
             vend = os.path.join(os.path.dirname(v), "vendor")
             if os.path.isdir(vend) and not os.path.isdir(os.path.join(root, "vendor")):
