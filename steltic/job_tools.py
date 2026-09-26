@@ -415,8 +415,9 @@ class JobWorkspace:
             res = ((out or {}).get("results")) or []
             n = len(res)
             if not n:
-                if out and out.get("not_tabulated"):
-                    # the corpus answered: a tabulation gap (a town in neither annex, ...) is a
+                if out and (out.get("not_tabulated") or out.get("document_not_in_corpus")
+                            or "is not in the corpus" in str(out.get("note") or "")):
+                    # the corpus answered (or said the document is not in it): a tabulation gap (a town in neither annex, ...) is a
                     # definite answer that no rewording will change
                     return self._not_found(query, collection, trail)
                 return None
@@ -459,7 +460,8 @@ class JobWorkspace:
             if halt:
                 return dict(RAG_HALT)
             hits = ((out or {}).get("results") or [])
-            if not hits and (out or {}).get("not_tabulated"):
+            if not hits and ((out or {}).get("not_tabulated") or (out or {}).get("document_not_in_corpus")
+                             or "is not in the corpus" in str((out or {}).get("note") or "")):
                 return self._not_found(query, collection, trail)
             # Only a lookup that matched the id is exact. The server says so (`matched`, or the
             # exact_* `type` it ran); an older server does not, so a hit whose section / table /

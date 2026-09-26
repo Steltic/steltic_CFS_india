@@ -122,6 +122,7 @@ def test_document_not_in_corpus_passes_through():
     ws, out = _run(lambda q, c, cl, t, n: {"results": [], "note": "IS_456_2000 is not in the corpus"},
                    "development length anchor bolt", coll="engineering_standards_IS456")
     assert out["not_found_kind"] == "document_not_in_corpus"
+    assert all(w["collection"] for w in ws.wire), "no rung 5 once the corpus says the document is absent"
 
 
 def test_evidence_files_are_never_overwritten(tmp_path):
