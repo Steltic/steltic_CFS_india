@@ -16,6 +16,8 @@ os.environ["STEEL_BUILDER_JOBS"] = JOBS
 sys.path.insert(0, os.path.join(ROOT, "steel_engine"))
 import india_cfs_env  # noqa: E402,F401
 
+COLUMN_67_DC = 0.853          # C01 re-sized Ex5 column (2 x CLR250X80X25X5, Lu 1500, knee brace at 4.5 m on the rafter)
+
 US = re.compile(r"\b(AISI|S100|S240|S400|ASCE|AISC|LRFD|SDPWS|SFIA|ksi|kip|plf|psf|SDS|SD1)\b")
 
 
@@ -121,6 +123,17 @@ def test_ex5_all_cfs_portal(ex5):
     assert {"column", "rafter", "knee brace", "purlin", "girt", "joist", "mezzanine post"} <= set(roles)
     assert all(m["DC"] <= 1.0 and m["ok"] for m in roles.values())
     assert roles["column"]["n_ply"] == 2 and "Annex D" in roles["column"]["K_cite"]
+    # C01 (R12 re-size): the corrected IS 801 6.7 stress interaction governs the column; pinned +-2 % to the re-sized
+    # reference (contract/CFS_REFERENCE.md B.5) and fbx = M / Sx_eff by hand
+    col = roles["column"]
+    i67 = [c for c in col["checks"] if c["check"].startswith("interaction") and isinstance(c.get("dc"), (int, float))]
+    g = max(i67, key=lambda c: c["dc"])
+    assert g["dc"] == pytest.approx(COLUMN_67_DC, rel=0.02)
+    import is801_members as M
+    import is811_sections as S
+    sec = S.built_up("CLR250X80X25X5", 2)
+    b = M.bending_allowable(sec, 294.0, 1500.0, wind_eq=True)
+    assert g["fb_MPa"] == pytest.approx(g["M_Nmm"] / (b["Sx_eff_cm3"] * 1e3), rel=0.01)
     assert all(c["ok"] for c in pkg["cfs_connections"]) and all(c["dc"] <= 1.0 for c in pkg["cfs_connections"])
     assert pkg["design_status"]["status"] == "complete", pkg["design_status"]["reasons"]
     text = re.sub(r"<[^>]+>", " ", open(os.path.join(root, "report.html"), encoding="utf-8").read())

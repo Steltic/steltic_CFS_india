@@ -10,8 +10,13 @@ Design decisions (the 'agent'):
   * Occupancy: general-storage warehouse (no food storage stated) -> I = 1.0 (IS 1893 Table 8 (iii), D8).
   * Portal: 2 x 12 m spans, eave 7.0 m, apex 8.4 m (pitch 13.1 deg), frames at 5.0 m, 7 frames (30 m); columns and
     rafters 2 x CLR250X80X25X5 back to back (IS 801 7.3 connectors at 600 mm), FIXED bases (IS 800 Annex D sway K:
-    pinned bases give K > 2.8 and KL/r > 200, 6.6.3); fly braces to the inner flange at every second girt / purlin
-    (L_unbraced 3000 mm); IS 1079 grade 30 kgf/mm2 -> Fy 294 MPa (IS 801 Table 2 F = 1800 kgf/cm2).
+    pinned bases give K > 2.8 and KL/r > 200, 6.6.3); IS 1079 grade 30 kgf/mm2 -> Fy 294 MPa (IS 801 Table 2
+    F = 1800 kgf/cm2).
+    C01 re-size (ruling R12: heavier sections, same grade and building geometry): with the IS 801 6.7 bending stress
+    corrected (N-mm -> kgf-cm / 10) the column 6.7 interaction was 1.127.  2 x CLR250X80X25X5 is already the heaviest
+    IS 811 lipped channel, so the column is relieved by (a) fly braces to the inner column flange at EVERY girt
+    (L_unbraced 1500 mm; rafters keep every second purlin, 3000 mm), (b) knee braces 2 x CLR200X80X25X4 (was
+    2 x CLR150X50X25X4) landing 4.5 m along the rafter (was 3.0 m), 2.5 m below the eave.
   * Mezzanine: 12 m x 8 m over the first span at the end bay, at 3.5 m, on INDEPENDENT cold-formed posts (2 x CLR150X50X25X4
     at 3 m x 3 m); storage floor IL 7.5 kN/m2 (IS 875-2 Table 1 viii(a) minimum for warehouses, rag/IS875_P2_table1_storage.json),
     D 1.5; its seismic weight (D + 50 % IL, Table 10) enters the portal at 3.5 m (elastic, R 1.0).
@@ -49,7 +54,7 @@ def build_cfg():
         "geometry": {"plan_x_m": 24.0, "plan_y_m": 30.0, "heights_m": [7.0]},
         "portal": {"spans_m": [12.0, 12.0], "eave_m": 7.0, "apex_m": 8.4, "spacing_m": 5.0, "n_frames": 7, "length_m": 30.0,
                    "girt_spacing_m": 1.5, "purlin_spacing_m": 1.5, "base": "fixed", "opening_ratio": 0.05, "seismic_basis": "elastic_R1",
-                   "knee_brace": {"col_below_eave_m": 2.5, "raf_from_knee_m": 3.0}},
+                   "knee_brace": {"col_below_eave_m": 2.5, "raf_from_knee_m": 4.5}},
         "loads": {"D_roof": 0.35, "Lr": 0.69, "clad": 0.20, "snow": 0.0, "D_floor": 0.0, "L_floor": 0.0,
                   "snow_note": "IS 875 (Part 4):2021 snow: Himalayan / snow-bound scope; Hyderabad no design snow (found:false)",
                   "cite": "IS 875-1 Table 1 sheeting / purlins; IS 875-2 Table 2 (ii) sloping roof > 10 deg: 0.75 - 0.02/deg = 0.69 kN/m2"},
@@ -63,9 +68,9 @@ def build_cfg():
                       "posts": {"section": "CLR150X50X25X4", "n_ply": 2, "trib_m2": 9.0, "note": "posts at 3 m x 3 m, pinned ends"}},
         "cfs_members": {
             "Fy_MPa": 294.0, "grade_cite": "IS 1079 sheet, IS 801 Table 2 yield 30 kgf/mm2 (294 MPa) -> F = 1800 kgf/cm2",
-            "columns": {"section": "CLR250X80X25X5", "n_ply": 2, "L_unbraced_mm": 3000.0, "connector_spacing_mm": 600.0},
+            "columns": {"section": "CLR250X80X25X5", "n_ply": 2, "L_unbraced_mm": 1500.0, "connector_spacing_mm": 600.0},
             "rafters": {"section": "CLR250X80X25X5", "n_ply": 2, "L_unbraced_mm": 3000.0, "connector_spacing_mm": 600.0},
-            "knee_braces": {"section": "CLR150X50X25X4", "n_ply": 2},
+            "knee_braces": {"section": "CLR200X80X25X4", "n_ply": 2},
             "purlins": {"section": "CLR150X50X20X3.15", "spacing_mm": 1500.0, "span_mm": 5000.0, "roof_pitch_deg": 13.1,
                         "L_unbraced_mm": 3000.0, "L_unbraced_top_mm": 0.0, "bearing_mm": 60.0,
                         "wind_uplift_kNm2": None, "wind_pressure_kNm2": None,
