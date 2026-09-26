@@ -59,7 +59,10 @@ def test_diaphragm_rows_carry_the_flexible_764_record():
     lat = {"diaphragm_7_6_4": {"flexible_run": {"levels": {"X": [{"level": 1, "delta_max_from_chord_mm": 0.4,
                                                                     "avg_storey_drift_mm": 2.0, "ratio": 0.2,
                                                                     "limit": 1.2, "classification": "rigid"}]}}}}
-    assert L._flexible_764(lat, "X", 1)["ratio"] == 0.2
+    # GOLD-764: this is a pre-literal HR row ('ratio' = deviation / storey drift, no literal field): the drift ratio
+    # is informative only and the row carries no 7.6.4 ratio
+    r = L._flexible_764(lat, "X", 1)
+    assert r["ratio"] is None and r["ratio_vs_storey_drift"] == 0.2 and r["classification"] == "rigid"
     assert L._flexible_764(lat, "Y", 1) is None and L._flexible_764({}, "X", 1) is None
 
 

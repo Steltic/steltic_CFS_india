@@ -485,14 +485,34 @@ def _per_storey(v, k, default=None):
     return v if v is not None else default
 
 
+RATIO_764_NOTE = ("IS 1893 (Part 1):2016 7.6.4 literal: maximum deviation from the chord of the deformed shape / "
+                  "average displacement of the entire diaphragm (limit 1.2)")
+DRIFT_764_NOTE = "informative (not the IS 1893 criterion): deviation from the chord / average storey drift"
+
+
 def _flexible_764(lateral, d, k):
-    """X01: the HR flexible-diaphragm run's IS 1893 7.6.4 record (in-plane deformation from the chord vs the average
-    storey drift) of storey k, direction d -- None when the HR run did not perform the Table 5(ii) analysis."""
+    """X01: the HR flexible-diaphragm run's IS 1893 7.6.4 record of storey k, direction d -- 'ratio' = in-plane
+    deviation from the chord / average displacement of the entire diaphragm (7.6.4 literal, GOLD-764); the deviation /
+    average storey drift is kept as an informative ratio.  Older HR records ('ratio' drift-based, the literal value in
+    'ratio_vs_avg_displacement') are read through their literal field.  None when the HR run did not perform the
+    Table 5(ii) analysis."""
     lv = ((((lateral or {}).get("diaphragm_7_6_4") or {}).get("flexible_run") or {}).get("levels") or {}).get(d) or []
     for r in lv:
         if isinstance(r, dict) and int(r.get("level", -1)) == int(k):
-            return {q: r.get(q) for q in ("delta_max_from_chord_mm", "avg_storey_drift_mm", "ratio", "limit",
-                                          "classification")}
+            lit = r.get("ratio_vs_avg_displacement")
+            if not isinstance(lit, (int, float)):
+                lit = r.get("ratio") if (r.get("ratio_basis") or "avg_storey_drift_mm" not in r) else None
+            drift = r.get("ratio_vs_storey_drift")
+            if drift is None and not r.get("ratio_basis") and "avg_storey_drift_mm" in r:
+                drift = r.get("ratio")                  # older record: 'ratio' was the drift-based value
+            lim = r.get("limit") or 1.2
+            out = {q: r.get(q) for q in ("delta_max_from_chord_mm", "delta_avg_diaphragm_mm", "avg_storey_drift_mm",
+                                         "limit")}
+            out.update(ratio=lit, ratio_basis=RATIO_764_NOTE, ratio_vs_storey_drift=drift,
+                       ratio_vs_storey_drift_note=DRIFT_764_NOTE,
+                       classification=(("flexible" if lit > lim else "rigid") if isinstance(lit, (int, float))
+                                       else r.get("classification")))
+            return out
     return None
 
 

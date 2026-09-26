@@ -195,9 +195,10 @@ Sections are IS 811 labels only (`CLR…`, `CLS…`, `CWR…`, `CWS…`, `EA…`
   {record}}` or a list of records for levels 1..NF — every level must resolve to a record, see the HR contract);
   `flexible_diaphragm_analysis` (`True` runs it on a regular plan too, `False` declines it); `flexible_diaphragm_eor`
   (`{analysis_ref, results, source, cite}` of an external analysis, instead of the engine run). The diaphragm rows then
-  carry `flexible_run_7_6_4` (in-plane deformation vs average storey drift of that storey).
+  carry `flexible_run_7_6_4` (IS 1893 7.6.4 literal: maximum deviation from the chord / average displacement of the
+  entire diaphragm at that storey = `ratio`; `ratio_vs_storey_drift` is informative only, not the IS 1893 criterion).
 * 7.6.4 label (AUD-3): the lateral package's `diaphragm_7_6_4.classification` is "flexible (IS 1893 7.6.4, from the
-  analysis)" whenever the flexible run measures a ratio > 1.2 at any level, whatever `diaphragm` declares; a declared
+  analysis)" whenever the flexible run measures a literal ratio > 1.2 at any level, whatever `diaphragm` declares; a declared
   label that contradicts it is a non-blocking warning (`design_status.warnings`). `diaphragm_type` (`"cfs_board"` |
   `"board"` | `"metal_deck"` | `"rc_slab"` | `"composite_deck"` | `"braced_roof"`, optional; otherwise read from
   `floor_system`, default CFS joists): a board / CFS or bare metal-deck diaphragm declared rigid with no stiffness basis
