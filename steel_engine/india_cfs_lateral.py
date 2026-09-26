@@ -130,6 +130,41 @@ def _k2(site, z_m):
     return pts[-1][1]
 
 
+# DOCS-OPEN-1: the site record that makes a Vb / zone reading acceptable to the HR preflight -- the map reading
+# ('derived_from_map' with the site lat / long) or the ruling R5 site proxy (proxy_town, distance_km, basis, verify,
+# annex_found / corpus_status; india_loads.resolve_site_annex_proxy) -- forwarded to the HR sub-run
+SITE_PROXY_KEYS = ("proxy_town", "distance_km", "basis", "verify", "annex_found", "corpus_status")
+
+
+def site_source_record(site, quantity="Vb"):
+    """{<q>_source, lat, long, proxy_town, distance_km, basis, verify, annex_found, corpus_status} declared on the CFS
+    site for quantity 'Vb' or 'zone': top-level site keys, overridden by a nested site['site_proxy'] record and by the
+    quantity-specific site['Vb_site_proxy'] / site['zone_site_proxy'] record (a nested record may also give 'cite' for
+    the basis).  Only the keys actually declared are returned."""
+    site = site or {}
+    q = "Vb" if str(quantity).lower().startswith("vb") else "zone"
+    rec = {}
+    src = site.get("%s_source" % q)
+    if src is not None:
+        rec["%s_source" % q] = src
+    for a, b in (("lat", "lat"), ("latitude", "lat"), ("long", "long"), ("lon", "long"), ("longitude", "long")):
+        if site.get(a) is not None and b not in rec:
+            rec[b] = site[a]
+    for k in SITE_PROXY_KEYS:
+        if site.get(k) is not None:
+            rec[k] = site[k]
+    for nest in (site.get("site_proxy"), site.get("%s_site_proxy" % q)):
+        if isinstance(nest, dict):
+            for k in SITE_PROXY_KEYS + ("lat", "long"):
+                if nest.get(k) is not None:
+                    rec[k] = nest[k]
+            if nest.get("cite") is not None and "basis" not in rec:
+                rec["basis"] = nest["cite"]
+            if nest.get("source") is not None and "%s_source" % q not in rec:
+                rec["%s_source" % q] = nest["source"]
+    return rec
+
+
 def wind_story_forces(cfg):
     """IS 875 (Part 3):2015 storey forces on the whole building (N) for wind along X and along Y, from Vb, k1, k2(z)
     (Table 2, retrieved), k3, k4 / Kd (cyclone belt, D10), Ka (Table 4, frame tributary area), Kc, Table 5 wall
@@ -148,6 +183,8 @@ def wind_story_forces(cfg):
            "k4": k4, "k4_cite": req.get("cite"), "structure_class": req.get("class") or str(site.get("wind_structure_class") or "other"),
            "Kd": Kd, "Kc": Kc, "cyclone_belt": bool(cb), "cyclone_belt_cite": site.get("cyclone_belt_cite"),
            "terrain_category": site.get("terrain_category"), "Ka_basis": "frame_tributary", "storeys": []}
+    out.update(site_source_record(site, "Vb"))          # DOCS-OPEN-1: lat / long or the R5 site-proxy record
+    out.setdefault("Vb_source", "Annex A")
     hs = []
     z = 0.0
     for h in H:
@@ -365,6 +402,7 @@ def build_hr_spec(cfg, name):
     plan["seismic_summary"] = dict(plan.get("seismic_summary") or {}, code=IS.IS1893_EDITION if hasattr(IS, "IS1893_EDITION") else "IS 1893 (Part 1):2016",
                                    site=site.get("city"), zone=site["zone"], Z=site["Z"], I=I_rec["I"], I_cite=I_rec.get("cite"),
                                    I_row=I_rec.get("row"), R=R, R_cite=cite, system=sysn, soil=site["soil"],
+                                   **site_source_record(site, "zone"),    # DOCS-OPEN-1: zone_source + map / R5 record
                                    **({"R_x": rs["R_x"], "R_y": rs["R_y"]} if (rs["R_x_declared"] or rs["R_y_declared"]) else {}))
     plan["combinations"] = "auto"
     plan["lateral_frame_basis"] = "IS800_LSD"

@@ -113,7 +113,8 @@ whole job into `example_only`. Never invent a clause number, a table value or a 
 ```python
 cfg = {
   "name": name, "jurisdiction": "india", "units": "m", "design_basis": "IS801_WSM", "brief": "...",
-  "site": {"city", "zone", "Z", "soil", "Vb", "Vb_source", "terrain_category", "k1", "k3", "cyclone_belt",
+  "site": {"city", "zone", "Z", "soil", "Vb", "Vb_source", "zone_source", "lat", "long", "site_proxy",  # R5 / map record
+           "terrain_category", "k1", "k3", "cyclone_belt",
            "cyclone_belt_cite", "Kd", "k2_table": {10: .., 15: .., 20: .., 30: ..}, "wind_structure_class",
            "Kc", "Ka_corpus_hit", "cpe_corpus_hit"},   # the last two: retrieved IS 875-3 Table 4 / Table 5 records
                                                        # (used before the in-repo transcriptions); Kc default 1.0
@@ -246,10 +247,14 @@ corpus checkout (default: a sibling `engineering_rag_india`). A miss reports `no
 a town in neither IS 875-3 Annex A nor IS 1893 Annex E: read Fig. 1 at the site), `server_error` (`found: None`, retry —
 never report the provision as absent) or `term_absent_from_document` (the only "the standard lacks it"). A town not in
 the annexes: `site.Vb_source` 'derived_from_map' (with the site lat / long) or the ruling R5 site proxy (proxy town,
-distance, basis, VERIFY) — never "nearest city". Open item: the lateral sub-run's wind summary receives
-`site.Vb_source` only, so the HR preflight refuses 'derived_from_map' / 'site_proxy' until the lat / long and proxy
-fields are forwarded — until then state the reading in `site.Vb_source` as text (e.g. "IS 875-3 Fig. 1 at 28.54 N,
-77.39 E -- VERIFY") and in the retrieval row's cite.
+distance, basis, VERIFY) — never "nearest city". The lateral sub-run receives the whole record (DOCS-OPEN-1, closed):
+`site.Vb_source` / `site.zone_source` = 'derived_from_map' with `site.lat` / `site.long` (aliases `latitude`, `lon`,
+`longitude`), or 'site_proxy' with `proxy_town`, `distance_km`, `basis`, `verify: True` and `annex_found: False` /
+`corpus_status: 'not_tabulated'` — as top-level `site` keys, in a shared `site.site_proxy` record, or per quantity in
+`site.Vb_site_proxy` / `site.zone_site_proxy` (a nested record may give `cite` for the basis, `source` for the
+source). They are copied into the HR `wind_summary` / `seismic_summary`, so the HR preflight (one policy,
+`india_loads.resolve_site_annex_proxy`) passes a properly recorded map reading or proxy (proxy = WARN, VERIFY) and
+still refuses an incomplete one. Also state the reading in the retrieval row's cite.
 
 ## Hard rules (the gates enforce them; do not argue with a refusal)
 1. One `complete` authority: `india_cfs_gates.design_status`. It is `complete` only when the hot-rolled frame status
