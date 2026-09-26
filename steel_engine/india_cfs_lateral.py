@@ -385,6 +385,10 @@ def build_hr_spec(cfg, name):
         "occupancy": cfg.get("occupancy"), "load_plan": plan, "diaphragm_7_6_4": lf.get("diaphragm_7_6_4"),
         "gold": lf.get("gold"), "custom_build_module": lf.get("custom_build_module"),      # job-local builder (irregular plans)
         "d_x_m": lf.get("d_x_m"), "d_y_m": lf.get("d_y_m"), "default_strong": lf.get("default_strong"), "Ta_override": lf.get("Ta_override"),
+        # X01: IS 1893 Table 5(ii) flexible-diaphragm run of the HR engine (L / T / U / Z / cruciform plans): the declared
+        # in-plane deck stiffness, the explicit run switch and an EOR record of an external analysis
+        "diaphragm_stiffness": lf.get("diaphragm_stiffness"), "flexible_diaphragm_analysis": lf.get("flexible_diaphragm_analysis"),
+        "flexible_diaphragm_eor": lf.get("flexible_diaphragm_eor"),
         "hr_cfg_extra": lf.get("hr_cfg_extra") or {},       # declared HR cfg keys passed through verbatim (e.g. is18168_table2,
                                                             # grade_by_section, custom_sections, column_imposed_load_reduction)
         "notes": "%s: hot-rolled %s lateral frame (R %s) of a CFS building; CFS members gravity / wind only (D3)"
@@ -432,6 +436,17 @@ def _per_storey(v, k, default=None):
                 return val
         return v.get("default", default)
     return v if v is not None else default
+
+
+def _flexible_764(lateral, d, k):
+    """X01: the HR flexible-diaphragm run's IS 1893 7.6.4 record (in-plane deformation from the chord vs the average
+    storey drift) of storey k, direction d -- None when the HR run did not perform the Table 5(ii) analysis."""
+    lv = ((((lateral or {}).get("diaphragm_7_6_4") or {}).get("flexible_run") or {}).get("levels") or {}).get(d) or []
+    for r in lv:
+        if isinstance(r, dict) and int(r.get("level", -1)) == int(k):
+            return {q: r.get(q) for q in ("delta_max_from_chord_mm", "avg_storey_drift_mm", "ratio", "limit",
+                                          "classification")}
+    return None
 
 
 def diaphragm_demands(cfg, lateral):
@@ -509,6 +524,9 @@ def diaphragm_demands(cfg, lateral):
                          "clause": "IS 1893 7.6.3 storey force (gamma 1.0) / IS 875-3 storey wind; rigid diaphragm on the frame lines: " + mech,
                          "note": "diaphragm shear capacity requires a cited test / product value for the deck or sheathing "
                                  "(IS 801 9.1.4 excludes diaphragms; no Indian table) -- EOR input"})
+            fr = _flexible_764(lateral, d, k)
+            if fr:
+                rows[-1]["flexible_run_7_6_4"] = fr          # X01: in-plane deformation measured on the HR flexible run
             # C03 / CFS-C-17: collectors (drag struts) at declared re-entrant lines
             for rl in (geo.get("reentrant_lines_%s" % d) or []):
                 st_ = rl.get("storeys") or rl.get("storey")

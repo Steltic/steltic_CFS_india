@@ -162,6 +162,13 @@ Sections are IS 811 labels only (`CLR…`, `CLS…`, `CWR…`, `CWS…`, `EA…`
   0.9 × the declared plan area (`gold.plan_area_m2`, else `plan_x_m × plan_y_m − voids_m2`) — a dropped roof or floor
   silently removes gravity load and seismic weight.
 * `d_x_m` / `d_y_m` (Ta base dimension), `Ta_override` (`{"X", "Y", "formula"}`), `default_strong`.
+* Re-entrant plans (L / T / U / Z / cruciform; IS 1893 Table 5(ii), Amd 2): the HR run adds the flexible-floor-diaphragm
+  3-D dynamic analysis to the rigid case automatically and envelopes the two. Declare the deck in-plane stiffness
+  `diaphragm_stiffness` (`{"type": "rc_slab" | "metal_deck" | "custom", "t_mm" | "G_eff_MPa" | "Gd_kN_per_m" |
+  "topping_t_mm" + "fck_MPa", "source", "cite"}` — EOR input; without it the job stays PARTIAL with the reason);
+  `flexible_diaphragm_analysis` (`True` runs it on a regular plan too, `False` declines it); `flexible_diaphragm_eor`
+  (`{analysis_ref, results, source, cite}` of an external analysis, instead of the engine run). The diaphragm rows then
+  carry `flexible_run_7_6_4` (in-plane deformation vs average storey drift of that storey).
 * Passed to the HR engine as declared (HR meaning): `K_factors` (`{"lateral_col": {"Kz", "Ky"}, "gravity_col": .., "brace": ..,
   "basis"}`, default 1.0 braced), `LLT_sag_mm` / `LLT_hog_mm` (`{"floor", "roof"}` unbraced lengths for beam LTB),
   `brace_process` (hot / cold formed hollow braces), `collector_basis`, `floor_system` (text for the report),
