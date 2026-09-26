@@ -17,6 +17,8 @@ Design decisions (the 'agent'):
     IS 811 lipped channel, so the column is relieved by (a) fly braces to the inner column flange at EVERY girt
     (L_unbraced 1500 mm; rafters keep every second purlin, 3000 mm), (b) knee braces 2 x CLR200X80X25X4 (was
     2 x CLR150X50X25X4) landing 4.5 m along the rafter (was 3.0 m), 2.5 m below the eave.
+    C02 re-size: purlins CLR200X80X20X3.15 and girts CLR180X80X20X3.15 (were CLR150X50X20X3.15) for the member-level
+    IS 875-3 pressures (element Ka, governing Cpe over all faces, Table 5 / 6 local strips with Kd 1.0, Cpi +-0.2).
   * Mezzanine: 12 m x 8 m over the first span at the end bay, at 3.5 m, on INDEPENDENT cold-formed posts (2 x CLR150X50X25X4
     at 3 m x 3 m); storage floor IL 7.5 kN/m2 (IS 875-2 Table 1 viii(a) minimum for warehouses, rag/IS875_P2_table1_storage.json),
     D 1.5; its seismic weight (D + 50 % IL, Table 10) enters the portal at 3.5 m (elastic, R 1.0).
@@ -71,11 +73,12 @@ def build_cfg():
             "columns": {"section": "CLR250X80X25X5", "n_ply": 2, "L_unbraced_mm": 1500.0, "connector_spacing_mm": 600.0},
             "rafters": {"section": "CLR250X80X25X5", "n_ply": 2, "L_unbraced_mm": 3000.0, "connector_spacing_mm": 600.0},
             "knee_braces": {"section": "CLR200X80X25X4", "n_ply": 2},
-            "purlins": {"section": "CLR150X50X20X3.15", "spacing_mm": 1500.0, "span_mm": 5000.0, "roof_pitch_deg": 13.1,
+            # C02 re-size (R12): member-level wind (element Ka 1.0 on 7.5 m2, Table 6 local strips -1.4 with Kd 1.0, Cpi 0.2)
+            "purlins": {"section": "CLR200X80X20X3.15", "zone": "all", "spacing_mm": 1500.0, "span_mm": 5000.0, "roof_pitch_deg": 13.1,
                         "L_unbraced_mm": 3000.0, "L_unbraced_top_mm": 0.0, "bearing_mm": 60.0,
                         "wind_uplift_kNm2": None, "wind_pressure_kNm2": None,
                         "deflection_limit_ratio": 150, "deflection_cite": "IS 800:2007 Table 6 (read-only): purlins, elastic cladding, span/150"},
-            "girts": {"section": "CLR150X50X20X3.15", "spacing_mm": 1500.0, "span_mm": 5000.0, "L_unbraced_mm": 3000.0,
+            "girts": {"section": "CLR180X80X20X3.15", "zone": "all", "spacing_mm": 1500.0, "span_mm": 5000.0, "L_unbraced_mm": 3000.0,
                       "wind_suction_kNm2": None, "wind_pressure_kNm2": None,
                       "deflection_limit_ratio": 150, "deflection_cite": "IS 800:2007 Table 6 (read-only): girts, elastic cladding, span/150"},
             "joists": {"section": "CLR200X80X25X4", "n_ply": 1, "spacing_mm": 500.0, "span_mm": 3000.0, "bearing_mm": 60.0,

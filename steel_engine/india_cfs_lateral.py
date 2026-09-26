@@ -214,6 +214,37 @@ def wind_story_forces(cfg):
     return out, forces
 
 
+def lowrise_member_wind_plan(cfg, ws, plan):
+    """C02 / CFS-C-07 / CFS-D-09(b): load_plan['member_wind'] for a single-storey / low-rise HR lateral run (the HR
+    preflight requires it and the wall columns then carry the girt reactions of the Table 5 wall pressures), from the
+    vendored india_wind_tables.lowrise_member_wind: Table 5 walls, Table 6 roof by pitch, Cpi from the opening ratio
+    (7.3.2).  A declared member_wind is kept.  Returns (patterns, basis) or None when not a low-rise run."""
+    geo = cfg["geometry"]; lf = cfg.get("lateral_frame") or {}
+    H = list(geo["heights_m"])
+    if plan.get("member_wind"):
+        return None
+    lowrise = len(H) == 1 or bool(lf.get("member_wind")) or geo.get("roof_pitch_deg") is not None
+    if not lowrise or lf.get("member_wind") is False:
+        return None
+    Lx, Ly = float(geo["plan_x_m"]), float(geo["plan_y_m"])
+    w_, l_ = min(Lx, Ly), max(Lx, Ly)
+    top = ws["storeys"][-1]
+    pd = max(float(top.get("pd_X_kNm2") or 0.0), float(top.get("pd_Y_kNm2") or 0.0), float(top.get("pd_kNm2") or 0.0))
+    orat = geo.get("opening_ratio", (cfg.get("site") or {}).get("opening_ratio"))
+    pitch = float(geo.get("roof_pitch_deg") or 0.0)
+    ridge = "X" if Lx >= Ly else "Y"                          # the ridge runs along the greater plan dimension
+    mw = WT.lowrise_member_wind(pd, sum(H), w_, l_, pitch, 0.05 if orat is None else float(orat), ridge_axis=ridge)
+    if not isinstance(mw, dict) or not mw.get("found"):
+        raise LateralSystemError("low-rise member wind (IS 875-3 Tables 5 / 6, 7.3.2) unresolved: %s"
+                                 % (mw.get("note") if isinstance(mw, dict) else mw))
+    basis = {"pd_kNm2": pd, "h_m": sum(H), "w_m": w_, "l_m": l_, "roof_pitch_deg": pitch, "ridge_axis": ridge,
+             "opening_ratio": orat, "opening_ratio_note": None if orat is not None else
+             "geometry.opening_ratio not declared: 5 % assumed (Cpi +-0.2, IS 875-3 7.3.2.1) -- VERIFY",
+             "cite": str(mw.get("cite")) + "; pd = the roof-storey frame pd (Table 4 frame Ka)",
+             "source": "india_wind_tables.lowrise_member_wind (vendored)"}
+    return mw["patterns"], basis
+
+
 def merge_declared_wind(plan, forces):
     """C05: a declared load_plan.story_forces W_X / W_Y (e.g. a mixed-height building worked by hand from IS 875-3) is
     KEPT, not overwritten by the envelope storey forces -- it needs a cite (story_forces_cite or wind_story_forces_cite)
@@ -284,6 +315,9 @@ def build_hr_spec(cfg, name):
                                    D_floor_kNm2=ld["D_floor"], D_roof_kNm2=ld["D_roof"], L_floor_kNm2=ld["L_floor"],
                                    L_roof_kNm2=ld["Lr"], clad_kNm2=ld.get("clad", 0.0),
                                    partition_kNm2=ld.get("partition_design_kNm2", 0.0), snow_kNm2=ld.get("snow", 0.0))
+    mwp = lowrise_member_wind_plan(cfg, ws, plan)
+    if mwp is not None:
+        plan["member_wind"], plan["wind_summary"]["member_wind_basis"] = mwp
     plan["story_forces"], ws["story_forces_source"] = merge_declared_wind(plan, forces)
     plan["wind_summary"].update(story_forces_source=ws["story_forces_source"])
     plan["story_forces_units"] = "N"

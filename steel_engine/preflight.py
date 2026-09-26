@@ -120,15 +120,18 @@ def check(cfg) -> list:
         say("ERROR", "cfg['cfs_members'] (studs / joists to IS 801) required")
     if cm and cm.get("Fy_MPa") is None:
         say("ERROR", "cfs_members.Fy_MPa + grade_cite required (IS 811 has no default grade)")
-    for role in ("studs", "joists", "purlins", "girts", "rafters", "columns"):
-        spec = cm.get(role) if isinstance(cm.get(role), dict) else None
-        if spec and spec.get("section"):
-            try:
-                import is811_sections as S
-                n, base = S.parse_designator(spec.get("designator") or spec["section"])
-                S.props(base)
-            except Exception as ex:
-                say("ERROR", "cfs_members.%s: %s" % (role, ex))
+    import india_cfs_members as CMB
+    for role in ("studs", "joists", "purlins", "girts", "rafters", "columns", "eave_struts", "headers"):
+        for spec in CMB.groups(cm, role):                   # C14: one group or a list of groups
+            if spec.get("section"):
+                try:
+                    import is811_sections as S
+                    n, base = S.parse_designator(spec.get("designator") or spec["section"])
+                    S.props(base)
+                except Exception as ex:
+                    say("ERROR", "cfs_members.%s: %s" % (role, ex))
+    if cm:
+        out += CMB.wind_preflight(cfg)                      # C02: member wind derivable for studs / purlins / girts
     out += G.validate_india_cfs_p0(cfg)
     return out
 
