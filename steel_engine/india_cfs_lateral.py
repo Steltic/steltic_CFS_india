@@ -345,18 +345,35 @@ def run_lateral(cfg, job_dir, name=None, timeout_s=3600):
     return res
 
 
+def _per_storey(v, k, default=None):
+    """A number, or {storey: value} (keys int / str, optional 'default') -> the value for storey k."""
+    if isinstance(v, dict):
+        for key in (k, str(k)):
+            if key in v:
+                return v[key]
+        for rng, val in v.items():                          # '1-3' ranges
+            a_, _, b_ = str(rng).partition("-")
+            if a_.isdigit() and b_.isdigit() and int(a_) <= k <= int(b_):
+                return val
+        return v.get("default", default)
+    return v if v is not None else default
+
+
 def diaphragm_demands(cfg, lateral):
     """Storey diaphragm demands handed from the CFS floor / roof to the frame lines (IS 1893 7.6.3 storey forces at
-    gamma 1.0, IS 875-3 wind storey forces): unit shear into the two frame lines of each direction and the chord
-    force M/depth.  Capacities of a sheathed / decked CFS diaphragm need a cited product / test value -- IS 801 has no
-    diaphragm provision (9.1.4) -- so each capacity slot is found:false until the EOR supplies one."""
+    gamma 1.0, IS 875-3 wind storey forces): unit shear into the frame lines of each direction and the chord force
+    M/depth.  Capacities of a sheathed / decked CFS diaphragm need a cited product / test value -- IS 801 has no
+    diaphragm provision (9.1.4) -- so each capacity slot is found:false until the EOR supplies one.
+    C03: one braced line is allowed (v = F/B, cantilever chord); geometry.diaphragm_lines_X / _Y and
+    diaphragm_capacity.v_allow_kN_per_m may be per storey ({storey: value}); collector rows at the declared
+    re-entrant lines (geometry.reentrant_lines_X / _Y) carry F (1 - B_short/B)."""
     geo = cfg["geometry"]; H = list(geo["heights_m"])
     Lx, Ly = float(geo["plan_x_m"]), float(geo["plan_y_m"])
-    plan = (lateral.get("esm") or {}); sf_eq = (plan.get("story_forces") or {})
     lp = json.load(open(os.path.join(lateral["root"], "load_plan.json"))) if os.path.exists(os.path.join(lateral["root"], "load_plan.json")) else {}
     sf = lp.get("story_forces") or {}
     lf = cfg.get("lateral_frame") or {}
     NX, NY = int(lf["NX"]), int(lf["NY"])
+    bx, by = float(lf.get("bay_x_m") or Lx / max(NX, 1)), float(lf.get("bay_y_m") or Ly / max(NY, 1))
     # braced lines per direction (a line = a grid line with at least one braced bay); "perimeter" / "core" as in build_hr_spec
     bays = lf.get("braced_bays", "perimeter")
     if bays == "perimeter":
@@ -368,38 +385,75 @@ def diaphragm_demands(cfg, lateral):
         for (dd, kk) in (lf.get("moment_lines") or []):
             if dd == d:
                 lines[d] = sorted(set(lines[d]) | {int(kk)})
+    dcap = cfg.get("diaphragm_capacity") or {}
     rows = []
     for k in range(1, len(H) + 1):
         # storey force along X is resisted by the frame lines that run along X (y = const, length Lx = the diaphragm
         # depth B); with n equal lines at spacing s = Lspan / (n - 1) the rigid diaphragm hands F / n to each line:
         # v = F / (n B); chord = w s^2 / (8 B) with w = F / Lspan (continuous-diaphragm approximation; n = 2 is the
-        # simple span F / (2 B), F Lspan / (8 B)).  WP6-fix: B and Lspan were swapped (B = Ly for X), which under-stated
-        # v for the long direction of a rectangle; the line count was ignored.
-        for d, B, Lspan in (("X", Lx, Ly), ("Y", Ly, Lx)):
+        # simple span F / (2 B), F Lspan / (8 B)).  n = 1: the whole F goes into the one line (v = F / B) and the
+        # diaphragm cantilevers from it: chord = w a^2 / (2 B), a = the longer overhang (a = L/2 for a central line:
+        # F L / 8).  WP6-fix: B and Lspan were swapped; C03: max(2, n) halved the shear of a single line.
+        for d, B, Lspan, bay in (("X", Lx, Ly, by), ("Y", Ly, Lx, bx)):
             # non-rectangular plans: depth (line length) and span declared per direction
-            B = float(geo.get("diaphragm_depth_%s_m" % d) or B)
-            Lspan = float(geo.get("diaphragm_span_%s_m" % d) or Lspan)
-            nlines = max(2, int(geo.get("diaphragm_lines_%s" % d) or len(lines[d]) or 2))
-            s_span = Lspan / (nlines - 1)
+            B = float(_per_storey(geo.get("diaphragm_depth_%s_m" % d), k) or B)
+            Lspan = float(_per_storey(geo.get("diaphragm_span_%s_m" % d), k) or Lspan)
+            ndecl = _per_storey(geo.get("diaphragm_lines_%s" % d), k)
+            nlines = int(ndecl or len(lines[d]) or 2)
+            if nlines < 1:
+                raise LateralSystemError("geometry.diaphragm_lines_%s = %s at storey %d: at least one frame line" % (d, ndecl, k))
             Fe = abs(float((sf.get("EQ_" + d) or {}).get(str(k), [0, 0, 0])[0 if d == "X" else 1]))
             Fw = abs(float((sf.get("W_" + d) or {}).get(str(k), [0, 0, 0])[0 if d == "X" else 1]))
             F = max(Fe, Fw); gov = "EQ" if Fe >= Fw else "W"
-            # flexible-diaphragm tributary share to the two extreme frame lines (perimeter braced bays) or equal split
             v_unit = F / 1e3 / (nlines * B)   # kN/m along each of the n frame lines (length B = diaphragm depth)
-            M = (F / Lspan) * s_span ** 2 / 8.0   # N-m: diaphragm panel of span s between adjacent lines
+            w = F / Lspan                     # N/m
+            if nlines == 1:
+                pos = (lines[d][0] * bay) if (len(lines[d]) == 1 and not ndecl) else Lspan / 2.0
+                a_ = max(pos, Lspan - pos)
+                M = w * a_ ** 2 / 2.0         # N-m: cantilever each side of the single line
+                s_span = a_
+                mech = "single line: v = F/B, chord = (F/L) a^2/(2 B), a = %.2f m overhang" % a_
+            else:
+                s_span = Lspan / (nlines - 1)
+                M = w * s_span ** 2 / 8.0     # N-m: diaphragm panel of span s between adjacent lines
+                mech = "n = %d equal lines: v = F/(n B), chord = (F/L) s^2/(8 B), s = L/(n - 1)" % nlines
             chord = M / B                     # N
-            dcap = cfg.get("diaphragm_capacity") or {}
-            cap = dcap.get("v_allow_kN_per_m")
+            cap = _per_storey(dcap.get("v_allow_kN_per_m"), k)
+            ccite = dcap.get("cite")
+            if isinstance(cap, dict):
+                ccite = cap.get("cite") or ccite
+                cap = cap.get("value")
             rec_cap = {"capacity": None, "capacity_basis": "test", "allowable_increase": 1.0, "dc": None, "ok": None, "found": False}
             if cap:
                 inc = float(dcap.get("allowable_increase", 1.0))
                 rec_cap = {"capacity": float(cap) * inc, "value": v_unit, "limit": float(cap) * inc, "capacity_basis": dcap.get("basis", "test"),
                            "allowable_increase": inc, "dc": v_unit / (float(cap) * inc), "ok": v_unit <= float(cap) * inc, "found": True,
-                           "capacity_cite": dcap.get("cite"), "capacity_source": dcap.get("source")}
+                           "capacity_cite": ccite, "capacity_source": dcap.get("source")}
             rows.append({"storey": k, "dir": d, "F_EQ_N": Fe, "F_W_N": Fw, "governing": gov, "F_N": F, "n_lines": nlines,
                          "v_unit_kN_per_m": v_unit, "chord_force_kN": chord / 1e3, "span_m": Lspan, "panel_span_m": s_span, "depth_m": B, **rec_cap,
-                         "clause": "IS 1893 7.6.3 storey force (gamma 1.0) / IS 875-3 storey wind; rigid diaphragm on n equal frame lines: "
-                                   "shear = F/(n B) per unit length of line, chord = (F/L) s^2/(8 B), s = L/(n - 1)",
+                         "clause": "IS 1893 7.6.3 storey force (gamma 1.0) / IS 875-3 storey wind; rigid diaphragm on the frame lines: " + mech,
                          "note": "diaphragm shear capacity requires a cited test / product value for the deck or sheathing "
                                  "(IS 801 9.1.4 excludes diaphragms; no Indian table) -- EOR input"})
+            # C03 / CFS-C-17: collectors (drag struts) at declared re-entrant lines
+            for rl in (geo.get("reentrant_lines_%s" % d) or []):
+                st_ = rl.get("storeys") or rl.get("storey")
+                if st_ not in (None, "all"):
+                    sts = st_ if isinstance(st_, (list, tuple)) else [st_]
+                    if k not in [int(x) for x in sts]:
+                        continue
+                Bs = float(rl["B_short_m"]); Bf = float(rl.get("B_m") or B)
+                Fc = F * max(0.0, 1.0 - Bs / Bf)
+                crow = {"storey": k, "dir": d, "kind": "collector", "line": rl.get("line"), "F_N": F, "B_short_m": Bs, "B_m": Bf,
+                        "value": Fc / 1e3, "F_collector_kN": Fc / 1e3, "demand_level": "working",
+                        "clause": "re-entrant corner collector (drag strut): F (1 - B_short/B) of the storey force is dragged "
+                                  "across the re-entrant line into the frame line (IS 1893 7.6.3 storey force / IS 875-3 storey wind)",
+                        "limit": None, "dc": None, "ok": None, "found": False, "capacity_basis": rl.get("capacity_basis", "EOR_input"),
+                        "allowable_increase": 1.0,
+                        "note": "collector capacity: declare reentrant_lines_%s[].capacity_kN + cite (working-stress capacity of the "
+                                "drag member / its connections)" % d}
+                if rl.get("capacity_kN"):
+                    capk = float(rl["capacity_kN"])
+                    crow.update(limit=capk, capacity=capk, dc=(Fc / 1e3) / capk, ok=(Fc / 1e3) <= capk + 1e-9, found=True,
+                                capacity_cite=rl.get("cite"), note=None)
+                rows.append(crow)
     return rows

@@ -185,7 +185,8 @@ def diaphragm_issues(pkg) -> list:
     out = []
     for r in pkg.get("diaphragm") or []:
         if r.get("ok") is None or r.get("found") is False:
-            out.append("diaphragm storey %s %s: capacity not evaluated (%s)" % (r.get("storey"), r.get("dir"), r.get("note") or "found:false"))
+            out.append("%s storey %s %s: capacity not evaluated (%s)" % ("collector" if r.get("kind") == "collector" else "diaphragm",
+                                                                         r.get("storey"), r.get("dir"), r.get("note") or "found:false"))
         elif _dc(r) is not None and _dc(r) > 1.0:
             out.append("diaphragm storey %s %s: D/C %.2f > 1" % (r.get("storey"), r.get("dir"), _dc(r)))
     return out
