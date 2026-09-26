@@ -12,7 +12,9 @@ cfg['connections'] = {
   'beam_shear':   {<beam section> | 'default': fin_plate_shear_checks inputs (gravity beams)},
   'column_base':  {<column section> | 'default': base_plate_design geometry (B_mm, L_mm, t_plate_mm, fy_plate_MPa,
                    fck_MPa, anchors{n_total, n_tension, d_mm, grade, f_mm, pitch_mm, edge_mm, n_per_row},
-                   Ec_MPa? (default IS 456 5000 sqrt fck), embedment{capacity_N, cite}?, fixed (bool), Hc_mm?,
+                   Ec_MPa? (default IS 456 5000 sqrt fck), embedment{capacity_N, source, cite}? (asserted, WARN) or
+                   anchors.embedment{method 'bond', tau_bd_MPa, bar 'plain'|'deformed', L_mm, source, cite} (AUD-4),
+                   fixed (bool), Hc_mm?, plate_grade?,
                    X03 stiffeners?{n_per_side | x_mm, t_mm, h_mm (at the column face), fy_MPa, weld{size_mm, fu_MPa,
                    site?} | weld_column / weld_plate {type 'fillet'|'cjp', ...}, layout 'flange_extension'|'cross',
                    n_per_side_y?, y_mm?} (IS 800 7.4.2 gusseted base; anchors.x_mm / y_mm = tension-row anchor
@@ -50,6 +52,23 @@ def _props(sec, member=None):
     return S.props(sec)
 
 
+def _plate_grades(cfg, sp=None):
+    """AUD-2: (plate_grade, job_steel_grade) for the IS 2062 Table 3 plate fy (india_connections.plate_fy_is2062):
+    the spec's own plate_grade, else cfg['plate_grade'] (both declared plate grades), and the job steel_grade."""
+    cfg = cfg or {}
+    return ((sp or {}).get("plate_grade") or cfg.get("plate_grade")), cfg.get("steel_grade")
+
+
+def _with_grades(d, cfg, sp=None):
+    d = dict(d or {})
+    pg, jg = _plate_grades(cfg, sp)
+    if d.get("plate_grade") is None and pg is not None:
+        d["plate_grade"] = pg
+    if d.get("job_steel_grade") is None and jg is not None:
+        d["job_steel_grade"] = jg
+    return d
+
+
 def _fy(member, p):
     m = I8.material_for_section(p, member.get("grade"), process=member.get("process"))
     return m.get("fy_MPa"), m.get("fu_MPa")
@@ -65,6 +84,11 @@ def brace_end_connection(cfg, member):
         return None
     conn = {"id": "conn-%s" % member["id"], "member_id": member["id"], "kind": "brace_end"}
     conn.update({k: v for k, v in sp.items() if k not in ("welds",)})
+    pg, jg = _plate_grades(cfg, sp)                     # AUD-2: gusset fy by thickness (india_is800_s12)
+    if pg is not None:
+        conn.setdefault("plate_grade", pg)
+    if jg is not None:
+        conn.setdefault("job_steel_grade", jg)
     w = sp.get("welds")
     if w:
         w = dict(w)
@@ -90,14 +114,14 @@ def beam_column_connection(cfg, beam_member, p_beam, fy_beam, *, col_props=None)
     out = {"type": typ, "weld_type": sp.get("weld_type"), "bolt_type": sp.get("bolt_type"), "cite": sp.get("cite"),
            "source": SRC}
     if typ == "end_plate":
-        ep = dict(sp.get("end_plate") or {})
+        ep = _with_grades(sp.get("end_plate"), cfg, sp)
         r = C.end_plate_moment_capacity(**ep)
         out["moment"] = r
         out["moment_capacity_Nmm"] = r.get("capacity_Nmm")
         out["bolt_type"] = out["bolt_type"] or ep.get("bolt_type", "HSFG")
         out["cite"] = out["cite"] or r.get("cite")
     elif typ in ("welded_cover_plate", "cover_plate"):
-        cp = dict(sp.get("cover_plate") or {})
+        cp = _with_grades(sp.get("cover_plate"), cfg, sp)
         r = C.cover_plate_moment_capacity(Zp_beam_mm3=p_beam["Zx"], fy_beam_MPa=fy_beam, d_beam_mm=p_beam["d"], **cp)
         out["moment"] = r
         out["moment_capacity_Nmm"] = r.get("capacity_Nmm")
@@ -108,7 +132,7 @@ def beam_column_connection(cfg, beam_member, p_beam, fy_beam, *, col_props=None)
         out["moment_capacity_Nmm"] = p_beam["Zx"] * fy_beam / C.GAMMA_M0
         out["weld_type"] = out["weld_type"] or "cjp"
         out["cite"] = out["cite"] or "IS 800:2007 10.5.7.1.2 (CJP = parent metal): Zp fy/gamma_m0 at the column face"
-    sh = sp.get("shear")
+    sh = _with_grades(sp.get("shear"), cfg, sp) if sp.get("shear") else None
     if sh:
         out["shear"] = C.fin_plate_shear_checks(V_N=float(sh.pop("V_N", 0.0) or 0.0), **sh) if "V_N" in sh else None
         out["shear_spec"] = sh
@@ -128,8 +152,9 @@ def beam_shear_connection_checks(cfg, beam_member, V_N, *, sfrs=False):
     sp = spec_for(cfg, "beam_shear", beam_member["section"], "beam")
     if not sp:
         return None
-    keys = ("t_plate_mm", "h_plate_mm", "fy_plate_MPa", "fu_plate_MPa", "bolts", "weld", "block_shear_areas", "cjp")
-    sp = {k: v for k, v in sp.items() if k in keys}
+    keys = ("t_plate_mm", "h_plate_mm", "fy_plate_MPa", "fu_plate_MPa", "bolts", "weld", "block_shear_areas", "cjp",
+            "plate_grade", "n_plates")
+    sp = _with_grades({k: v for k, v in sp.items() if k in keys}, cfg, sp)
     r = C.fin_plate_shear_checks(V_N=float(V_N), **sp)
     return r
 
@@ -147,7 +172,62 @@ def base_entry(cfg, col_member, load_cases):
     for k, v in sp.items():
         if k not in ("fixed", "axis"):
             b[k] = v
+    pg, jg = _plate_grades(cfg, sp)                     # AUD-2: IS 2062 Table 3 plate fy by thickness
+    if pg is not None:
+        b.setdefault("plate_grade", pg)
+    if jg is not None:
+        b.setdefault("job_steel_grade", jg)
+    bd = breakout_delegation(cfg)                       # AUD-4: concrete breakout record (delegated or WARN)
+    if bd is not None:
+        b.setdefault("breakout_delegation", bd)
     return b
+
+
+def breakout_delegation(cfg):
+    """AUD-4: the cfg['delegated_design'] item that delegates anchor breakout / pedestal design to the foundation EOR
+    -- an item whose text names anchors / breakout / cone / pull-out / pedestal, with non-empty criteria -- or None."""
+    import re as _re
+    rx = _re.compile(r"anchor|break-?out|\bcone\b|pull-?out|pedestal", _re.I)
+    reg = (cfg or {}).get("delegated_design")
+    reg = [reg] if isinstance(reg, dict) else (reg if isinstance(reg, list) else [])
+    for r in reg:
+        if isinstance(r, dict) and r.get("criteria") not in (None, "", [], {}) and \
+                rx.search(" ".join(str(r.get(k) or "") for k in ("item", "criteria"))):
+            return {"item": r.get("item"), "criteria": r.get("criteria")}
+    return None
+
+
+def anchorage_findings(cfg):
+    """AUD-4 WARNs (never blockers): declared column bases whose anchorage rests on an asserted per-anchor capacity
+    (no derivation), a x1.6 deformed-bar bond increase on a property-class anchor, and anchored bases without a
+    delegated anchor-breakout / pedestal design item."""
+    out = []
+    bases = ((cfg or {}).get("connections") or {}).get("column_base") or {}
+    if not isinstance(bases, dict):
+        return out
+    asserted, anchored = [], False
+    for key, sp in bases.items():
+        if not isinstance(sp, dict):
+            continue
+        a = sp.get("anchors") or {}
+        if a.get("d_mm") and a.get("n_total"):
+            anchored = True
+        emb = C.anchorage_embedment_capacity(sp.get("embedment") or a.get("embedment"), a.get("d_mm"),
+                                             anchor_grade=a.get("grade"))
+        if emb and emb.get("found") and emb.get("method") == "asserted":
+            asserted.append("%s (%.0f kN)" % (key, emb["capacity_N"] / 1e3))
+        elif emb and emb.get("warn"):
+            out.append(("WARN", "column_base[%s]: %s" % (key, emb["warn"])))
+    if asserted:
+        out.append(("WARN", "anchorage: asserted per-anchor embedment capacities without a derivation at %s -- give "
+                            "column_base.anchors.embedment = {method: 'bond', tau_bd_MPa, bar: 'plain'|'deformed', L_mm, "
+                            "source, cite} (IS 456:2000 26.2.1.1 tau_bd is an EOR input) or the EOR cone / breakout "
+                            "basis" % ", ".join(asserted)))
+    if anchored and breakout_delegation(cfg) is None:
+        out.append(("WARN", "anchorage: concrete cone / group breakout and the pedestal are %s -- add a "
+                            "cfg['delegated_design'] item for anchor breakout / pedestal design with criteria"
+                            % C.BREAKOUT_NOTE))
+    return out
 
 
 def is_seismic_combo(label, tags=None):
@@ -189,6 +269,8 @@ def column_splice(cfg, col_member, p, fy, records, *, sfrs, tags_of=None, seismi
                                          "clause": "IS 800:2007 12.5.2 (not applicable: no splice)",
                                          "cite": "column continuous over this length (declared)"}}}
     import static_model as SM
+    if sp.get("plate_grade") is None and (cfg or {}).get("plate_grade") is not None:
+        sp["plate_grade"] = cfg["plate_grade"]           # AUD-2
     cases = []
     for lab, r in (records or {}).items():
         d = dict(zip(SM.REC_FIELDS, list(r) + [0.0] * (len(SM.REC_FIELDS) - len(r))))
@@ -210,7 +292,8 @@ def column_splice(cfg, col_member, p, fy, records, *, sfrs, tags_of=None, seismi
     return C.column_splice_checks(sfrs=sfrs, Af_mm2=p["bf"] * p["tf"], fy_MPa=fy, P_N=P, M_Nmm=M, Zx_mm3=p["Zx"],
                                   A_mm2=p["A"], d_mm=p["d"], splice=sp, cases=cases, bf_mm=p["bf"], tf_mm=p["tf"],
                                   tw_mm=p["tw"], is18168=a18, tie_force_N=tie_force_N, Hc_mm=Hc_mm,
-                                  Zx_lower_mm3=Zx_lower_mm3)
+                                  Zx_lower_mm3=Zx_lower_mm3,
+                                  job_steel_grade=(cfg or {}).get("steel_grade"))
 
 
 # ------------------------------------------------------------------------------------------ HSFG slip (10.4.3)
