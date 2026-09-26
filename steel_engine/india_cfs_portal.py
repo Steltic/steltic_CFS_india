@@ -616,7 +616,9 @@ def base_check(cfg, base, R_N, wind_eq, with_imposed=True):
     6.1.2): 33 % plate / 25 % anchors only when W / EL acts together with imposed load."""
     H, V, Mz = R_N
     B_, L_, t = float(base["B_mm"]), float(base["L_mm"]), float(base["t_plate_mm"])
-    fyp = float(base["fy_plate_MPa"])
+    # AUD-2: plate fy = IS 2062:2025 Table 3 ReH for the plate thickness when the declared fy is higher (recorded)
+    fyp, _pfy = C8.plate_fy_is2062(float(base["fy_plate_MPa"]), t, base.get("plate_grade") or (cfg or {}).get("plate_grade"),
+                                   job_grade=(cfg or {}).get("steel_grade"), what="portal base plate")
     an = base["anchors"]; n = int(an["n_total"]); nt = int(an["n_tension"]); d = float(an["d_mm"])
     inc = is800_wsm_increase(wind_eq, with_imposed, anchor=False)
     inc_a = is800_wsm_increase(wind_eq, with_imposed, anchor=True)
@@ -677,10 +679,12 @@ def base_check(cfg, base, R_N, wind_eq, with_imposed=True):
         Mt = T_total * a / (B_)
         checks["plate bending (uplift side)"] = M._rec(6.0 * Mt / t ** 2, 0.75 * fyp * inc, "IS 800:2007 11.4.1 (c)",
                                                       "solid plates bending: fab = 0.75 fy; " + IS800_1114_CITE, capacity_basis="IS800_WSM", allowable_increase=inc)
+    for k_ in ("plate bending 11.4.1(c)", "plate bending (uplift side)"):
+        C8.tag_plate_fy(checks.get(k_), _pfy)
     dcs = [c["dc"] for c in checks.values() if isinstance(c.get("dc"), (int, float))]
     return {"checks": checks, "dc": max(dcs) if dcs else None, "ok": (None if any(c.get("ok") is None for c in checks.values())
                                                                        else all(c.get("ok") for c in checks.values())),
-            "reactions": {"H_N": H, "V_N": V, "M_Nmm": Mz}, "T_total_N": T_total}
+            "reactions": {"H_N": H, "V_N": V, "M_Nmm": Mz}, "T_total_N": T_total, "plate_fy": _pfy}
 
 
 def _bracing_block(cfg, bid, lb, F_by_case, fy, L_diag, cos, n_bays, n_sides, note):
@@ -987,7 +991,7 @@ def run(cfg, root):
                       "checks": [_mrow(cl, k, v) for k, v in bc["checks"].items()], "value": bc["reactions"]["V_N"], "limit": None,
                       "dc": bc["dc"], "ok": bc["ok"], "governing_combo": cl, "reactions": bc["reactions"], "T_uplift_N": bc["T_total_N"],
                       "clause": "IS 800:2007 11.6.2 / 11.4.1 (c) working stress (11.1.4 increases); concrete bearing EOR input", "capacity_basis": "IS800_WSM",
-                      "allowable_increase": 1.0, "demand_level": "working"})
+                      "allowable_increase": 1.0, "demand_level": "working", "plate_fy": bc.get("plate_fy")})
     else:
         conns.append({"id": "column-base", "type": "base", "value": None, "limit": None, "dc": None, "ok": None, "clause": "IS 800 11.6.2",
                       "note": "cfs_connections_spec.base not declared", "capacity_basis": "IS800_WSM", "allowable_increase": 1.0})
