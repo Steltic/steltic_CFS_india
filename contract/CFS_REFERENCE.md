@@ -9,21 +9,29 @@ into another building.
 
 **Problem.** 12 m × 8 m plan, 4 × 3.0 m storeys, residential (48 persons). New Delhi: IS 1893 Annex E Zone IV,
 Z = 0.24, soil Type II; IS 875-3 Annex A Vb = 47 m/s, terrain category 3, inland (Kd 0.9, k4 1.0). Loads: floor
-D 1.5 + partitions 1.0 (0.5 declared in W — a preflight WARN under ruling R1: the default is max(0.5, 1.0) = 1.0,
-IS 1893 7.3.6), IL 2.0 (IS 875-2 Table 1), roof D 1.0, Lr 0.75, cladding 0.5 kN/m².
+D 1.5 + partitions 1.0 (also 1.0 in W: max(0.5, 1.0) under ruling R1, IS 1893 7.3.6 "the higher values shall be
+used"), IL 2.0 (IS 875-2 Table 1), roof D 1.0, Lr 0.75, cladding 0.5 kN/m².
 
 **Method (the sequence to mirror).**
 1. Zone IV → SCBF, R = 4.5 (IS 1893 Table 9 SBF concentric; L7), IS 18168:2023 applies (Zone IV residential).
-   `lateral_frame`: 2 × 2 bays (6 m × 4 m), X-bracing in every perimeter bay, fixed bases; IS 808 WPB200X200X50.92
-   lateral columns and braces (plastic section, 12.8.2.5), WPB200X200X42.26 gravity columns, NPB300X165X39.88 (X) /
-   NPB200X130X27.37 (Y) beams, E250 B0; CJP-welded gussets at brace ends, 3 × M20 HSFG fin plates, 650 × 650 × 60
-   base plates with 6 × M30 anchors (embedment = EOR input, IS 456 not in corpus).
+   `lateral_frame`: 2 × 2 bays (6 m × 4 m), X-bracing in every perimeter bay, fixed bases, E250 B0. The SFRS sections are
+   sized by IS 18168:2023 5.3 / Table 2 (limit = coefficient × ε/√Ry = 0.845 × coefficient for E250, Ry 1.4):
+   lateral columns WPB200X200X61.3 (b/tf 6.67 ≤ 7.61; WPB200X200X50.92 at 8.42 fails), braces WPB200X200X50.92
+   (brace row 8.42 ≤ 9.55; plastic section, 12.8.2.5), X beams NPB300X150X49.32 (b/tf 5.98 ≤ 7.61, d/tw 34.8 ≤ 37.6;
+   NPB300X165X39.88 at 8.51 / 50.1 fails), Y beams NPB200X130X31.56 (6.70 / 29.7; NPB200X130X27.37 at 7.82 fails);
+   WPB200X200X42.26 gravity columns (not SFRS). CJP-welded gussets at brace ends; fin plates 3 × M20 HSFG (220 mm,
+   X beams) / 2 × M20 HSFG (150 mm, Y beams — fits the 190 mm clear web); 650 × 650 × 65 base plates (E250, t > 40:
+   fy 230) with 6 × M30 anchors, embedment 1500 mm (bond π d L τbd = 169.6 kN per anchor; EOR input, IS 456 not in
+   corpus, VERIFY).
 2. Seismic: I = 1.0 (Table 8 (iii)); Ta = 0.09 h/√d = 0.312 s (X) / 0.382 s (Y); Sa/g = 2.5 (soil II);
-   Ah = (0.24/2)(1.0/4.5)(2.5) = 0.0667; W ≈ 1318 kN (D + 25 % IL, Table 10; partitions 0.5); VB = Ah W ≈ 87.9 kN;
-   Zone IV → RSA (7.7.1) scaled to VB (scale 1.16 X / 1.22 Y); drift max 4.6 × 10⁻⁵ ≪ 0.004 (7.11.1).
-3. Hot-rolled frame D/C (IS 800, vendored engine): floor NPB300 0.87, roof 0.35, brace 0.13, gravity column 0.64,
-   lateral column 0.24; connections ≤ 0.98. Open item: the vendored 12.8.2.4 `brace_tension_share` check fails
-   (gravity compression dominates the brace force in a light building) → status `partial` with exactly those reasons.
+   Ah = (0.24/2)(1.0/4.5)(2.5) = 0.0667; W ≈ 1488 kN (D + 25 % IL, Table 10; partitions 1.0); VB = Ah W ≈ 99.2 kN;
+   Zone IV → RSA (7.7.1) scaled to VB (scale 1.15 X / 1.21 Y); drift max 4.7 × 10⁻⁵ ≪ 0.004 (7.11.1).
+3. Hot-rolled frame D/C (IS 800, vendored engine): floor X beam NPB300X150X49.32 0.74, roof X beam 0.58, Y beams
+   0.63, brace 0.74, gravity column 0.64, lateral column 0.33; connections ≤ 0.98 (brace-end gusset Whitmore yield
+   0.98; SFRS column base 0.91, governed by the anchorage embedment under the 12.12 / IS 18168 9.3 base demand of
+   155 kN per anchor). IS 18168 Table 2 (brace / column / beam rows), 7.2, 10.2, 12.8 and 12.12 checks all pass
+   (1009 capacity-design checks, 0 fail). The lateral sub-run sees the parent job's stored `rag/` hits (each
+   retrieval row's `file` → `hit_file`), so the HR evidence gate passes; status `complete`, 0 reasons.
 4. CFS studs CLR100X50X15X2 at 400 mm, 3.0 m, Fy 240 MPa (IS 1079 / IS 801 Table 2 → F = 1450 kgf/cm²), sheathed both
    faces (Kw 40 N/mm per side, a = 300 mm, screw lateral capacity 600 N — EOR / test inputs, VERIFY), non-load-bearing,
    designed at EVERY storey (records stud-S1 … stud-S4). Member-level wind (`member_pd`): Ka = 1.0 for the 1.2 m² stud
@@ -35,7 +43,7 @@ IS 1893 7.3.6), IL 2.0 (IS 875-2 Table 1), roof D 1.0, Lr 0.75, cladding 0.5 kN/
    6.1 / 6.2 / 6.3 bending D/C 0.545 (DL + IL, increase 1.0; Ma = Fb Sx_eff, WP6 / E6); deflection span/300 (IS 800
    Table 6, other buildings, floor, elements not susceptible to cracking — read-only) 0.24.
 6. Diaphragm: unit shear F/(n B) per frame line (n = 2 perimeter lines per direction; one line → F/B with a cantilever
-   chord) ≤ 6.0 kN/m (cited product test value, EOR input); max 2.31 kN/m at storey 3 → ok; chord force (F/L) s²/(8 B)
+   chord) ≤ 6.0 kN/m (cited product test value, EOR input); max 2.70 kN/m at storey 3 (Y) → ok; chord force (F/L) s²/(8 B)
    reported.
 7. Package: `design_basis = "IS801_WSM"`, `lateral_frame_basis = "IS800_LSD"`; every stud W-row carries
    `allowable_increase = 1.3333`, every DL / DL+IL row 1.0; `capacity_basis ∈ {IS801_allowable, test, EOR_input}`;

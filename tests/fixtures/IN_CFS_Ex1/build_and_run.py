@@ -10,12 +10,17 @@ Design decisions (the 'agent'):
   * Lateral system: hot-rolled SCBF, R 4.5 (IS 1893 Table 9 SBF concentric; Zone IV -> SCBF per L7); IS 18168:2023
     applies in Zone IV (residential).  Grid 2 x 2 bays (6 m x 4 m) of IS 808 WPB columns, NPB grid beams; X-bracing
     in every perimeter bay, braces IS 808 WPB200X200X50.92 E250 B0 (12.8.2.1; plastic section 12.8.2.5), KL/r = 6708/50.7 = 132 < 160.
+    IS 18168 5.3 / Table 2 (E250, Ry 1.4: limit = coefficient x eps/sqrt(Ry) = 0.845 x coefficient) sizes the SFRS members:
+    lateral columns WPB200X200X61.3 (b/tf 100/15 = 6.67 <= 9.0 x 0.845 = 7.61; the 50.92 section, 8.42, fails),
+    X beams NPB300X150X49.32 (b/tf 5.98 <= 7.61, d/tw 278.6/8.0 = 34.8 <= 44.5 x 0.845 = 37.6; NPB300X165X39.88 fails
+    8.51 / 50.1), Y beams NPB200X130X31.56 (6.70 / 29.7; NPB200X130X27.37 fails 7.82); braces WPB200X200X50.92 pass the
+    brace row (8.42 <= 11.3 x 0.845 = 9.55).  Gravity columns (not SFRS) stay WPB200X200X42.26.
   * CFS: floor joists CLR180X50X20X3.15 at 400 mm spanning 4 m between the grid beams (deck one-way in Y);
     exterior studs CLR100X50X15X2 at 400 mm, 3.0 m storey, sheathed both faces (IS 801 8.1; Kw from the
     sheathing test declared as EOR input), wind + cladding self-weight only (non-load-bearing: joists bear on the
     hot-rolled beams); IS 1079 grade: Fy 240 MPa (IS 801 Table 2: 24 kgf/mm2 -> F = 1450 kgf/cm2).
   * Loads: floor D 1.5 kN/m2 (CFS joists + 18 mm cement board + screed + finishes, IS 875-1) + partitions 1.0
-    (IS 875-2 3.1.2) design / 0.5 in W (IS 1893 7.3.6); residential IL 2.0 kN/m2 (IS 875-2 Table 1); roof D 1.0,
+    (IS 875-2 3.1.2) design and in W (IS 1893 7.3.6: max(0.5, design allowance), ruling R1); residential IL 2.0 kN/m2 (IS 875-2 Table 1); roof D 1.0,
     Lr 0.75 (Table 2, access not provided); cladding 0.5 kN/m2 on the perimeter.
 """
 from __future__ import annotations
@@ -63,16 +68,25 @@ def build_cfg():
                       "d0_mm": 22.0, "nn": 1, "ns": 0},
             "block_shear_areas": {"Avg_mm2": (40 + 2 * 70) * 10.0, "Avn_mm2": (40 + 2 * 70 - 2.5 * 22) * 10.0, "Atg_mm2": 40.0 * 10.0,
                                   "Atn_mm2": (40 - 11) * 10.0},
-            "cjp": {"t_mm": 10.0, "length_mm": 220.0, "fy_MPa": 250.0, "n_sides": 1, "site": True}, "weld_type": "cjp"}},
+            "cjp": {"t_mm": 10.0, "length_mm": 220.0, "fy_MPa": 250.0, "n_sides": 1, "site": True}, "weld_type": "cjp"},
+            # Y beams NPB200X130X31.56: clear web 210 - 2 x 10 = 190 mm -> a 150 mm fin plate with 2 bolts (e 40, p 70, e 40)
+            "NPB200X130X31.56": {
+                "t_plate_mm": 10.0, "h_plate_mm": 150.0, "fy_plate_MPa": 250.0, "fu_plate_MPa": 410.0, "bolt_type": "HSFG",
+                "slip_surface": "clean_mill_scale",
+                "bolts": {"n_bolts": 2, "d_mm": 20, "grade": "8.8", "t_mm": 6.0, "fu_plate_MPa": 410.0, "e_mm": 40.0, "p_mm": 70.0,
+                          "d0_mm": 22.0, "nn": 1, "ns": 0},
+                "block_shear_areas": {"Avg_mm2": (40 + 70) * 10.0, "Avn_mm2": (40 + 70 - 1.5 * 22) * 10.0, "Atg_mm2": 40.0 * 10.0,
+                                      "Atn_mm2": (40 - 11) * 10.0},
+                "cjp": {"t_mm": 10.0, "length_mm": 150.0, "fy_MPa": 250.0, "n_sides": 1, "site": True}, "weld_type": "cjp"}},
         "column_base": {"default": {
-            "B_mm": 650.0, "L_mm": 650.0, "t_plate_mm": 60.0, "fy_plate_MPa": 230.0, "fck_MPa": 30.0, "fixed": True,
+            "B_mm": 650.0, "L_mm": 650.0, "t_plate_mm": 65.0, "fy_plate_MPa": 230.0, "fck_MPa": 30.0, "fixed": True,
             "anchors": {"n_total": 6, "n_tension": 3, "d_mm": 30, "grade": "8.8", "f_mm": 250.0, "pitch_mm": 150.0, "edge_mm": 100.0,
                         "n_per_row": 3, "Anb_mm2": 561.0},
             "Ec_note": "Ec = 5000 sqrt(30) = 27386 MPa (IS 456:2000 6.2.3.1); plate fy 230 (E250, t > 40, IS 2062 Table 3); "
                        "M30 8.8 Anb 561 mm2 (IS 1367 thread stress area)",
-            "embedment": {"capacity_N": 3.1416 * 30.0 * 1200.0 * 1.2,   # = 135 717 N per anchor, see formula string
-                          "formula": "bond: pi d L_emb tau_bd = pi x 30 mm x 1200 mm x 1.2 MPa (x 1.6 for deformed / 1.0 plain, HD bolt sleeve) "
-                                     "-> 135 717 N per anchor; EOR numbers: d 30 (anchor), L_emb 1200 mm, tau_bd 1.2 MPa (M30 concrete, plain bar, "
+            "embedment": {"capacity_N": 3.1416 * 30.0 * 1500.0 * 1.2,   # = 169 646 N per anchor, see formula string
+                          "formula": "bond: pi d L_emb tau_bd = pi x 30 mm x 1500 mm x 1.2 MPa (x 1.6 for deformed / 1.0 plain, HD bolt sleeve) "
+                                     "-> 169 646 N per anchor; EOR numbers: d 30 (anchor), L_emb 1500 mm, tau_bd 1.2 MPa (M30 concrete, plain bar, "
                                      "IS 456:2000 Table 26.2.1.1 -- not in the corpus), no cone check -- VERIFY",
                           "cite": "EOR -- IS 456:2000 cl. 26.2.1 development length / cone; standard not in corpus -- VERIFY",
                           "source": "EOR -- IS 456:2000 cl. 26.2.1 development length / cone; standard not in corpus -- VERIFY"}}},
@@ -89,15 +103,15 @@ def build_cfg():
                       "note": "4 flats per floor x 3 persons = 48 < 200 -> Table 8 (iii) I = 1.0"},
         "geometry": {"plan_x_m": Lx, "plan_y_m": Ly, "heights_m": H},
         "loads": {"D_floor": 1.5, "D_roof": 1.0, "L_floor": 2.0, "Lr": 0.75, "clad": 0.5, "partition_design_kNm2": 1.0,
-                  "partition_seismic_kNm2": 0.5, "snow": 0.0,
+                  "partition_seismic_kNm2": max(0.5, 1.0), "snow": 0.0,   # ruling R1: max(0.5, design allowance) in W
                   "cite": "IS 875-1 Table 1 assembly; IS 875-2 Table 1 residential 2.0 kN/m2, 3.1.2 partitions 1.0; Table 2 roof 0.75; "
-                          "IS 1893 7.3.6 partitions >= 0.5 in W, Table 10 25 % of IL"},
+                          "IS 1893 7.3.6 partitions in W = max(0.5, 1.0 design allowance) = 1.0 ('the higher values shall be used'), Table 10 25 % of IL"},
         "lateral_frame": {"system": "SCBF", "R": 4.5, "NX": 2, "NY": 2, "bay_x_m": Lx / 2.0, "bay_y_m": Ly / 2.0,
                           "braced_bays": "perimeter", "brace_config": "X", "base": "fixed",
-                          "col": "WPB200X200X50.92", "beam": "NPB300X165X39.88", "brace": "WPB200X200X50.92",
-                          "col_sec": {"lateral": {"1-4": "WPB200X200X50.92"}, "gravity": {"1-4": "WPB200X200X42.26"}},
-                          "beam_sec": {"floor_X": "NPB300X165X39.88", "floor_Y": "NPB200X130X27.37",
-                                       "roof_X": "NPB300X165X39.88", "roof_Y": "NPB200X130X27.37"},
+                          "col": "WPB200X200X61.3", "beam": "NPB300X150X49.32", "brace": "WPB200X200X50.92",
+                          "col_sec": {"lateral": {"1-4": "WPB200X200X61.3"}, "gravity": {"1-4": "WPB200X200X42.26"}},
+                          "beam_sec": {"floor_X": "NPB300X150X49.32", "floor_Y": "NPB200X130X31.56",
+                                       "roof_X": "NPB300X150X49.32", "roof_Y": "NPB200X130X31.56"},
                           "LLT_sag_mm": {"floor": 400.0, "roof": 400.0}, "LLT_hog_mm": {"floor": 6000.0, "roof": 6000.0},
                           "steel_grade": "E250 B0", "brace_grade": "E250 B0", "brace_process": None,
                           "deck_span": "Y", "diaphragm": "rigid", "apply_is18168": True, "connections": connections,
@@ -121,7 +135,7 @@ def build_cfg():
                                          "allowable diaphragm shear 6.0 kN/m from the manufacturer's tested diaphragm table (report to be filed) -- VERIFY",
                                "cite": "IS 801 9.1.4 excludes diaphragms from the IS 801 test route; capacity is a cited product / test value"},
         "eor_inputs": [
-            {"item": "SFRS column-base anchorage embedment (concrete bond / cone)", "value": "135 717 N per M30 anchor: pi x 30 x 1200 x 1.2 MPa",
+            {"item": "SFRS column-base anchorage embedment (concrete bond / cone)", "value": "169 646 N per M30 anchor: pi x 30 x 1500 x 1.2 MPa (L_emb 1500 mm: the 12.12 / IS 18168 9.3 base demand of the WPB200X200X61.3 column, 155 kN per anchor, exceeds the 135.7 kN of a 1200 mm embedment)",
              "source": "EOR -- IS 456:2000 cl. 26.2.1 development length / cone; standard not in corpus -- VERIFY"},
             {"item": "stud sheathing modulus Kw (IS 801 8.1)", "value": "40 N/mm per side (12 mm cement board, screws at 300 mm)",
              "source": "EOR -- sheathing shear test per IS 801 8.1 -- VERIFY"},

@@ -63,12 +63,15 @@ def test_ex1_lateral_frame_numbers(ex1):
     assert lat["system"] == "SCBF" and lat["R"] == 4.5 and ss["zone"] == "IV" and ss["Z"] == 0.24 and ss["I"] == 1.0
     assert ss["Ah"] == pytest.approx((0.24 / 2) * (1.0 / 4.5) * 2.5, rel=1e-3)          # 0.0667
     assert ss["VB_kN"] == pytest.approx(ss["Ah"] * ss["W_kN"], rel=1e-3)
-    assert 1100 < ss["W_kN"] < 1400                                                     # 4 x 96 m2 light CFS floors + frame
+    assert 1300 < ss["W_kN"] < 1600      # 4 x 96 m2 light CFS floors + frame; partitions in W = max(0.5, 1.0) (ruling R1)
     assert lat["seismic_analysis"]["rsa_used_in_demands"] is True                       # 7.7.1 (Zone IV)
     assert lat["drift_max"] < 0.004
     dcs = {m["role"]: m["DC"] for m in lat["members"]}
     assert all(v <= 1.0 for v in dcs.values()) and {"brace", "lateral_col", "gravity_col", "floor", "roof"} <= set(dcs)
     assert all(c["DC"] <= 1.0 for c in lat["connections"])
+    # FIX1: IS 18168 Table 2 (H05) live in Zone IV -- the SFRS sections are sized to it; nothing fails, nothing skipped
+    assert lat["capacity_design"]["n_fail"] == 0 and lat["capacity_design"]["n_not_evaluated"] == 0
+    assert {m["section"] for m in lat["members"] if m["role"] == "lateral_col"} == {"WPB200X200X61.3"}
     import india_cfs_env
     assert lat["vendored_commit"] == india_cfs_env.vendored_commit() and len(lat["vendored_commit"]) >= 7
 
