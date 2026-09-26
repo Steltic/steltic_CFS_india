@@ -127,7 +127,8 @@ cfg = {
   "loads": {"D_floor", "D_roof", "L_floor", "Lr", "clad", "partition_design_kNm2", "partition_seismic_kNm2", "snow", "cite"},
   "lateral_frame": {"system": "SCBF"|"OCBF"|"EBF"|"SMF"|"SMF+SCBF"|.., "R", "NX", "NY", "bay_x_m", "bay_y_m", "braced_bays",
                     "brace_config", "base", "col", "beam", "brace", "col_sec", "beam_sec", "steel_grade",
-                    "brace_grade", "deck_span", "diaphragm", "apply_is18168", "connections", "diaphragm_7_6_4"},
+                    "brace_grade", "deck_span", "diaphragm", "diaphragm_by_level", "apply_is18168", "connections",
+                    "diaphragm_7_6_4"},
   "cfs_members": {"Fy_MPa", "grade_cite",
                   "studs":  {"section": "CLR100X50X15X2", "spacing_mm", "height_mm", "bearing", "sheathing": {...}, "cladding_kNm2"},
                   "joists": {"section", "spacing_mm", "span_mm", "bearing_mm", "compression_flange_restrained", "deflection_limit_ratio", "deflection_cite"},
@@ -199,7 +200,13 @@ Sections are IS 811 labels only (`CLR…`, `CLS…`, `CWR…`, `CWS…`, `EA…`
   entire diaphragm at that storey = `ratio`; `ratio_vs_storey_drift` is informative only, not the IS 1893 criterion).
 * 7.6.4 label (AUD-3): the lateral package's `diaphragm_7_6_4.classification` is "flexible (IS 1893 7.6.4, from the
   analysis)" whenever the flexible run measures a literal ratio > 1.2 at any level, whatever `diaphragm` declares; a declared
-  label that contradicts it is a non-blocking warning (`design_status.warnings`). `diaphragm_type` (`"cfs_board"` |
+  label that contradicts it is a non-blocking warning (`design_status.warnings`). `diaphragm_by_level`
+  (`{"1-2": "rigid", "default": "flexible"}`, levels or ranges; unnamed levels take `diaphragm`) labels each level of
+  the HR frame, e.g. a composite podium rigid under flexible CFS floors: rigid levels keep the rigid load-path
+  collectors; flexible levels accumulate the deck shear along each braced line into the braced bays (q x tributary
+  length of the line; the whole-line-shear upper bound only where the model shows no braced / frame bay on the line),
+  and with the Table 5(ii) run the EQ combinations take the flexible-deck beam axial forces as the flexible case (HR
+  contract); each level's label is compared with that level's literal 7.6.4 ratio. `diaphragm_type` (`"cfs_board"` |
   `"board"` | `"metal_deck"` | `"rc_slab"` | `"composite_deck"` | `"braced_roof"`, optional; otherwise read from
   `floor_system`, default CFS joists): a board / CFS or bare metal-deck diaphragm declared rigid with no stiffness basis
   (`diaphragm_stiffness`, 7.6.4 deflections, flexible run, `flexible_diaphragm_eor`) gets a preflight WARN.

@@ -422,6 +422,8 @@ def build_hr_spec(cfg, name):
         "steel_grade": lf.get("steel_grade", "E250 B0"), "brace_grade": lf.get("brace_grade", "E250 B0"),
         "brace_process": lf.get("brace_process"), "brace_config": lf.get("brace_config", "X"), "base": lf.get("base", "fixed"),
         "diaphragm": lf.get("diaphragm", "rigid"), "deck_span": lf.get("deck_span", "Y"),
+        # GOLD-COLL: per-level diaphragm labels (a composite podium rigid under flexible CFS floors)
+        "diaphragm_by_level": lf.get("diaphragm_by_level"),
         "floor_system": lf.get("floor_system", "one-way: CFS joists (IS 801) span between the hot-rolled grid beams"),
         "connections": lf.get("connections") or {}, "apply_is18168": lf.get("apply_is18168", site["zone"] in ("III", "IV", "V")),
         "section12_inputs": lf.get("section12_inputs") or {}, "K_factors": lf.get("K_factors"),
