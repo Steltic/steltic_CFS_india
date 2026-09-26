@@ -71,6 +71,13 @@ def check(cfg) -> list:
             say("ERROR", "loads.%s = %s kN/m2 implausible (psf entered?)" % (k, v))
     if ld.get("partition_seismic_kNm2") is not None and float(ld["partition_seismic_kNm2"]) < 0.5 and not cfg.get("portal"):
         say("ERROR", "partitions in W shall not be less than 0.5 kN/m2 (IS 1893 7.3.6)")
+    elif ld.get("partition_seismic_kNm2") is not None and ld.get("partition_design_kNm2") is not None \
+            and float(ld["partition_seismic_kNm2"]) < float(ld["partition_design_kNm2"]) - 1e-9 and not cfg.get("portal"):
+        # H22 / ruling R1
+        say("WARN", "loads.partition_seismic_kNm2 = %s is below the partition design allowance %s kN/m2: IS 1893 7.3.6 "
+                    "'In case the minimum values of seismic weights corresponding to partitions given in parts of IS 875 are "
+                    "higher, the higher values shall be used' (default when not declared: max(0.5, allowance))"
+            % (ld["partition_seismic_kNm2"], ld["partition_design_kNm2"]))
     # ---- lateral system (D3 / L7) ----
     lf = cfg.get("lateral_frame")
     if cfg.get("portal"):

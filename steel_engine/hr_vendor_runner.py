@@ -97,7 +97,8 @@ def build_cfg(spec):
         "NX": spec["NX"], "NY": spec["NY"], "bay_x": spec["bay_x_m"], "bay_y": spec["bay_y_m"], "heights": heights,
         "D_floor": spec["D_floor"], "D_roof": spec["D_roof"], "L_floor": spec["L_floor"], "Lr": spec["Lr"],
         "clad": spec.get("clad", 0.0), "snow": spec.get("snow", 0.0),
-        "partition_load_kNm2": spec.get("partition_design_kNm2", 0.0), "partition_seismic_kNm2": spec.get("partition_seismic_kNm2", 0.5),
+        "partition_load_kNm2": spec.get("partition_design_kNm2", 0.0), "partition_seismic_kNm2": (spec["partition_seismic_kNm2"] if spec.get("partition_seismic_kNm2") is not None
+                                   else max(0.5, float(spec.get("partition_design_kNm2") or 0.0))),     # H22 / R1: IS 1893 7.3.6
         "partitions": spec.get("partitions", True),
         "E": 200000.0, "base": spec.get("base", "fixed"), "diaphragm": spec.get("diaphragm", "rigid"),
         "floor_system": spec.get("floor_system", "one-way (CFS joists between the hot-rolled beams)"),

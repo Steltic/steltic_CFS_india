@@ -195,6 +195,15 @@ def wind_story_forces(cfg):
     return out, forces
 
 
+def partition_seismic_default(ld):
+    """IS 1893 7.3.6 (ruling R1): partitions in the seismic weight = the declared partition_seismic_kNm2, else
+    max(0.5, partition_design_kNm2) ('not less than 0.5 kN/m2 ... the higher values shall be used')."""
+    ld = ld or {}
+    if ld.get("partition_seismic_kNm2") is not None:
+        return float(ld["partition_seismic_kNm2"])
+    return max(0.5, float(ld.get("partition_design_kNm2") or 0.0))
+
+
 def build_hr_spec(cfg, name):
     """Declarative HR-frame spec (JSON) from the CFS cfg."""
     lf = cfg["lateral_frame"]; site = cfg["site"]; geo = cfg["geometry"]; ld = cfg["loads"]
@@ -241,7 +250,8 @@ def build_hr_spec(cfg, name):
         "NX": NX, "NY": NY, "bay_x_m": float(lf["bay_x_m"]), "bay_y_m": float(lf["bay_y_m"]), "heights_m": H,
         "D_floor": ld["D_floor"], "D_roof": ld["D_roof"], "L_floor": ld["L_floor"], "Lr": ld["Lr"], "clad": ld.get("clad", 0.0),
         "snow": ld.get("snow", 0.0), "partition_design_kNm2": ld.get("partition_design_kNm2", 0.0),
-        "partition_seismic_kNm2": ld.get("partition_seismic_kNm2", 0.5), "partitions": ld.get("partitions", True),
+        # H22 / ruling R1: partitions in W default to max(0.5, the partition design allowance) (IS 1893 7.3.6)
+        "partition_seismic_kNm2": partition_seismic_default(ld), "partitions": ld.get("partitions", True),
         "braced_bays": bays, "moment_lines": lf.get("moment_lines") or [], "col": lf["col"], "beam": lf["beam"],
         "brace": lf.get("brace"), "col_sec": lf.get("col_sec") or {}, "beam_sec": lf.get("beam_sec") or {},
         "steel_grade": lf.get("steel_grade", "E250 B0"), "brace_grade": lf.get("brace_grade", "E250 B0"),
