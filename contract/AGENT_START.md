@@ -190,7 +190,9 @@ Sections are IS 811 labels only (`CLR…`, `CLS…`, `CWR…`, `CWS…`, `EA…`
 * Re-entrant plans (L / T / U / Z / cruciform; IS 1893 Table 5(ii), Amd 2): the HR run adds the flexible-floor-diaphragm
   3-D dynamic analysis to the rigid case automatically and envelopes the two. Declare the deck in-plane stiffness
   `diaphragm_stiffness` (`{"type": "rc_slab" | "metal_deck" | "custom", "t_mm" | "G_eff_MPa" | "Gd_kN_per_m" |
-  "topping_t_mm" + "fck_MPa", "source", "cite"}` — EOR input; without it the job stays PARTIAL with the reason);
+  "topping_t_mm" + "fck_MPa", "source", "cite"}` — EOR input; without it the job stays PARTIAL with the reason;
+  per level, e.g. a composite podium under CFS floors: `{"by_level": {"1-2": {record}, "3": {record}}, "default":
+  {record}}` or a list of records for levels 1..NF — every level must resolve to a record, see the HR contract);
   `flexible_diaphragm_analysis` (`True` runs it on a regular plan too, `False` declines it); `flexible_diaphragm_eor`
   (`{analysis_ref, results, source, cite}` of an external analysis, instead of the engine run). The diaphragm rows then
   carry `flexible_run_7_6_4` (in-plane deformation vs average storey drift of that storey).
