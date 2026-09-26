@@ -183,6 +183,18 @@ def lateral_issues(pkg) -> list:
             return ["lateral frame (HR authority) status %s" % st.get("status")]
         # C12 (CFS-B-02): blocking reasons first (analysis method / irregularity / gates), per-element duplicates grouped,
         # and a count of the rest instead of a silent cut at 60
+        # RR-BUG-4: ranked by the HR reason class (india_seismic_gates.reason_class: analysis / irregularity / gates /
+        # evidence / system / other before the per-element rows); the cap keeps the first row of every class; the HR
+        # full count (n_reasons) is reported
+        n_all = int(st.get("n_reasons") or len(rs))
+        try:
+            from india_seismic_gates import REASON_CLASSES as _RCL, reason_class as _rcls
+            cls_of = _rcls
+            rank = lambda r: _RCL.index(_rcls(r))
+        except Exception:                                   # older vendored HR engine
+            cls_of = lambda r: "blocking" if BLOCKING_RE.search(str(r)) and not re.search(r"@(base-|conn-)?e\d", str(r)) \
+                else "elements"
+            rank = lambda r: 0 if cls_of(r) == "blocking" else 1
         seen, uniq = {}, []
         for r in rs:
             key = re.sub(r"(e|base-e|conn-)\d+|\d+(\.\d+)?", "#", str(r))
@@ -191,13 +203,29 @@ def lateral_issues(pkg) -> list:
                 continue
             seen[key] = 1
             uniq.append((key, r))
-        rank = lambda r: 0 if BLOCKING_RE.search(str(r)) else 1
-        uniq.sort(key=lambda kr: rank(kr[1]))
+        uniq.sort(key=lambda kr: rank(kr[1]))              # stable: HR order kept within a class
         cap = 60
-        out = ["lateral frame (HR authority) status %s: %s%s" % (st.get("status"), r, (" (+%d similar)" % (seen[k] - 1)) if seen[k] > 1 else "")
-               for k, r in uniq[:cap]]
+        sel = uniq
         if len(uniq) > cap:
-            out.append("lateral frame (HR authority): ... and %d more (see lateral/STATUS.md)" % (len(uniq) - cap))
+            firsts, seen_cls = set(), set()
+            for k, r in uniq:
+                c = cls_of(r)
+                if c not in seen_cls:
+                    seen_cls.add(c)
+                    firsts.add(k)
+            room = cap - len(firsts)
+            sel = []
+            for k, r in uniq:
+                if k in firsts:
+                    sel.append((k, r))
+                elif room > 0:
+                    sel.append((k, r))
+                    room -= 1
+        out = ["lateral frame (HR authority) status %s: %s%s" % (st.get("status"), r, (" (+%d similar)" % (seen[k] - 1)) if seen[k] > 1 else "")
+               for k, r in sel]
+        if len(uniq) > len(sel):
+            out.append("lateral frame (HR authority): %d reasons in total, ... and %d more (see lateral/STATUS.md)"
+                       % (n_all, len(uniq) - len(sel)))
         return out
     return []
 
