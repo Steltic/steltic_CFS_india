@@ -59,7 +59,9 @@ def cfs_combinations(plan, cfg=None):
     (the CFS members carry no lateral-system EQ force -- the hot-rolled frame does)."""
     plan = plan or {}
     sf = plan.get("story_forces") or {}
-    has_snow = bool((plan.get("snow_summary") or {}).get("applicable")) or bool((cfg or {}).get("snow"))
+    # C04: loads.snow is the documented key (AGENT_START); top-level snow and snow_summary.applicable are also honoured
+    has_snow = bool((plan.get("snow_summary") or {}).get("applicable")) or bool((cfg or {}).get("snow")) \
+        or bool(((cfg or {}).get("loads") or {}).get("snow"))
     wind_refs = [k for k in sf if k.upper().startswith(("W_", "WX", "WY", "WL"))]
     mw = plan.get("member_wind") or []
     wind_refs += [p.get("name") for p in mw if isinstance(p, dict) and p.get("name")]
