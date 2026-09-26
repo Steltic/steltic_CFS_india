@@ -1200,9 +1200,10 @@ def design_india(name, cfg, outdir):
         s12 = S12.section12_checks(cfg.get("system"), md, s12_cfg)
         pkg["capacity_design"] = {"system": cfg.get("system"), "R": G.declared_R(cfg), "section12": _jsonable(s12),
                                   "checks": {c.get("id", "c%d" % i) + ("@" + str(c.get("member")) if c.get("member") else ""):
-                                             {"value": c.get("value"), "limit": c.get("limit"), "dc": c.get("dc"),
-                                              "ok": c.get("ok"), "pass": c.get("ok"), "clause": c.get("clause"),
-                                              "cite": c.get("cite"), "found": c.get("ok") is not None}
+                                             dict({"value": c.get("value"), "limit": c.get("limit"), "dc": c.get("dc"),
+                                                   "ok": c.get("ok"), "pass": c.get("ok"), "clause": c.get("clause"),
+                                                   "cite": c.get("cite"), "found": c.get("ok") is not None},
+                                                  **({"sense": c["sense"]} if c.get("sense") else {}))
                                              for i, c in enumerate(s12.get("checks") or [])}}
     except ImportError as ex:
         s12 = {"checks": []}
@@ -1223,6 +1224,8 @@ def design_india(name, cfg, outdir):
     def _row(name, c, **extra):
         r = {"name": name, "value": c.get("value"), "limit": c.get("limit"), "dc": c.get("dc"), "ok": c.get("ok"),
              "clause": c.get("clause"), "cite": c.get("cite"), "source": c.get("source", CD.SRC)}
+        if c.get("sense"):
+            r["sense"] = c["sense"]
         if c.get("reason"):
             r["reason"] = c["reason"]
         if c.get("ok") is None:
@@ -1235,8 +1238,51 @@ def design_india(name, cfg, outdir):
     def _conn_force_sls(t, kind):
         best = 0.0
         for lab, r in (sls_rec.get(frozenset((reg[t][2], reg[t][3]))) or {}).items():
-            best = max(best, abs(r[0]) if kind == "brace" else abs(r[3]))
+            # GOLD-5: a beam end transfers its axial force (collector / chord / flexible-deck) with the shear
+            best = max(best, abs(r[0]) if kind == "brace" else math.hypot(r[3], r[0]))
         return best
+
+    try:
+        _os_conn = bool(amp1223 or S12.is18168_status(cfg.get("system"), s12_cfg)["applies"])
+    except Exception:
+        _os_conn = bool(amp1223)
+
+    def _beam_end_resultant(tags):
+        """GOLD-5 (IN_CFS_Ex6): the beam-end connection transfers the member's axial force -- the collector / chord
+        force of the diaphragm load path (IS 1893 7.6.4 load path; india_diaphragm, in the records) or the
+        flexible-deck axial (Table 5(ii)) -- together with the shear: R = sqrt(V^2 + N^2) per combination
+        (concurrent V and N of the same record).  The overstrength (12.2.3 / IS 18168 5.5) rows count where
+        IS 18168 applies (IS 18168 12.2.4.5 / 6.4: collector forces from the overstrength earthquake load) or
+        cfg['collector_basis'] = 'is800_12_2_3'.  Returns (R, combo, V, N, collector?)."""
+        best = (0.0, None, 0.0, 0.0)
+        for t in tags:
+            conn_l = envt[t].get("conn") or {}
+            for lab, r in (envt[t].get("records") or {}).items():
+                if lab in conn_l and not _os_conn:
+                    continue
+                V_, N_ = abs(r[3]), abs(r[0])
+                R_ = math.hypot(V_, N_)
+                if R_ > best[0]:
+                    best = (R_, lab, V_, N_)
+        return best + (any(t in coll_added for t in tags),)
+
+    def _vp_demand(tags, V_env, dem, notes):
+        """The shear-connection demand of a beam group: the envelope shear, or the V + N resultant when the beam end
+        carries axial force (GOLD-5); records the basis in dem / notes.  Returns (demand, label prefix)."""
+        R_, lab_, V_, N_, coll_ = _beam_end_resultant(tags)
+        if N_ <= 1e-6 * max(V_env, 1.0) or R_ <= V_env:
+            return V_env, ""
+        what = "collector / chord" if coll_ else "member"
+        dem.update(P_end_N=round(N_, 1), V_concurrent_N=round(V_, 1), V_P_resultant_N=round(R_, 1),
+                   resultant_combo=lab_, resultant_basis=(
+                       "IS 1893 (Part 1):2016 7.6.4 load path: the %s axial force is transferred through the beam-end "
+                       "connection with the concurrent shear, R = sqrt(V^2 + N^2) per combination (IS 800:2007 10.3 bolts "
+                       "under the resultant; plate / block shear / weld rows checked for R as a shear -- conservative)%s"
+                       % (what, "; overstrength rows included (IS 18168:2023 12.2.4.5 / 6.4 / 5.5%s)"
+                          % (", cfg collector_basis" if amp1223 else "") if _os_conn else "")))
+        notes.append("beam-end connection checked for the V + N resultant %.1f kN (V %.1f kN, %s axial %.1f kN, %s)"
+                     % (R_ / 1e3, V_ / 1e3, what, N_ / 1e3, lab_))
+        return R_, "(V + N resultant) "
 
     def _conn_group(key, tags):
         kind, sec, role = key
@@ -1325,25 +1371,26 @@ def design_india(name, cfg, outdir):
                 # frame): that end is a shear connection under the governing V (WP6-fix)
                 rel_ = info0.get("beam_rel") or {}
                 if any((rel_.get(t) or ("none",))[0] in ("I", "J") for t in sfrs_tags):
-                    r = CD.beam_shear_connection_checks(cfg, {"section": sec, "role": "beam"}, g["V"])
+                    Vpin, pfx_ = _vp_demand(tags, g["V"], dem, notes)
+                    r = CD.beam_shear_connection_checks(cfg, {"section": sec, "role": "beam"}, Vpin)
                     if r is None:
                         checks.append(_row("IS 800 10 shear connection (pinned end)", {
                             "ok": None, "clause": "IS 800:2007 10.3 / 8.4.1 / 6.4.1",
                             "reason": "cfg['connections']['beam_shear'] not declared for %s (pinned end of the SMF beam)" % sec}))
                     else:
                         for nm, c in r["checks"].items():
-                            checks.append(_row("pinned-end shear connection: %s" % nm, c))
+                            checks.append(_row("pinned-end shear connection: %s%s" % (pfx_, nm), c))
             else:
-                # braced-bay / gravity beam: shear connection under the governing V (SFRS braced-bay beams: also the
-                # collector axial is carried by the member check; the connection sees V and the 12.2.3 axial)
-                Vd = g["V"]
+                # braced-bay / gravity beam: shear connection under the governing V; a beam end carrying axial force
+                # (collector / chord / flexible deck) is checked for the V + N resultant per combination (GOLD-5)
+                Vd, pfx_ = _vp_demand(tags, g["V"], dem, notes)
                 r = CD.beam_shear_connection_checks(cfg, {"section": sec, "role": "beam"}, Vd)
                 if r is None:
                     checks.append(_row("IS 800 10 shear connection", {"ok": None, "clause": "IS 800:2007 10.3 / 8.4.1 / 6.4.1",
                                                                        "reason": "cfg['connections']['beam_shear'] not declared for %s" % sec}))
                 else:
                     for nm, c in r["checks"].items():
-                        checks.append(_row("beam-end shear connection: %s" % nm, c))
+                        checks.append(_row("beam-end shear connection: %s%s" % (pfx_, nm), c))
                     sp = CD.spec_for(cfg, "beam_shear", sec, "beam") or {}
                     if sp.get("bolts") and (sfrs_tags or sp.get("bolt_type")):
                         sl = CD.hsfg_slip_checks(sp.get("bolts"), sp.get("bolt_type"),
@@ -1583,13 +1630,13 @@ def design_india(name, cfg, outdir):
             for d in ("X", "Y"):
                 mp_ = flex[d]["mass_participation"]
                 chks.append({"name": "7.7.5.2 modal mass %s (flexible run)" % d, "value": round(mp_, 4), "limit": 0.90,
-                             "dc": round(0.90 / mp_, 4) if mp_ > 0 else None, "ok": mp_ >= 0.90,
+                             "dc": round(0.90 / mp_, 4) if mp_ > 0 else None, "ok": mp_ >= 0.90, "sense": ">=",
                              "clause": "IS 1893 7.7.5.2", "cite": "sum of modal masses >= 90 % of the seismic mass",
                              "source": "india_flexible_diaphragm.rsa_flexible"})
                 vs, vb = flex[d]["VB_scaled_N"], flex[d]["VBbar_N"]
                 chks.append({"name": "7.7.3.1 scaled base shear %s (flexible run)" % d, "value": round(vs / 1e3, 2),
                              "limit": round(vb / 1e3, 2), "dc": round(vb / vs, 4) if vs > 0 else None,
-                             "ok": vs >= vb * 0.999, "clause": "IS 1893 7.7.3.1",
+                             "ok": vs >= vb * 0.999, "sense": ">=", "clause": "IS 1893 7.7.3.1",
                              "cite": "force responses x V-bar_B / VB when VB < V-bar_B",
                              "source": "india_flexible_diaphragm.rsa_flexible"})
             frec["checks"] = chks
