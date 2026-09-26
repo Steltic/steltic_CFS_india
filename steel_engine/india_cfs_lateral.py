@@ -158,11 +158,17 @@ def wind_story_forces(cfg):
     Ka_d = {}
     for d, bay_key, Lalt in (("X", "bay_y_m", Ly), ("Y", "bay_x_m", Lx)):
         sp = float(lf.get(bay_key) or Lalt)
-        Ka_rec = WT.resolve_ka(sp * max(H), site.get("Ka_corpus_hit"))
+        # RR-BUG-6: a declared site.Ka_corpus_hit is per direction (Ka_x / Ka_y, or an {area: Ka} table) or is checked
+        # against Table 4 at THIS direction's area -- never applied where Table 4 gives a higher Ka
+        Ka_rec = WT.resolve_ka(sp * max(H), site.get("Ka_corpus_hit"), direction=d)
         if not Ka_rec.get("found"):
             raise LateralSystemError("Ka (Table 4) unresolved: %s" % Ka_rec.get("cite"))
         Ka_d[d] = (float(Ka_rec["Ka"]), sp * max(H), Ka_rec.get("cite"))
         out.update({"Ka_%s" % d: Ka_d[d][0], "Ka_area_%s_m2" % d: Ka_d[d][1]})
+        if Ka_rec.get("area_check"):
+            out["Ka_area_check_%s" % d] = Ka_rec["area_check"]
+        if Ka_rec.get("note"):
+            out["Ka_note_%s" % d] = Ka_rec["note"]
     dgov = max(Ka_d, key=lambda d: Ka_d[d][0])
     out.update(Ka=Ka_d[dgov][0], Ka_area_m2=Ka_d[dgov][1], Ka_cite=Ka_d[dgov][2],
                Ka_note="Ka per direction: frame spacing normal to the wind x storey height (7.2.2.1); Ka / Ka_area = the larger")

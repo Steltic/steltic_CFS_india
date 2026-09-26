@@ -117,6 +117,9 @@ cfg = {
            "cyclone_belt_cite", "Kd", "k2_table": {10: .., 15: .., 20: .., 30: ..}, "wind_structure_class",
            "Kc", "Ka_corpus_hit", "cpe_corpus_hit"},   # the last two: retrieved IS 875-3 Table 4 / Table 5 records
                                                        # (used before the in-repo transcriptions); Kc default 1.0
+                                                       # Ka_corpus_hit: {Ka} (checked against Table 4 at each
+                                                       # direction's / element's area -- a lower Ka is replaced by
+                                                       # Table 4, RR-BUG-6), {Ka_x, Ka_y} or {table: {area_m2: Ka}}
   "occupancy": {"use", "area_m2", "persons", "note", "food_storage", "educational", "hospital", "assembly",
                 "lifeline"},                                          # -> I (IS 1893 Table 8; flags override keywords)
   "geometry": {"plan_x_m", "plan_y_m", "heights_m": [..]},
