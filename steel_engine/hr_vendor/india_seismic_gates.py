@@ -219,16 +219,49 @@ def parse_systems(text, *, imf_as_smrf=False) -> list:
 
 
 def resolve_system_R(cfg) -> dict:
-    """Table 9 R for the declared system(s); R = min over components unless R_x/R_y given."""
+    """Table 9 R for the declared system(s).
+
+    R_table9 = min over all components (the default design R for both directions).  H06: per-direction R is
+    honoured when declared -- cfg['R_x'] / cfg['R_y'] (or seis / seismic_summary R_x, R_y).  Each declared value
+    is validated against the Table 9 R of that direction's system (cfg['system_x'] / cfg['system_y'] when given,
+    else every declared component): a declared R above that value is refused (errors[], the Table 9 value is
+    used), a lower one is kept (conservative).  R_x / R_y in the result are the values ESM and RSA use."""
     cfg = cfg or {}
     txt = system_text(cfg)
-    comps = parse_systems(txt, imf_as_smrf=bool(cfg.get("imf_as_smrf")))
+    imf = bool(cfg.get("imf_as_smrf"))
+    comps = parse_systems(txt, imf_as_smrf=imf)
     rows = [TABLE9_STEEL[c] for c in comps if c in TABLE9_STEEL]
     nob = [c.split(":", 1)[1] for c in comps if c.startswith("nobasis:")]
     R = min((r["R"] for r in rows), default=None)
-    return {"system_text": txt, "components": comps, "table9_rows": [r["row"] for r in rows],
-            "R_table9": R, "no_basis": nob,
-            "cite": "; ".join("%s R = %.1f" % (r["row"], r["R"]) for r in rows) or None}
+    _, ss = _summary(cfg)
+    out = {"system_text": txt, "components": comps, "table9_rows": [r["row"] for r in rows],
+           "R_table9": R, "no_basis": nob,
+           "cite": "; ".join("%s R = %.1f" % (r["row"], r["R"]) for r in rows) or None,
+           "errors": []}
+    for d in ("x", "y"):
+        dsys = cfg.get("system_" + d)
+        dcomps = parse_systems(dsys, imf_as_smrf=imf) if dsys else comps
+        drows = [TABLE9_STEEL[c] for c in dcomps if c in TABLE9_STEEL]
+        Rt = min((r["R"] for r in drows), default=R)
+        decl = None
+        for src in (cfg, _seis(cfg), ss):
+            v = _f(src.get("R_" + d))
+            if v is not None:
+                decl = v
+                break
+        use, basis = R, "min over components (Table 9)"
+        if decl is not None:
+            if Rt is not None and decl > Rt + 1e-9:
+                out["errors"].append("R_%s = %.2f exceeds the IS 1893 Table 9 value %.2f for the %s-direction system %s"
+                                     % (d, decl, Rt, d.upper(), "/".join(dcomps) or "?"))
+                use, basis = Rt, "declared R_%s refused (> Table 9); Table 9 value of the %s-direction system" % (d, d.upper())
+            else:
+                use, basis = decl, "declared R_%s (<= Table 9 %s for %s)" % (d, Rt, "/".join(dcomps) or "?")
+        out["R_" + d] = use
+        out["R_%s_table9" % d] = Rt
+        out["R_%s_declared" % d] = decl
+        out["R_%s_basis" % d] = basis
+    return out
 
 
 def declared_R(cfg):
@@ -316,6 +349,8 @@ def validate_R(cfg) -> list:
                         (R, Rt, "/".join(info["components"]))))
         elif R < Rt - 1e-9:
             out.append(("WARN", "R = %.2f is below the Table 9 value %.2f (conservative)" % (R, Rt)))
+    for msg in resolve_system_R(cfg).get("errors") or []:          # H06: per-direction R_x / R_y
+        out.append(("ERROR", msg))
     return out
 
 
@@ -695,16 +730,16 @@ def _walk_strings(o, path="", acc=None):
 
 
 def example_label_hits(*objs) -> list:
-    """(path, text) of cite/_label/source strings matching the EXAMPLE regex."""
+    """(path, text) of cite/_label/source/basis strings matching the EXAMPLE regex.  H32: free-text note leaves
+    ('note', 'notes', '*_note', '*_notes') are exempt -- a note may say "EXAMPLE EOR json not used"; only the
+    provenance leaves (cite, label, source, basis) are scanned."""
     hits = []
     for o in objs:
         for p, s in _walk_strings(o):
-            leaf = p.rsplit(".", 1)[-1].lower()
-            if any(t in leaf for t in ("cite", "cited", "_label", "label", "source", "basis", "note")) \
-                    and EXAMPLE_RE.search(s):
-                # "found:false ... example" free notes are allowed only when not a cite/label/source
-                if leaf in ("note",) and "cite" not in p.lower():
-                    continue
+            leaf = re.sub(r"(\[\d+\])+$", "", p.rsplit(".", 1)[-1]).lower()
+            if leaf in ("note", "notes") or leaf.endswith("_note") or leaf.endswith("_notes"):
+                continue
+            if any(t in leaf for t in ("cite", "label", "source", "basis")) and EXAMPLE_RE.search(s):
                 hits.append((p, s[:120]))
     return hits
 
@@ -799,6 +834,25 @@ def irregularity_reasons(cfg, pkg=None) -> list:
     return out
 
 
+FLEX_EOR_KEYS = ("analysis_ref", "results", "source", "cite")
+
+
+def flexible_diaphragm_eor(cfg):
+    """H01: a verified EOR record of the Table 5(ii) flexible-diaphragm 3D dynamic analysis.
+    cfg['flexible_diaphragm_eor'] = {analysis_ref, results, source, cite}, all four non-empty.
+    Returns (record | None, missing keys).  The private cfg key '_flexible_diaphragm_run' is NOT evidence."""
+    rec = (cfg or {}).get("flexible_diaphragm_eor")
+    if not isinstance(rec, dict):
+        return None, list(FLEX_EOR_KEYS) if rec is not None else []
+
+    def _empty(v):
+        return v is None or (isinstance(v, (str, list, tuple, dict)) and not (v.strip() if isinstance(v, str) else v))
+    miss = [k for k in FLEX_EOR_KEYS if _empty(rec.get(k))]
+    if miss:
+        return None, miss
+    return dict(rec, basis="EOR-documented"), []
+
+
 def analysis_findings(cfg, pkg) -> list:
     out = []
     ok_esm, why = esm_permitted(cfg, pkg)
@@ -818,9 +872,16 @@ def analysis_findings(cfg, pkg) -> list:
                            % (d, _f(s["VB_scaled_kN"]), _f(s["VBbar_kN"])))
             if isinstance(s, dict) and _f(s.get("mass_participation")) is not None and _f(s["mass_participation"]) < 0.90:
                 out.append("RSA %s: modal mass %.1f %% < 90 %% (7.7.5.2)" % (d, 100 * _f(s["mass_participation"])))
-    if an.get("reentrant_flexible_required") and not an.get("flexible_diaphragm_run"):
-        out.append("Amd 2 Table 5(ii): re-entrant plan requires a flexible-diaphragm 3D dynamic analysis in "
-                   "addition to the rigid case -- not performed")
+    if an.get("reentrant_flexible_required"):
+        # H01: the flag counts only when an engine flexible-diaphragm run recorded it, or with a complete EOR record
+        basis = an.get("flexible_diaphragm_basis")
+        eor = an.get("flexible_diaphragm_eor") if isinstance(an.get("flexible_diaphragm_eor"), dict) else {}
+        ok_flex = an.get("flexible_diaphragm_run") is True and (
+            basis == "engine" or (basis == "EOR-documented" and all(eor.get(k) for k in FLEX_EOR_KEYS)))
+        if not ok_flex:
+            out.append("Amd 2 Table 5(ii): re-entrant plan requires a flexible-diaphragm 3D dynamic analysis in "
+                       "addition to the rigid case -- not performed (no engine run and no complete "
+                       "cfg['flexible_diaphragm_eor'] {analysis_ref, results, source, cite})")
     return out
 
 
@@ -876,8 +937,26 @@ def occupancy_findings(cfg) -> list:
     if I is None:
         return ["I not declared"]
     if I + 1e-9 < r["I"]:
-        return ["I = %.2f is below the Table 8 value %.2f (%s)" % (I, r["I"], r.get("row"))]
+        # H20: the matched keyword / flag and the ruling label (R2) are part of the message
+        via = (" via %s" % r["matched_keyword"]) if r.get("matched_keyword") else ""
+        return ["I = %.2f is below the %s value %.2f%s" % (
+            I, "Table 8" if str(r.get("row") or "").startswith("Table 8") else "resolved", r["I"],
+            " (%s%s)" % (r.get("row"), via))]
     return []
+
+
+def occupancy_warnings(cfg) -> list:
+    """H20: non-blocking Table 8 notes (storage use without food_storage declared, keyword-only row (i),
+    residential precedence over an institution name)."""
+    try:
+        from india_seismic import importance_factor
+    except Exception:
+        return []
+    occ = (cfg or {}).get("occupancy")
+    if occ is None:
+        _, ss = _summary(cfg or {})
+        occ = ss.get("occupancy")
+    return list(importance_factor(occ).get("warnings") or [])
 
 
 def _R_system_agreement(cfg, pkg) -> list:
@@ -1035,12 +1114,18 @@ def design_status(cfg, pkg=None, *, job_dir=None, report_html=None) -> dict:
         reasons += _grounding_findings(pk, job_dir)
         reasons += provenance_findings(pk, job_dir) if job_dir else [
             "job folder unknown -- provenance hashes not verified"]
-        if job_dir:
-            try:
-                import consistency as _CC
+        # H30: one completion authority -- the consistency rules that are free of false positives also gate
+        try:
+            import consistency as _CC
+            if job_dir:
                 reasons += ["consistency: " + s for s in _CC.script_grep_issues(job_dir)]
-            except Exception:
-                pass
+            reasons += ["consistency: " + s for s in _CC.literal_dc_issues(pk)]
+            plan_ = _CC.plan_of(cfg, pk, job_dir)
+            if job_dir:
+                reasons += ["consistency: " + s for s in _CC.rag_evidence_issues(plan_, job_dir)]
+            reasons += ["consistency: " + s for s in _CC.retrieval_assumption_issues(plan_, cfg)]
+        except Exception as ex:
+            reasons.append("consistency rules unavailable: %s" % ex)
         if report_html is None and job_dir and os.path.exists(os.path.join(job_dir, "report.html")):
             report_html = os.path.join(job_dir, "report.html")
     if report_html:

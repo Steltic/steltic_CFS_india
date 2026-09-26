@@ -94,11 +94,33 @@ def _hss_area_csv(label):
         except Exception: pass
     return _HSS_AREA_CSV.get(str(label).strip().upper())
 
+def _india_label(name):
+    """H42: an IS 808 / IS 1161 style designation (WPB, NPB, MB, ISMB, CHS, NB, ISA ...)."""
+    try:
+        import sections as _SEC
+        return _SEC._looks_india(name)
+    except Exception:
+        return str(name).upper().startswith(("WPB", "NPB", "MB", "ISMB", "ISHB", "CHS", "NB", "ISA", "ISMC", "SHS", "RHS"))
+
+
+def _unknown_section_msg(name):
+    """H42: India-worded error for an unknown section label (US wording kept for AISC labels in kip-in)."""
+    if _UNIT_SYSTEM == "N-mm" or _india_label(name):
+        return ("IS section label %r not in IS 808 / IS 1161 tables (is808_shapes.csv / is1161_tubes.csv)%s -- use a "
+                "tabulated IS designation (e.g. 'MB300', 'WPB200X200X50.92', 'CHS193.7X6.3')"
+                % (name, "" if _UNIT_SYSTEM == "N-mm" else "; the engine is in kip-in (SI units not active: set "
+                   "cfg['units'] = 'N-mm' or 'm', or call india_units.apply_si_geometry(cfg))"))
+    return None
+
+
 class _HSSArea(dict):
     """HSS gross area lookup with an automatic aisc_shapes.csv fallback (B6)."""
     def __missing__(self, key):
         a = _hss_area_csv(key)
         if a is None:
+            msg = _unknown_section_msg(key)
+            if msg:
+                raise KeyError(msg)
             raise KeyError("HSS %r not in catalog or aisc_shapes.csv -- use a valid AISC HSS label" % (key,))
         self[key] = a
         return a
@@ -195,21 +217,17 @@ def Ipack(name):
             mm = 25.4
             A, Ix, Iy, J = s_in
             return (A * mm**2, Ix * mm**4, Iy * mm**4, J * mm**4)
-        raise KeyError(
-            "section %r not in SI catalog (is808/is1161/aisc) — "
-            "use an IS 808 label (e.g. 'MB300') or valid W-shape" % (name,)
-        )
+        raise KeyError(_unknown_section_msg(name))
     s = SEC.get(key) or (SEC.get(name) if name != key else None)
     if s is None:
         s = SEC.get(str(name).upper().strip())
     if s is None:
         s = _shapes_csv().get(key)
         if s is None:
-            raise KeyError(
+            raise KeyError(_unknown_section_msg(name) or (
                 "section %r not in catalog, is808_shapes.csv, is1161_tubes.csv, or aisc_shapes.csv — "
                 "use an IS 808 label (e.g. 'MB300', 'NPB300X150X36.52') or valid W-shape"
-                % (name,)
-            )
+                % (name,)))
         SEC[key] = s
     return s
 
@@ -225,8 +243,11 @@ def grid(cfg,k):
     # perimeters, masses, wind widths and ELF weights consistent with the ACTUAL framed footprint for
     # non-rectangular / setback buildings instead of silently assuming the full plate.
     NX,NY=cfg["NX"],cfg["NY"]
-    kk=1 if k==0 else k
     pr=cfg.get("present")
+    if pr and k==0:                                   # H16: a declared / captured base footprint wins
+        P = pr.get(0, pr.get("0"))
+        if P: return {tuple(p) for p in P}
+    kk=1 if k==0 else k
     if pr:
         P = pr.get(kk, pr.get(str(kk)))
         if P: return {tuple(p) for p in P}
@@ -234,6 +255,33 @@ def grid(cfg,k):
     if f is None:
         return {(i,j) for i in range(NX+1) for j in range(NY+1)}
     return f(kk,NX,NY)
+
+def plan_extent(cfg, k, pts=None):
+    """(Bx, By): true plan extent (engine length units) of level k's footprint -- max - min of the present
+    grid-node coordinates (xcoords / ycoords / skew honoured), NOT extent + one bay (H04)."""
+    pts = grid(cfg, k) if pts is None else pts
+    xy = [_xy_in(cfg, i, j) for i, j in pts]
+    if not xy:
+        return 0.0, 0.0
+    return (max(c[0] for c in xy) - min(c[0] for c in xy), max(c[1] for c in xy) - min(c[1] for c in xy))
+
+
+def floor_plan_inertia(cfg, k, m, pts=None, info=None):
+    """H04: the ONE floor mass moment of inertia about the vertical axis used by modal_props, _modal_impl,
+    example_build and the static accidental torque.  Returns (J, basis).
+    Priority: cfg['Jm_by_level'][k] (engine units: mass x length^2, t.mm^2 on the SI path) > a J the builder
+    declared in its info dict (info['Jm'][k]) > m (Bx^2 + By^2) / 12 with the TRUE plan extent of the level."""
+    by = cfg.get("Jm_by_level") or {}
+    v = by.get(k, by.get(str(k)))
+    if v is not None:
+        return float(v), "cfg['Jm_by_level']"
+    bj = (info or {}).get("Jm") or {}
+    v = bj.get(k, bj.get(str(k)))
+    if v is not None:
+        return float(v), "builder info['Jm']"
+    Bx, By = plan_extent(cfg, k, pts)
+    return m * (Bx ** 2 + By ** 2) / 12.0, "m (Bx^2 + By^2) / 12, true plan extent of the level's footprint"
+
 
 def zlevels(cfg):
     h=cfg["heights"]; z=[0.0]
@@ -264,12 +312,44 @@ def release_args(relz="none", rely="none"):
 _MOMENT_NODES = set()    # B3: nodes a RIGID (moment) beam frames into -> used to auto-role lateral vs gravity columns
 _BEAM_REL = {}           # viewer3d: beam tag -> (relz, rely) end-release codes ("none" = fixed-ended)
 _COL_DIR = {}            # viewer3d: column tag -> strong_dir ("X"/"Y") web orientation
+_SI_UNIT_WORDS = ("n-mm", "n-mm-s", "n-mm-sec", "m", "mm", "si", "metric", "india_metric", "india_si")
+_KIP_UNIT_WORDS = ("kip-in", "kip+inch", "kip_in", "imperial", "usa", "in")
+
+
+def ensure_units(cfg):
+    """H42 (L-05): switch the engine to SI automatically for an N-mm / metre cfg or an India job before building,
+    so esm_from_model / seismic_weights / build never run an SI cfg with kip-in constants (a WPB brace raised an
+    'AISC HSS' error, a CHS brace silently returned W without self-weight).  US jobs (kip-in / force_kip_in / no
+    India marker) are untouched.  Cheap when already converted."""
+    if not isinstance(cfg, dict):
+        return
+    u = str(cfg.get("units") or "").strip().lower()
+    if cfg.get("force_kip_in") or u in _KIP_UNIT_WORDS:
+        return
+    if not u:
+        j = str(cfg.get("jurisdiction") or cfg.get("code_jurisdiction") or "").lower()
+        lp = cfg.get("load_plan") if isinstance(cfg.get("load_plan"), dict) else {}
+        india = j in ("india", "in", "bis", "is", "is_bis") or \
+            str(lp.get("jurisdiction") or "").lower() in ("india", "is", "is_bis", "bis")
+        if not (india or cfg.get("metric") or cfg.get("si_native")):
+            return
+        if india and not (cfg.get("metric") or cfg.get("si_native")):
+            return                  # India job without declared units: preflight refuses it (WP1.12), no guessing
+    elif u not in _SI_UNIT_WORDS:
+        return
+    if _UNIT_SYSTEM == "N-mm" and cfg.get("_units_converted") and str(cfg.get("units")) == "N-mm":
+        return
+    from india_units import apply_si_geometry
+    apply_si_geometry(cfg)
+
+
 def build(cfg,transf="Linear"):
     """Build the OpenSees model; return the standard info dict
     {cm, present, z, NF, ele:[(tag,kind,sec,n1,n2)]}.  The agent supplies its own builder as
     cfg["custom_build"] = f, where f(cfg, transf) builds the model and returns that dict -- see
     engine/example_build.py for a complete worked reference to copy.  When no custom_build is given
     (the built-in B-archetypes and quick self-checks) the model is built by example_build()."""
+    ensure_units(cfg)                                  # H42: SI cfg / India job -> N-mm engine before building
     cb = cfg.get("custom_build")
     if cfg.get("custom_sections"):
         import sections as _SEC
@@ -298,8 +378,17 @@ def build(cfg,transf="Linear"):
         # builder read cfg['_sw_by_level'], so rebuild once when it was missing / changed.
         sw = self_weight_by_level(cfg, info)
         old = cfg.get("_sw_by_level")
-        if sw and (not old or any(abs(float(old.get(k, 0.0)) - v) > 1e-6 * max(v, 1.0) for k, v in sw.items())):
+        if sw and (not old or set(old) != set(sw)
+                   or any(abs(float(old.get(k, 0.0)) - v) > 1e-6 * max(v, 1.0) for k, v in sw.items())):
             cfg["_sw_by_level"] = sw
+            return build(cfg, transf)
+    if _UNIT_SYSTEM == "N-mm" and (cfg.get("nodal_masses") or cfg.get("nodal_dead_loads")
+                                   or cfg.get("crane") or cfg.get("cranes")):
+        # H16: point weights (nodal_masses, nodal_dead_loads, crane bridge + crab) binned to the diaphragm levels
+        # by z on the live model; rebuild once when they change (the builder's masses read floor_w)
+        pm = point_weights_by_level(cfg, info)
+        if pm != cfg.get("_pw_by_level"):
+            cfg["_pw_by_level"] = pm
             return build(cfg, transf)
     info["moment_nodes"] = set(_MOMENT_NODES)   # snapshot: nodes with a rigid (moment) beam framing in
     info["beam_rel"] = dict(_BEAM_REL)          # snapshot: per-beam end releases (viewer3d)
@@ -399,6 +488,31 @@ def add_beam(tag, n1, n2, sec, releases=None):
     return tag
 
 
+def add_link(tag, n1, n2, sec, Avy=None, Avz=None):
+    """EBF shear link for custom_build (IS 18168:2023 11 / 12.3; H39): an ElasticTimoshenkoBeam (shear deformation
+    kept) with the strong axis vertical (transf 3, as add_beam), no end releases (the link is continuous with the
+    beam outside it).  Arguments E G A Jx Iy Iz Avy Avz transf, with Iy = Ix(strong), Iz = Iy(weak) as add_beam;
+    Avz (major-axis shear, local z) defaults to the web area (d - 2 tf) tw and Avy to 5/6 x 2 bf tf.  Declare the
+    link in info['links'] ({tag, e_mm, brace_tags, beam_tags, column_tags, ...}) so the pipeline gives it role
+    'link'; static_model already maps ElasticTimoshenkoBeam elements of kind 'beam'."""
+    _ensure_col_transf()
+    A, Ix, Iy, J = Ipack(sec)
+    if Avy is None or Avz is None:
+        try:
+            import sections as _SEC
+            p = _SEC.props(sec)
+            Avz = Avz if Avz is not None else (p["d"] - 2.0 * p["tf"]) * p["tw"]
+            Avy = Avy if Avy is not None else 5.0 / 6.0 * 2.0 * p["bf"] * p["tf"]
+        except Exception:
+            Avz = Avz if Avz is not None else A / 2.0
+            Avy = Avy if Avy is not None else A / 2.0
+    ops.element("ElasticTimoshenkoBeam", tag, n1, n2, E, Gmod, A, J, Ix, Iy, Avy, Avz, 3)
+    _MOMENT_NODES.add(n1)
+    _MOMENT_NODES.add(n2)
+    _BEAM_REL[tag] = ("none", "none")
+    return tag
+
+
 def nbays(cfg,k):
     P=grid(cfg,k); n=0
     for i in range(cfg["NX"]):
@@ -419,7 +533,41 @@ def floor_area_mm2(cfg,k):
 
 def perim_mm(cfg,k):
     """Exposed floor-edge length (mm) when unit_system is N-mm."""
-    P=grid(cfg,k)
+    return _perim_nodes_mm(cfg, grid(cfg,k))
+
+
+def envelope_nodes(cfg, k):
+    """H16: the building envelope at level k for cladding -- cfg['envelope'] (list of (i, j) for every level, or
+    {k: [(i, j)]}) when declared, else the union of the footprints at and above level k (a mezzanine's interior
+    free edge is not clad; the outer walls around it are)."""
+    env = cfg.get("envelope")
+    if isinstance(env, dict):
+        e = env.get(k, env.get(str(k)))
+        if e:
+            return {tuple(p) for p in e}
+    elif env:
+        return {tuple(p) for p in env}
+    U = set()
+    for kk in range(k, len(cfg["heights"]) + 1):
+        U |= set(grid(cfg, kk))
+    return U
+
+
+def envelope_perim_mm(cfg, k):
+    """Perimeter (mm) of the building envelope at level k (see envelope_nodes)."""
+    return _perim_nodes_mm(cfg, envelope_nodes(cfg, k))
+
+
+def roof_levels(cfg):
+    """H50: levels treated as roofs in the seismic weight -- cfg['roof_levels'] (lower / lean-to roofs) plus the top
+    level NF.  A roof level carries no partitions and no Table 10 imposed share (IS 1893 7.3.2: imposed load on roof
+    need not be considered) and 20 % snow when snow > 1.5 kN/m2 (7.3.5)."""
+    NF = len(cfg["heights"])
+    return {int(k) for k in (cfg.get("roof_levels") or [])} | {NF}
+
+
+def _perim_nodes_mm(cfg, P):
+    """Boundary length (mm) of the framed bays of a node set P."""
     def framed(i,j):
         return (0<=i<cfg["NX"] and 0<=j<cfg["NY"] and (i,j) in P and (i+1,j) in P
                 and (i,j+1) in P and (i+1,j+1) in P)
@@ -513,28 +661,104 @@ def floor_w(cfg,k):
 STEEL_N_PER_MM3 = 7850.0 * 9.81 * 1e-9      # 78.5 kN/m3 (IS 875 Part 1) in N/mm3
 
 
+def nearest_level(cfg, z):
+    """H16: the diaphragm level (0 = base) nearest to elevation z (ties go to the upper level)."""
+    zl = zlevels(cfg)
+    return min(range(len(zl)), key=lambda k: (abs(float(z) - zl[k]), -k))
+
+
 def self_weight_by_level(cfg, info=None):
     """Member self-weight apportioned to the floor levels (N): beams at their level, columns and
-    braces half to each end level (IS 1893 7.4.1).  Needs the live model (called right after build)."""
+    braces half to each end level (IS 1893 7.4.1).  Needs the live model (called right after build).
+    H16: each piece is binned to the diaphragm level NEAREST its elevation z (a crane-bracket node or a
+    beam at an intermediate height no longer lands on a level the seismic weight never reads)."""
     out = {}
     try:
         eles = (info or {}).get("ele") or []
         for (t, kind, sec, n1, n2) in eles:
             try:
                 A = Ipack(sec)[0]
-                L = math.dist(ops.nodeCoord(n1), ops.nodeCoord(n2))
+                c1, c2 = ops.nodeCoord(n1), ops.nodeCoord(n2)
+                L = math.dist(c1, c2)
             except Exception:
                 continue
             W = A * STEEL_N_PER_MM3 * L
-            k1, k2 = n1 // 100000, n2 // 100000
             if kind == "beam":
-                out[k1] = out.get(k1, 0.0) + W
+                kk = nearest_level(cfg, 0.5 * (c1[2] + c2[2]))
+                if kk >= 1:
+                    out[kk] = out.get(kk, 0.0) + W
             else:
-                for kk in (k1, k2):
+                for zz in (c1[2], c2[2]):
+                    kk = nearest_level(cfg, zz)
                     if kk >= 1:
                         out[kk] = out.get(kk, 0.0) + 0.5 * W
     except Exception:
         return {}
+    return out
+
+
+CRANE_W_ASSUMPTION = ("IS 1893 7.3.2: weights of equipment and other permanently fixed facilities are included -- crane "
+                      "bridge + crab weight 100 % at the diaphragm level nearest the rail; the lifted (hook) load is "
+                      "suspended and not a permanent mass, so it is excluded (EOR to confirm)")
+
+
+def point_weights_by_level(cfg, info=None):
+    """H16: declared point weights (N) per diaphragm level, binned by z on the live model:
+      * cfg['nodal_masses'] = [{node | ijk: (i, j, k), mass_kN (seismic WEIGHT, kN), note}]
+      * cfg['nodal_dead_loads'] = [{node, Fz_N (down < 0), ...}] -- permanent loads are full dead load in W (7.3.1),
+        unless the same node is listed in nodal_masses (that entry governs)
+      * crane bridge + crab (cfg['crane'] bridge_kN, crab_kN; include_in_W default True) -- CRANE_W_ASSUMPTION.
+    Returns {k: {"nodal_masses": N, "nodal_dead": N, "crane": N}}."""
+    out = {}
+
+    def _lev(node):
+        try:
+            return nearest_level(cfg, ops.nodeCoord(int(node))[2])
+        except Exception:
+            return int(node) // 100000
+
+    def _add(k, key, W):
+        if k is None or k < 1 or not W:
+            return
+        d = out.setdefault(k, {})
+        d[key] = d.get(key, 0.0) + W
+    nm_nodes = set()
+    for e in (cfg.get("nodal_masses") or []):
+        node, ijk = e.get("node"), e.get("ijk")
+        if isinstance(node, (list, tuple)):
+            node, ijk = None, tuple(node)
+        if node is None and ijk is None:
+            continue
+        if node is None:
+            node, k = ntag(*[int(x) for x in ijk]), int(ijk[2])
+        else:
+            node = int(node); k = _lev(node)
+        nm_nodes.add(node)
+        _add(k, "nodal_masses", abs(float(e.get("mass_kN") or 0.0)) * 1000.0)
+    for e in (cfg.get("nodal_dead_loads") or []):
+        try:
+            node = int(e["node"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if node in nm_nodes:
+            continue
+        Fz = float(e.get("Fz_N") or 0.0)
+        if Fz < 0:
+            _add(_lev(node), "nodal_dead", -Fz)
+    crs = cfg.get("cranes") if isinstance(cfg.get("cranes"), list) else ([cfg["crane"]] if isinstance(cfg.get("crane"), dict) else [])
+    for cr in crs:
+        if not isinstance(cr, dict) or cr.get("include_in_W") is False:
+            continue
+        Wc = (float(cr.get("bridge_kN") or 0.0) + float(cr.get("crab_kN") or 0.0)) * 1000.0
+        if Wc <= 0:
+            continue
+        if cr.get("rail_height_mm") is not None:
+            k = nearest_level(cfg, float(cr["rail_height_mm"]))
+        else:
+            bn = (cr.get("bracket_nodes") or {})
+            n0 = bn.get("L") if isinstance(bn, dict) else None
+            k = _lev(n0) if n0 is not None else None
+        _add(k, "crane", Wc)
     return out
 
 
@@ -543,23 +767,38 @@ def _table10_fraction(p):
     return 0.25 if float(p or 0.0) <= 3.0 else 0.50
 
 
+def partition_seismic_kNm2(cfg):
+    """(value, basis) of the partition weight in W (IS 1893 7.3.6).  H22 / ruling R1: default = max(0.5, IS 875-2
+    3.1.2 partition allowance cfg['partition_load_kNm2']); a declared cfg['partition_seismic_kNm2'] is used as is
+    (preflight WARNs when it is below the allowance; below 0.5 raises)."""
+    if not cfg.get("partitions", True):
+        return 0.0, "cfg['partitions'] False"
+    pp = cfg.get("partition_seismic_kNm2")
+    if pp is not None:
+        return float(pp), "declared partition_seismic_kNm2"
+    pa = float(cfg.get("partition_load_kNm2") or 0.0)
+    return max(0.5, pa), ("max(0.5, partition_load_kNm2 %.2f) -- IS 1893 7.3.6: 'In case the minimum values of "
+                          "seismic weights corresponding to partitions given in parts of IS 875 are higher, the higher "
+                          "values shall be used' (ruling R1)" % pa)
+
+
 def seismic_weight_components(cfg, k):
     """IS 1893 7.3/7.4 seismic weight of level k (N) -- the SAME W the design uses (WP1.6):
-    full DL + cladding + member self-weight + partitions (7.3.6, >= 0.5 kN/m2 on floors) +
-    Table 10 share of the floor imposed load (roof imposed load excluded, 7.3.2) + 20 % of snow
-    when snow > 1.5 kN/m2 (7.3.5) + declared extra mass."""
-    NF = len(cfg["heights"]); roof = (k == NF)
+    full DL + cladding + member self-weight + partitions (7.3.6, >= 0.5 kN/m2 on floors; default
+    max(0.5, partition allowance), R1) + Table 10 share of the floor imposed load (roof imposed load excluded,
+    7.3.2; roof levels = roof_levels(cfg), H50) + 20 % of snow when snow > 1.5 kN/m2 (7.3.5) + declared extra
+    mass + point weights (nodal_masses, nodal_dead_loads, crane bridge + crab; H16).  Cladding on the building
+    envelope perimeter (envelope_nodes, H16)."""
+    NF = len(cfg["heights"]); roof = (k in roof_levels(cfg))
     area = floor_area_mm2(cfg, k)
     d = _Dlev(cfg, k, roof)
-    th = cfg["heights"][k-1]; th = th if not roof else th / 2.0
+    th = cfg["heights"][k-1]; th = th if k != NF else th / 2.0
     comp = {"dead": d * area / 1000.0,
-            "cladding": float(cfg.get("clad") or 0.0) * perim_mm(cfg, k) * th / 1000.0}
+            "cladding": float(cfg.get("clad") or 0.0) * envelope_perim_mm(cfg, k) * th / 1000.0}
     sw = (cfg.get("_sw_by_level") or {})
     comp["self_weight"] = float(sw.get(k, sw.get(str(k), 0.0)) or 0.0) if cfg.get("self_weight", True) else 0.0
     if not roof:
-        pp = cfg.get("partition_seismic_kNm2")
-        if pp is None:
-            pp = 0.5 if cfg.get("partitions", True) else 0.0
+        pp, _ = partition_seismic_kNm2(cfg)
         if cfg.get("partitions", True) and pp < 0.5:
             raise ValueError("IS 1893 7.3.6: partition weight in W shall not be less than 0.5 kN/m2 (got %g)" % pp)
         comp["partitions"] = float(pp) * area / 1000.0
@@ -571,6 +810,10 @@ def seismic_weight_components(cfg, k):
     extra = (cfg.get("extra_mass_floors") or {}).get(k, 0.0)
     if extra:
         comp["extra"] = float(extra) * area / 1000.0
+    pw = (cfg.get("_pw_by_level") or {})
+    for key, v in (pw.get(k) or pw.get(str(k)) or {}).items():
+        if v:
+            comp[key] = float(v)
     return comp
 
 
@@ -593,7 +836,8 @@ def floor_dead(cfg,k):
     NF=len(cfg["heights"]); roof=(k==NF)
     if _UNIT_SYSTEM == "N-mm":
         c = seismic_weight_components(cfg, k)
-        return c["dead"] + c["cladding"] + c["self_weight"] + c.get("extra", 0.0)
+        return (c["dead"] + c["cladding"] + c["self_weight"] + c.get("extra", 0.0)
+                + c.get("nodal_masses", 0.0) + c.get("nodal_dead", 0.0))
     d=_Dlev(cfg,k,roof)
     w=d*floor_area_ft2(cfg,k)/1000.0
     th=cfg["heights"][k-1]/12.0; th=th if not roof else th/2
@@ -646,7 +890,9 @@ def _model_key(cfg):
            cfg.get("clad"), cfg.get("L_floor"), cfg.get("Lr"), cfg.get("snow"),
            bool(cfg.get("storage")), tuple(cfg.get("storage_levels") or ()),   # 12.7.2 storage live in W
            tuple(sorted((cfg.get("extra_mass_floors") or {}).items())),
-           tuple(sorted((cfg.get("seis") or {}).items())))
+           tuple(sorted((cfg.get("seis") or {}).items())),
+           repr([cfg.get(k_) for k_ in ("Jm_by_level", "nodal_masses", "partition_load_kNm2",       # H04/H16/H22/H50
+                                        "partition_seismic_kNm2", "roof_levels", "crane", "envelope")]))
     return hashlib.md5(repr(sig).encode()).hexdigest()
 
 def modal(cfg, nm):
@@ -663,11 +909,7 @@ def _modal_impl(cfg,nm):
     info=build(cfg,"Linear"); NF=info["NF"]
     nm_req=min(nm,3*NF)
     masses={k:floor_w(cfg,k)/g for k in range(1,NF+1)}
-    Jm={}
-    for k in range(1,NF+1):
-        pts=info["present"][k]; SX,SY=cfg["SX"],cfg["SY"]
-        xs=[i*SX for i,j in pts]; ys=[j*SY for i,j in pts]
-        Bx=max(xs)-min(xs)+SX; By=max(ys)-min(ys)+SY; Jm[k]=masses[k]*(Bx**2+By**2)/12.0
+    Jm={k:floor_plan_inertia(cfg,k,masses[k],info["present"][k],info)[0] for k in range(1,NF+1)}   # H04
     Mtot=sum(masses.values()); maxmodes=max(1,3*NF)
     # Regularize the (singular) mass matrix: the rigid diaphragm leaves mass only on the floor masters,
     # so most DOF are massless and -genBandArpack fails to converge beyond ~6 modes -- silently falling
@@ -872,6 +1114,17 @@ def india_seismic_params(cfg):
     if miss:
         raise ValueError("IS 1893 seismic parameters missing: %s (seismic_summary / cfg['seis'])" % miss)
     out["Z"], out["I"], out["R"] = float(out["Z"]), float(out["I"]), float(out["R"])
+    # H06: per-direction R (cfg R_x / R_y validated against Table 9 per direction); default = R for both
+    out["R_x"] = out["R_y"] = out["R"]
+    try:
+        import india_seismic_gates as _G
+        sr = _G.resolve_system_R(cfg)
+        for d in ("x", "y"):
+            if sr.get("R_%s_declared" % d) is not None and sr.get("R_" + d) is not None:
+                out["R_" + d] = float(sr["R_" + d])
+                out["R_%s_basis" % d] = sr.get("R_%s_basis" % d)
+    except Exception:
+        pass
     return out
 
 
@@ -880,12 +1133,10 @@ def modal_props(cfg):
     (ux, uy, rz), floor masses (tonne) and mass moments of inertia.  All 3*NF diaphragm modes."""
     info = build(cfg, "Linear"); NF = info["NF"]
     masses = {k: floor_w(cfg, k) / g for k in range(1, NF + 1)}
-    Jm = {}
+    Jm, Jb = {}, {}
     for k in range(1, NF + 1):
-        pts = info["present"][k]
-        xs = [_xy_in(cfg, i, j)[0] for i, j in pts]; ys = [_xy_in(cfg, i, j)[1] for i, j in pts]
-        Bx = max(xs) - min(xs) + cfg["SX"]; By = max(ys) - min(ys) + cfg["SY"]
-        Jm[k] = masses[k] * (Bx ** 2 + By ** 2) / 12.0
+        # H04: one helper (true plan extent); a builder-declared info['Jm'] or cfg['Jm_by_level'] is kept
+        Jm[k], Jb[k] = floor_plan_inertia(cfg, k, masses[k], info["present"][k], info)
     tm = 1e-8 * min(masses.values())
     for t in ops.getNodeTags():
         ops.mass(t, tm, tm, tm, tm, tm, tm)
@@ -909,7 +1160,7 @@ def modal_props(cfg):
         modes.append({"mode": n + 1, "T": T[n], "mass_x": Lx * Lx / Mn / Mt, "mass_y": Ly * Ly / Mn / Mt,
                       "rot": sum(Jm[k] * ph[k][2] ** 2 for k in ph) / Mn})
     return {"w2": list(w2), "T": T, "phi": phi, "modes": modes,
-            "m": masses, "J": Jm, "Mtot": Mt, "NF": NF, "cm": info.get("cm") or {}}
+            "m": masses, "J": Jm, "J_basis": Jb, "Mtot": Mt, "NF": NF, "cm": info.get("cm") or {}}
 
 
 def india_story_forces(cfg, direction, kind="EQ"):
@@ -926,21 +1177,79 @@ def india_story_forces(cfg, direction, kind="EQ"):
             for k, v in dict(raw).items()}
 
 
-def VBbar(cfg, direction):
-    """V-bar_B (N): design base shear from the approximate period Ta (7.7.3) -- the ESM VB of the
-    load_plan in that direction (VB_x_kN / VB_y_kN / VB_kN), cross-checked against the story forces."""
+def _agent_VBbar(cfg, direction):
+    """The agent's V-bar_B (N) in a direction: seismic_summary VB_x_kN / VB_y_kN / VB_kN, else the EQ story
+    forces sum.  None when neither is declared."""
     ss = ((cfg.get("load_plan") or {}).get("seismic_summary") or {})
     v = ss.get("VB_%s_kN" % direction.lower(), ss.get("VB_kN"))
     if v is not None:
-        return float(v) * 1000.0
+        return float(v) * 1000.0, ("seismic_summary.VB_%s_kN" % direction.lower()
+                                   if ss.get("VB_%s_kN" % direction.lower()) is not None else "seismic_summary.VB_kN")
     Fx = india_story_forces(cfg, direction)
     if Fx:
-        return abs(sum(f[0] if direction == "X" else f[1] for f in Fx.values()))
-    raise ValueError("V-bar_B for %s unavailable (seismic_summary.VB_kN or story_forces.EQ_%s)" % (direction, direction))
+        return abs(sum(f[0] if direction == "X" else f[1] for f in Fx.values())), "story_forces.EQ_" + direction
+    return None, None
+
+
+def VBbar_record(cfg, direction):
+    """H02: V-bar_B (N) per direction, computed by the engine and compared with the agent's value.
+
+    Engine value: IS 1893 7.6.1 VB = Ah W with Ah = max((Z/2)(I/R_d)(Sa/g)(Ta_d), rho_min Table 7) -- 6.4.2(a)
+    ESM spectrum at the approximate period Ta_d of 7.6.2 (seismic_summary Ta_x_s / Ta_y_s, else Ta_s / Ta), R_d
+    the direction's R (H06) and W = the larger of the engine seismic weight and the declared W_kN (7.4).
+    used_N = max(engine, agent) -- 7.7.3 V-bar_B is never below the code value."""
+    import india_seismic as IS
+    d = direction.upper()
+    ss = ((cfg.get("load_plan") or {}).get("seismic_summary") or {})
+    agent, agent_src = _agent_VBbar(cfg, d)
+    rec = {"direction": d, "agent_N": agent, "agent_source": agent_src, "engine_N": None,
+           "clause": "IS 1893 (Part 1):2016 6.4.2, 7.2.2 (Table 7), 7.6.1, 7.6.2, 7.7.3"}
+    try:
+        prm = india_seismic_params(cfg)
+        Ta = ss.get("Ta_%s_s" % d.lower())
+        if Ta is None:
+            Ta = ss.get("Ta_s", ss.get("Ta"))
+        if Ta is None:
+            raise ValueError("Ta_%s_s / Ta_s not declared" % d.lower())
+        Ta = float(Ta)
+        NF = len(cfg["heights"])
+        We = sum(floor_w(cfg, k) for k in range(1, NF + 1))
+        Wd = float(ss["W_kN"]) * 1000.0 if ss.get("W_kN") is not None else 0.0
+        W = max(We, Wd)
+        R = float(prm["R_" + d.lower()])
+        sa = IS.sa_over_g(Ta, prm["soil"], "ESM")
+        try:
+            import india_seismic_gates as _G
+            zone = _G.zone_of(cfg)
+        except Exception:
+            zone = prm.get("zone")
+        rho = IS.TABLE7_RHO.get(str(zone or "").upper().replace("ZONE", "").strip()) or 0.0
+        Ah = max((prm["Z"] / 2.0) * (prm["I"] / R) * sa, rho)
+        rec.update(engine_N=Ah * W, Ta_s=Ta, R=R, Z=prm["Z"], I=prm["I"], soil=prm["soil"], Sa_g=sa, Ah=Ah,
+                   rho_min=rho, W_engine_N=We, W_declared_N=Wd or None, W_used_N=W)
+    except Exception as ex:
+        rec["engine_error"] = "%s: %s" % (type(ex).__name__, ex)
+    vals = [v for v in (rec["engine_N"], agent) if v is not None]
+    if not vals:
+        raise ValueError("V-bar_B for %s unavailable (seismic_summary.VB_kN or story_forces.EQ_%s; engine: %s)"
+                         % (d, d, rec.get("engine_error")))
+    rec["used_N"] = max(vals)
+    rec["basis"] = ("engine" if rec["engine_N"] is not None and (agent is None or rec["engine_N"] > agent)
+                    else "agent")
+    if rec["engine_N"] and agent is not None:
+        rec["agent_shortfall"] = 1.0 - agent / rec["engine_N"]
+    return rec
+
+
+def VBbar(cfg, direction):
+    """V-bar_B (N): design base shear from the approximate period Ta (7.7.3) -- the larger of the engine's
+    IS 1893 7.6.1 value in that direction and the agent's load_plan value (H02, see VBbar_record)."""
+    return VBbar_record(cfg, direction)["used_N"]
 
 
 def seismic_weights(cfg):
     """IS 1893 7.4 seismic weight per floor (N) from the model (self-weight included) + components."""
+    ensure_units(cfg)                                  # H42
     build(cfg, "Linear")
     NF = len(cfg["heights"])
     comps = {k: seismic_weight_components(cfg, k) for k in range(1, NF + 1)}
@@ -950,9 +1259,11 @@ def seismic_weights(cfg):
 def esm_from_model(cfg, Ta, soil=None):
     """Convenience: india_seismic.esm_summary with the engine seismic weights."""
     import india_seismic as IS
+    ensure_units(cfg)                                  # H42
     prm = india_seismic_params(dict(cfg, seis=dict(cfg.get("seis") or {}, soil=soil or (cfg.get("seis") or {}).get("soil"))))
     W, comps = seismic_weights(cfg)
-    r = IS.esm_summary(W, cfg["heights"], prm["Z"], prm["I"], prm["R"], prm["soil"], prm.get("zone"), Ta)
+    r = IS.esm_summary(W, cfg["heights"], prm["Z"], prm["I"], {"X": prm["R_x"], "Y": prm["R_y"]}, prm["soil"],
+                       prm.get("zone"), Ta)
     r["seismic_summary"]["W_components_kN"] = {k: {n: round(v / 1000.0, 2) for n, v in c.items()} for k, c in comps.items()}
     return r
 
@@ -988,7 +1299,10 @@ def rsa_analysis(cfg, nseg=6, zeta=0.05):
         Mn.append(M)
         Gam["X"].append(sum(m[k] * ph[k][0] for k in ph) / M)
         Gam["Y"].append(sum(m[k] * ph[k][1] for k in ph) / M)
-    A = [IS.design_Ah(prm["Z"], prm["I"], prm["R"], T, prm["soil"], "RSA") for T in mp["T"]]
+    # H06: Ak per direction with that direction's R (R_x / R_y; = R when not declared)
+    Ad = {d: [IS.design_Ah(prm["Z"], prm["I"], prm["R_" + d.lower()], T, prm["soil"], "RSA") for T in mp["T"]]
+          for d in ("X", "Y")}
+    A = Ad["X"]
     w = [math.sqrt(max(x, 1e-12)) for x in mp["w2"]]
     rho = np.array([[IS.cqc_rho(w[i], w[j], zeta) for j in range(nm)] for i in range(nm)])
     # unit modal load patterns on the linear static model, one solve per mode
@@ -1014,10 +1328,10 @@ def rsa_analysis(cfg, nseg=6, zeta=0.05):
         mx = Gam["X"][n] ** 2 * Mn[n] / mp["Mtot"]; my = Gam["Y"][n] ** 2 * Mn[n] / mp["Mtot"]
         ph = mp["phi"][n]
         out["modes"].append({"mode": n + 1, "T": mp["T"][n], "Sa_g": IS.sa_over_g(mp["T"][n], prm["soil"], "RSA"),
-                             "Ak": A[n], "mass_x": mx, "mass_y": my,
+                             "Ak": A[n], "Ak_x": Ad["X"][n], "Ak_y": Ad["Y"][n], "mass_x": mx, "mass_y": my,
                              "rot": sum(J[k] * ph[k][2] ** 2 for k in ph) / Mn[n]})
     for d in ("X", "Y"):
-        coef = np.array([Gam[d][n] * A[n] for n in range(nm)])
+        coef = np.array([Gam[d][n] * Ad[d][n] for n in range(nm)])
         # modal base shear (N): coef * g * sum(m phi_d)
         Vn = np.array([coef[n] * g * sum(m[k] * mp["phi"][n][k][0 if d == "X" else 1] for k in m) for n in range(nm)])
         VB = float(math.sqrt(max(Vn @ rho @ Vn, 0.0)))
@@ -1027,7 +1341,8 @@ def rsa_analysis(cfg, nseg=6, zeta=0.05):
             vk = np.array([coef[n] * g * sum(m[j] * mp["phi"][n][j][0 if d == "X" else 1] for j in range(k, NF + 1))
                            for n in range(nm)])
             Vst.append(float(math.sqrt(max(vk @ rho @ vk, 0.0))))
-        Vbar = VBbar(cfg, d)
+        _vrec = VBbar_record(cfg, d)
+        Vbar = _vrec["used_N"]
         scale = max(1.0, Vbar / VB) if VB > 0 else 1.0
         E_ = {}
         for t in tags:
@@ -1039,9 +1354,9 @@ def rsa_analysis(cfg, nseg=6, zeta=0.05):
         for k in range(1, NF + 1):
             un = np.array([coef[n] * g / mp["w2"][n] * mp["phi"][n][k][0 if d == "X" else 1] for n in range(nm)])
             disp.append(float(math.sqrt(max(un @ rho @ un, 0.0))))
-        out[d] = {"VB_rsa_N": VB, "VBbar_N": Vbar, "scale": scale, "VB_scaled_N": VB * scale,
+        out[d] = {"VB_rsa_N": VB, "VBbar_N": Vbar, "scale": scale, "VB_scaled_N": VB * scale, "R": prm["R_" + d.lower()],
                   "mass_participation": cum, "storey_shear_N": Vst, "storey_shear_scaled_N": [v * scale for v in Vst],
-                  "disp_cm_mm_unscaled": disp,
+                  "disp_cm_mm_unscaled": disp, "VBbar_record": _vrec,
                   "cite": "IS 1893 7.7.3.1 (Amd 2): force responses x V-bar_B/VB when VB < V-bar_B; "
                           "7.7.3.2 displacements not scaled"}
         out["elements"][d] = E_
@@ -1064,9 +1379,10 @@ def _apply_nodal_gravity(cfg, info, fD=1.0, fL=1.0):
 def india_drift(cfg, eccentricity=None, gravity=(1.0, 1.0)):
     """IS 1893 7.11.1.1 storey drift under VB with gamma = 1.0, measured at EVERY column line
     (extreme edges govern) including the 7.8.2 design eccentricity (both variants), P-Delta with
-    1.0 DL + 1.0 LL.  Also returns Delta_max / Delta_ave per level from the total displacements at
-    the two extreme plan edges (Table 5(i) as substituted by Amd 2) and the CM storey drifts /
-    storey shears used for the Table 6(i) stiffness screen.  One drift function for India."""
+    1.0 DL + 1.0 LL, for +F and -F (the worse governs, H03).  Also returns Delta_max / Delta_ave per
+    level from the LATERAL displacements only (gravity state subtracted) at the two extreme plan edges
+    (Table 5(i) as substituted by Amd 2) and the CM storey drifts / storey shears used for the Table 6(i)
+    stiffness screen.  One drift function for India."""
     import india_combos as IC
     import india_loads as IL
     plan = cfg.get("load_plan") or {}
@@ -1081,55 +1397,81 @@ def india_drift(cfg, eccentricity=None, gravity=(1.0, 1.0)):
             continue
         tor = IC.torsion_moments(plan, cfg, d, eccentricity)
         best = None
+        base = None
+        ratio_all = None
+        di = 0 if d == "X" else 1
+        grav_on = any(float(x or 0.0) for x in gravity)
         for v in ("a", "b", None):
-            info = build(cfg, "PDelta"); NF = info["NF"]
-            ops.timeSeries("Linear", 1); ops.pattern("Plain", 1, 1)
-            _apply_nodal_gravity(cfg, info, *gravity)
-            for k in range(1, NF + 1):
-                fx, fy, mz = F.get(k, (0.0, 0.0, 0.0))
-                if v:
-                    mz += float((tor.get(v) or {}).get(k, 0.0)) * sc
-                ops.load(mtag(k), fx, fy, 0.0, 0.0, 0.0, mz)
-            ops.constraints("Transformation"); ops.numberer("RCM"); ops.system("UmfPack")
-            ops.test("NormDispIncr", 1e-7, 200); ops.algorithm("Newton")
-            ops.integrator("LoadControl", 1.0); ops.analysis("Static")
-            if ops.analyze(1) != 0:
-                raise RuntimeError("drift analysis (%s, variant %s) did not converge" % (d, v))
-            di = 0 if d == "X" else 1
-            disp = {}
-            for k in range(0, NF + 1):
-                for (i, j) in info["present"][k]:
-                    disp[(i, j, k)] = ops.nodeDisp(ntag(i, j, k), di + 1)
-            drift, drift_cm, ratio, dmax_lvl = [], [], [], []
-            for k in range(1, NF + 1):
-                h = cfg["heights"][k - 1]
-                lines = [(i, j) for (i, j) in info["present"][k] if (i, j) in info["present"][k - 1]]
-                dr = [abs(disp[(i, j, k)] - disp.get((i, j, k - 1), 0.0)) / h for (i, j) in lines] or [0.0]
-                drift.append(max(dr) if k not in dex else 0.0)
-                um = ops.nodeDisp(mtag(k), di + 1)
-                um0 = ops.nodeDisp(mtag(k - 1), di + 1) if k > 1 else 0.0
-                drift_cm.append(abs(um - um0) / h)
-                # extreme edges perpendicular to the force
-                pts = info["present"][k]
-                crd = {(i, j): _xy_in(cfg, i, j) for (i, j) in pts}
-                ax = 1 if d == "X" else 0
-                lo = min(c[ax] for c in crd.values()); hi = max(c[ax] for c in crd.values())
-                e1 = [abs(disp[(i, j, k)]) for (i, j), c in crd.items() if abs(c[ax] - lo) < 1e-6]
-                e2 = [abs(disp[(i, j, k)]) for (i, j), c in crd.items() if abs(c[ax] - hi) < 1e-6]
-                D1, D2 = max(e1), max(e2)
-                Dmx, Dmn = max(D1, D2), min(D1, D2)
-                ratio.append(Dmx / ((Dmx + Dmn) / 2.0) if Dmx > 0 else 1.0)
-                dmax_lvl.append(Dmx)
-            Vst = [sum((F.get(j, (0, 0, 0))[di]) for j in range(k, NF + 1)) for k in range(1, NF + 1)]
-            rec = {"variant": v, "drift": drift, "drift_cm": drift_cm, "ratio": ratio, "disp_max": dmax_lvl,
-                   "storey_shear_N": Vst, "heights": list(cfg["heights"])}
-            if v is None:
-                base = rec
-                continue
-            if best is None or max(drift) > max(best["drift"]):
-                best = rec
+            for sgn in (1.0, -1.0):
+                # H03: gravity state first (P-Delta, 1.0 DL + 1.0 LL), held constant; then the lateral forces +F / -F.
+                # Drift is checked on the total (gravity + lateral) displacements for both signs (the worse is kept);
+                # the Table 5(i) ratio uses the lateral displacements only, Delta(G+E) - Delta(G).
+                info = build(cfg, "PDelta"); NF = info["NF"]
+                ops.constraints("Transformation"); ops.numberer("RCM"); ops.system("UmfPack")
+                ops.test("NormDispIncr", 1e-7, 200); ops.algorithm("Newton")
+                ops.integrator("LoadControl", 1.0); ops.analysis("Static")
+                dg = {}
+                if grav_on:
+                    ops.timeSeries("Linear", 1); ops.pattern("Plain", 1, 1)
+                    _apply_nodal_gravity(cfg, info, *gravity)
+                    if ops.analyze(1) != 0:
+                        raise RuntimeError("drift gravity state (%s, variant %s) did not converge" % (d, v))
+                    for k in range(0, NF + 1):
+                        for (i, j) in info["present"][k]:
+                            dg[(i, j, k)] = ops.nodeDisp(ntag(i, j, k), di + 1)
+                    ug = {k: ops.nodeDisp(mtag(k), di + 1) for k in range(1, NF + 1)}
+                    ops.loadConst("-time", 0.0)
+                else:
+                    ug = {}
+                ops.timeSeries("Linear", 2); ops.pattern("Plain", 2, 2)
+                for k in range(1, NF + 1):
+                    fx, fy, mz = F.get(k, (0.0, 0.0, 0.0))
+                    if v:
+                        mz += float((tor.get(v) or {}).get(k, 0.0)) * sc
+                    ops.load(mtag(k), sgn * fx, sgn * fy, 0.0, 0.0, 0.0, sgn * mz)
+                if ops.analyze(1) != 0:
+                    raise RuntimeError("drift analysis (%s, variant %s, sign %+d) did not converge" % (d, v, sgn))
+                disp = {}
+                for k in range(0, NF + 1):
+                    for (i, j) in info["present"][k]:
+                        disp[(i, j, k)] = ops.nodeDisp(ntag(i, j, k), di + 1)
+                lat = {key: u - dg.get(key, 0.0) for key, u in disp.items()}
+                drift, drift_cm, ratio, dmax_lvl = [], [], [], []
+                for k in range(1, NF + 1):
+                    h = cfg["heights"][k - 1]
+                    lines = [(i, j) for (i, j) in info["present"][k] if (i, j) in info["present"][k - 1]]
+                    dr = [abs(disp[(i, j, k)] - disp.get((i, j, k - 1), 0.0)) / h for (i, j) in lines] or [0.0]
+                    drift.append(max(dr) if k not in dex else 0.0)
+                    um = ops.nodeDisp(mtag(k), di + 1)
+                    um0 = ops.nodeDisp(mtag(k - 1), di + 1) if k > 1 else 0.0
+                    drift_cm.append(abs(um - um0) / h)
+                    # extreme edges perpendicular to the force -- lateral displacement only
+                    pts = info["present"][k]
+                    crd = {(i, j): _xy_in(cfg, i, j) for (i, j) in pts}
+                    ax = 1 if d == "X" else 0
+                    lo = min(c[ax] for c in crd.values()); hi = max(c[ax] for c in crd.values())
+                    e1 = [abs(lat[(i, j, k)]) for (i, j), c in crd.items() if abs(c[ax] - lo) < 1e-6]
+                    e2 = [abs(lat[(i, j, k)]) for (i, j), c in crd.items() if abs(c[ax] - hi) < 1e-6]
+                    D1, D2 = max(e1), max(e2)
+                    Dmx, Dmn = max(D1, D2), min(D1, D2)
+                    ratio.append(Dmx / ((Dmx + Dmn) / 2.0) if Dmx > 0 else 1.0)
+                    dmax_lvl.append(Dmx)
+                Vst = [sum((F.get(j, (0, 0, 0))[di]) for j in range(k, NF + 1)) for k in range(1, NF + 1)]
+                rec = {"variant": v, "sign": "+F" if sgn > 0 else "-F", "drift": drift, "drift_cm": drift_cm,
+                       "ratio": ratio, "disp_max": dmax_lvl, "storey_shear_N": Vst, "heights": list(cfg["heights"])}
+                ratio_all = ratio if ratio_all is None else [max(a, b) for a, b in zip(ratio_all, ratio)]
+                if v is None:
+                    if base is None or max(drift) > max(base["drift"]):
+                        base = rec
+                    continue
+                if best is None or max(drift) > max(best["drift"]):
+                    best = rec
         best = best or base
-        best["ratio"] = [max(a, b) for a, b in zip(best["ratio"], base["ratio"])]
+        best["ratio"] = ratio_all
+        best["ratio_basis"] = ("IS 1893 Table 5(i) (Amd 2): Delta_max / Delta_ave at the extreme edges from the lateral "
+                               "displacements only (Delta(G+E) - Delta(G)), worst of +F / -F and the 7.8.2 variants")
+        best["drift_basis"] = ("IS 1893 7.11.1.1: total displacement (1.0 DL + 1.0 LL P-Delta gravity state + design "
+                               "lateral force), worse of +F and -F")
         best["drift_cm_no_torsion"] = base["drift_cm"]
         # Table 6(i) (Amd 2) storey lateral stiffness = storey shear / inter-storey drift under the design
         # lateral-force distribution.  Stiffness is a property of the structure, so it is taken from a FIRST-ORDER
@@ -1221,10 +1563,72 @@ def india_wind_serviceability(cfg):
     return out
 
 
+def crane_sway_model(cfg, cr=None):
+    """H48: ('building' | 'single_frame', basis).  cfg['crane']['sway_model'] when declared; otherwise single_frame
+    unless the roof is a rigid diaphragm (cfg['diaphragm'] == 'rigid') AND roof plan bracing is declared
+    (cfg['roof_bracing'] truthy) -- only then does the surge share out to the other frames through the roof."""
+    cr = cr if cr is not None else (cfg.get("crane") if isinstance(cfg.get("crane"), dict) else {})
+    sm = str((cr or {}).get("sway_model") or "").strip().lower()
+    if sm in ("building", "single_frame"):
+        return sm, "declared cfg['crane']['sway_model']"
+    if sm:
+        raise ValueError("cfg['crane']['sway_model'] must be 'building' or 'single_frame' (got %r)" % sm)
+    rigid = str(cfg.get("diaphragm", "rigid")).lower() == "rigid"
+    if rigid and cfg.get("roof_bracing"):
+        return "building", "default: rigid diaphragm with declared roof bracing -> surge shared by the building"
+    return "single_frame", ("default: %s -> surge on the loaded bracket frame alone"
+                            % ("no roof bracing declared (cfg['roof_bracing'])" if rigid else
+                               "diaphragm %r (not rigid)" % cfg.get("diaphragm")))
+
+
+def _single_frame_model(cfg, cr, ax):
+    """H48: rebuild the plane frame containing the two bracket nodes on its own (fresh OpenSees domain): the
+    building's elements whose both ends lie in that vertical plane, the original supports, out-of-plane
+    translation and the two out-of-plane rotations restrained (2-D frame), no diaphragm."""
+    info = build(cfg, "Linear")
+    bn = cr["bracket_nodes"]; nL, nR = int(bn["L"]), int(bn["R"])
+    oa = 1 - ax                                    # out-of-plane horizontal axis index
+    c0 = ops.nodeCoord(nL)[oa]
+    if abs(ops.nodeCoord(nR)[oa] - c0) > 1.0:
+        raise ValueError("crane bracket nodes L/R are not in one frame plane (single_frame sway model)")
+    on = lambda n: abs(ops.nodeCoord(n)[oa] - c0) <= 1.0
+    eles = [e for e in info["ele"] if on(e[3]) and on(e[4])]
+    nodes = {n for e in eles for n in e[3:5]} | {nL, nR}
+    crd = {n: ops.nodeCoord(n) for n in nodes}
+    fixd = {}
+    for n in nodes:
+        try:
+            fixd[n] = set(ops.getFixedDOFs(n))
+        except Exception:
+            fixd[n] = set()
+    flex = {n for e in eles if e[1] != "brace" for n in e[3:5]}
+    col_dir = dict(info.get("col_dir") or {}); rel = dict(info.get("beam_rel") or {})
+    saved = (set(_MOMENT_NODES), dict(_BEAM_REL), dict(_COL_DIR))
+    ops.wipe(); ops.model("basic", "-ndm", 3, "-ndf", 6)
+    for n, c in crd.items():
+        ops.node(n, *c)
+    op = {2, 4, 6} if ax == 0 else {1, 5, 6}
+    for n in nodes:
+        want = fixd[n] | op | ({4, 5, 6} if n not in flex else set())
+        ops.fix(n, *[1 if d in want else 0 for d in range(1, 7)])
+    ops.uniaxialMaterial("Elastic", 1, E)
+    for (t, kind, sec, n1, n2) in eles:
+        if kind == "col":
+            add_column(t, n1, n2, sec, col_dir.get(t, "X" if ax == 0 else "Y"))
+        elif kind == "brace":
+            ops.element("Truss", t, n1, n2, Ipack(sec)[0], 1)
+        else:
+            add_beam(t, n1, n2, sec, releases=rel.get(t))
+    _MOMENT_NODES.clear(); _MOMENT_NODES.update(saved[0])
+    _BEAM_REL.clear(); _BEAM_REL.update(saved[1]); _COL_DIR.clear(); _COL_DIR.update(saved[2])
+    return {"ele": eles, "nodes": sorted(nodes)}
+
+
 def india_crane_sway(cfg):
     """IS 800 Table 6 crane frame sway at rail level under the crane surge (gamma_f = 1.0):
     H/200 (pendant-operated, elastic cladding) or H/400 (cab-operated, brittle), H = rail height.
-    Returns None when the job has no crane."""
+    H48: sway on the whole building (surge shared through a rigid, plan-braced roof) or on the loaded bracket
+    frame alone (crane_sway_model).  Returns None when the job has no crane."""
     if not (cfg.get("crane") or cfg.get("cranes")):
         return None
     import india_loads as IL
@@ -1235,9 +1639,13 @@ def india_crane_sway(cfg):
     div = IL.IS800_TABLE6["frame_crane_cab_brittle" if op == "cab" else "frame_crane_pendant_elastic"]
     Hr = float(cr["rail_height_mm"])
     ax = 0 if str(cr["span_axis"]).upper() == "X" else 1
+    model, basis = crane_sway_model(cfg, cr)
     worst = 0.0
     for side in ("L", "R"):
-        info = build(cfg, "Linear")
+        if model == "single_frame":
+            _single_frame_model(cfg, cr, ax)
+        else:
+            build(cfg, "Linear")
         ops.timeSeries("Linear", 1); ops.pattern("Plain", 1, 1)
         for nd, v in IL.crane_frame_loads(cfg, (side, "S+")).items():
             h = [0.0] * 6; h[ax] = v[ax]
@@ -1249,8 +1657,9 @@ def india_crane_sway(cfg):
             worst = max(worst, abs(ops.nodeDisp(int(nd), ax + 1)))
     lim = Hr / div
     return {"sway_mm": worst, "limit_mm": lim, "ratio": worst / lim, "operation": op,
-            "cite": "IS 800:2007 Table 6: crane frame sway at rail level H/%d (%s), crane surge at gamma 1.0"
-                    % (div, op)}
+            "sway_model": model, "sway_model_basis": basis,
+            "cite": "IS 800:2007 Table 6: crane frame sway at rail level H/%d (%s), crane surge at gamma 1.0; %s model"
+                    % (div, op, model)}
 
 
 def india_dynamic_wind_gate(cfg, f1_hz):
@@ -1264,7 +1673,7 @@ def india_dynamic_wind_gate(cfg, f1_hz):
         return True, [], False
     H_m = float(sum(cfg["heights"])) / 1000.0
     try:
-        xs = [_xy_in(cfg, i, j) for (i, j) in grid(cfg, 1)]
+        xs = [_xy_in(cfg, i, j) for (i, j) in envelope_nodes(cfg, 1)]     # H16: building envelope, not level 1
         bx = (max(c[0] for c in xs) - min(c[0] for c in xs)) / 1000.0
         by = (max(c[1] for c in xs) - min(c[1] for c in xs)) / 1000.0
         bmin = min(v for v in (bx, by) if v > 0)
@@ -1287,10 +1696,33 @@ def india_dynamic_wind_gate(cfg, f1_hz):
                 if have < float(want) * (1 - 0.02):
                     bad.append("W_%s story forces sum %.1f kN < 10.2 gust-factor along-wind base shear %.1f kN"
                                % (d, have, float(want)))
-    if not ws.get("across_wind"):
-        bad.append("dynamic wind required (%s): the across-wind response (IS 875-3 10.3) must be declared "
-                   "in wind_summary.across_wind {method, result, cite}" % "; ".join(why))
+    aw_ok, aw_why = across_wind_evaluated(ws.get("across_wind"))
+    if not aw_ok:
+        bad.append("dynamic wind required (%s): the across-wind response (IS 875-3 10.3) is not evaluated -- %s "
+                   "(ruling R10: wind_summary.across_wind {found: true, Mc_kNm: <number>, cite} or an EOR record "
+                   "{eor: {value, source, cite}}; job stays PARTIAL until then)" % ("; ".join(why), aw_why))
     return not bad, bad, True
+
+
+def across_wind_evaluated(aw):
+    """H12 / ruling R10: the IS 875-3 10.3 across-wind record counts only when evaluated -- found is True with a
+    numeric Mc_kNm, or an EOR record {value (numeric), source, cite}.  Returns (ok, reason)."""
+    def _num(v):
+        try:
+            return v is not None and not isinstance(v, bool) and math.isfinite(float(v))
+        except (TypeError, ValueError):
+            return False
+    if not isinstance(aw, dict) or not aw:
+        return False, "wind_summary.across_wind missing"
+    if aw.get("found") is True and _num(aw.get("Mc_kNm")):
+        return True, None
+    eor = aw.get("eor") or aw.get("EOR")
+    if isinstance(eor, dict) and _num(eor.get("value")) and str(eor.get("source") or "").strip() \
+            and str(eor.get("cite") or "").strip():
+        return True, None
+    if aw.get("found") is True:
+        return False, "across_wind.found is true but Mc_kNm is not a number"
+    return False, "across_wind is not evaluated (found %r, no numeric Mc_kNm, no EOR {value, source, cite})" % aw.get("found")
 
 
 def _bays_adjacent(present_k, i, j, dirn):
@@ -1315,6 +1747,8 @@ def beam_deflection_si(cfg):
     info = build(cfg, "Linear"); NF = info["NF"]
     div, cite = IL.floor_deflection_limit(cfg)
     ds = str(cfg.get("deck_span") or "").upper()
+    import static_model as _SM
+    roofs = IL.roof_level_set(cfg, NF)                                 # H50: top level + cfg['roof_levels']
     groups = {}
     coords = {}
     for (t, kind, sec, n1, n2) in info["ele"]:
@@ -1325,21 +1759,31 @@ def beam_deflection_si(cfg):
         if L < 1e-6:
             continue
         dirn = "X" if Lx >= Ly else "Y"
-        roof = (n1 // 100000) >= NF
+        k_ = n1 // 100000
+        roof = k_ >= NF or k_ in roofs
         # tributary width by the bays actually bounding the beam (edge beam: one bay -> half the bay width;
         # interior: two half bays) -- the full-bay width on every group over-read edge-beam deflections (WP6-fix)
-        k_ = n1 // 100000
         i_, j_ = (min(n1, n2) % 100000) // 100, min(n1, n2) % 100
-        nb = _bays_adjacent(info.get("present", {}).get(k_, set()), i_, j_, dirn)
+        pk = info.get("present", {}).get(k_, set())
+        nb = _bays_adjacent(pk, i_, j_, dirn)
         other = cfg["SY"] if dirn == "X" else cfg["SX"]
         trib = 0.0 if (ds in ("X", "Y") and dirn == ds) else (nb * other / 2.0 if nb else other)
-        key = (str(sec), round(L, 0), roof, dirn)
-        if key not in groups or trib > groups[key][1]:
-            groups[key] = (L, trib, roof, sec)
-    rows = []; worst = 0.0; n = 0
-    for (L, trib, roof, sec) in groups.values():
-        pL = float(cfg.get("Lr") or 0.0) if roof else float(cfg.get("L_floor") or 0.0) + float(cfg.get("partition_load_kNm2") or 0.0)
+        if ds in ("X", "Y"):
+            tw = _SM.one_way_trib_mm(cfg, pk, i_, j_, dirn)          # H13: actual bays + secondary strips
+            if tw is not None:
+                trib = tw
+        # H11 (HR-E-08): roof imposed = max(Lr, snow) (IS 875-5 8.1 Note 1); floors: the per-level imposed load
+        # (_Llev: cfg['L_by_level'] override) + partitions
+        if roof:
+            pL = max(float(cfg.get("Lr") or 0.0), float(cfg.get("snow") or 0.0))
+        else:
+            pL = float(_Llev(cfg, k_) or 0.0) + float(cfg.get("partition_load_kNm2") or 0.0)
         w = pL * trib / 1000.0                                         # N/mm
+        key = (str(sec), round(L, 0), roof, dirn)
+        if key not in groups or w > groups[key][1]:
+            groups[key] = (L, w, roof, sec)
+    rows = []; worst = 0.0; n = 0
+    for (L, w, roof, sec) in groups.values():
         if w <= 0:
             continue
         A, Ix, Iy, J = Ipack(sec)
@@ -1491,9 +1935,8 @@ def static_lateral(cfg,Fx,direction,accidental=False):
     for k in range(1,NF+1):
         f=[0.0]*6; f[di]=Fx[k]
         if accidental:
-            pts=info["present"][k]                       # real coords (xcoords/ycoords safe)
-            xs=[_xy_in(cfg,i,j)[0] for i,j in pts]; ys=[_xy_in(cfg,i,j)[1] for i,j in pts]
-            B=(max(ys)-min(ys)+SY) if direction=="X" else (max(xs)-min(xs)+SX)
+            Bx_,By_=plan_extent(cfg,k,info["present"][k])   # H04: true plan extent (xcoords/ycoords safe)
+            B=By_ if direction=="X" else Bx_
             f[5]=Fx[k]*0.05*B
         ops.load(mtag(k),*f)
     ops.constraints("Transformation"); ops.numberer("RCM"); ops.system("UmfPack")
@@ -1676,27 +2119,92 @@ def _footprint_at(cfg,k,NX,NY):
         except Exception: pass
     return {(i,j) for i in range(NX+1) for j in range(NY+1)}
 
+TABLE5_II_TEXT = ("IS 1893 (Part 1):2016 Table 5(ii): 'A building is said to have a re-entrant corner in any plan "
+                  "direction, when its structural configuration in plan has a projection of size greater than 15 "
+                  "percent of its overall plan dimension in that direction.'")
+
+
+def reentrant_projections(cfg, fp, trigger=0.15):
+    """IS 1893 Table 5(ii) projection test on one level's footprint (set of present (i, j) grid nodes).
+
+    The framed bays (4 corners present) are compared with their bounding box; every missing region that
+    reaches the bounding-box edge is a notch.  A notch reaching an edge normal to X gives the projection
+    beyond the re-entrant corner in X = its X depth; likewise in Y.  Re-entrant when any projection exceeds
+    15 % of the overall plan dimension in that direction ("in any plan direction" -- each direction is tested
+    on its own, the conservative reading).  Missing regions that do not reach the edge are openings (Table
+    5(iii)), not re-entrant corners.  Coordinates honour xcoords / ycoords."""
+    X = lambda i: _xy_in(cfg, i, 0)[0]
+    Y = lambda j: _xy_in(cfg, 0, j)[1]
+    NX, NY = cfg["NX"], cfg["NY"]
+    cells = {(i, j) for i in range(NX) for j in range(NY)
+             if all(c in fp for c in ((i, j), (i + 1, j), (i, j + 1), (i + 1, j + 1)))}
+    rec = {"notches": [], "openings": 0, "reentrant": False, "max_ratio": 0.0, "trigger": trigger}
+    if not cells:
+        return rec
+    i0 = min(i for i, j in cells); i1 = max(i for i, j in cells) + 1
+    j0 = min(j for i, j in cells); j1 = max(j for i, j in cells) + 1
+    Lx = abs(X(i1) - X(i0)); Ly = abs(Y(j1) - Y(j0))
+    miss = {(i, j) for i in range(i0, i1) for j in range(j0, j1)} - cells
+    seen = set()
+    for c0 in sorted(miss):
+        if c0 in seen:
+            continue
+        comp, stack = [], [c0]
+        seen.add(c0)
+        while stack:
+            c = stack.pop(); comp.append(c)
+            for d in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                n = (c[0] + d[0], c[1] + d[1])
+                if n in miss and n not in seen:
+                    seen.add(n); stack.append(n)
+        ci = [c[0] for c in comp]; cj = [c[1] for c in comp]
+        edge_x = min(ci) == i0 or max(ci) == i1 - 1
+        edge_y = min(cj) == j0 or max(cj) == j1 - 1
+        if not (edge_x or edge_y):
+            rec["openings"] += 1
+            continue
+        n = {"cells": len(comp)}
+        if edge_x and Lx > 0:
+            n["projection_x_mm"] = abs(X(max(ci) + 1) - X(min(ci))); n["L_x_mm"] = Lx
+            n["ratio_x"] = n["projection_x_mm"] / Lx
+        if edge_y and Ly > 0:
+            n["projection_y_mm"] = abs(Y(max(cj) + 1) - Y(min(cj))); n["L_y_mm"] = Ly
+            n["ratio_y"] = n["projection_y_mm"] / Ly
+        r = max(n.get("ratio_x", 0.0), n.get("ratio_y", 0.0))
+        n["reentrant"] = r > trigger
+        rec["notches"].append(n)
+        rec["max_ratio"] = max(rec["max_ratio"], r)
+        rec["reentrant"] = rec["reentrant"] or n["reentrant"]
+    return rec
+
+
 def plan_irregularities(cfg):
     """Geometric footprint screen + IS 1893 Part 1:2016 Table 5/6 classification hooks.
 
     Geometric flags (reentrant/setback/nonparallel/nonrect) still come from the ACTUAL
     per-level footprint. India classification (cites, triggers) is attached under
     out['is1893'] via india_seismic — do not treat ASCE Table 12.3-1/-2 as authoritative.
+    H01: 're-entrant' applies the Table 5(ii) 15 % projection test (reentrant_projections), so a
+    one-bay notch in a ten-bay plan is not re-entrant.
     """
     NX,NY=cfg["NX"],cfg["NY"]; NF=len(cfg.get("heights",[1]))
     full={(i,j) for i in range(NX+1) for j in range(NY+1)}
-    reentrant=setback=nonrect=False; prev=None
+    reentrant=setback=nonrect=False; prev=None; proj={}; openings=False
     for k in range(1,NF+1):
         fp=_footprint_at(cfg,k,NX,NY)
         if not fp: continue
         if fp!=full: nonrect=True
-        xs=[i for i,j in fp]; ys=[j for i,j in fp]
-        bbox={(i,j) for i in range(min(xs),max(xs)+1) for j in range(min(ys),max(ys)+1)}
-        if len(fp)<len(bbox): reentrant=True
+        pr=reentrant_projections(cfg,fp)
+        proj[k]=pr
+        if pr["reentrant"]: reentrant=True
+        if pr["openings"]: openings=True
         if prev is not None and len(fp)<len(prev): setback=True
         prev=fp
     out=dict(reentrant=reentrant, setback=setback,
-             nonparallel=bool(cfg.get("skew")), nonrect=nonrect)
+             nonparallel=bool(cfg.get("skew")), nonrect=nonrect, openings=openings,
+             reentrant_projection={"levels": proj, "trigger": 0.15,
+                                   "max_ratio": max([p["max_ratio"] for p in proj.values()] or [0.0]),
+                                   "clause": "IS 1893 Table 5(ii) (Amd 2)", "cite": TABLE5_II_TEXT})
     if setback:
         cfg["_vertical_setback"]=True
     try:
@@ -1847,6 +2355,36 @@ def _model_gate(cfg):
     return True, True, None
 
 
+def declared_node_sets(cfg, info, key):
+    """H35: {k: {(i, j)}} for a node-set declaration ('omit_beams_at' / 'stepped_bases') read from the builder
+    info, cfg and cfg['_gold'] (CFS india_cfs_frame_build schema {k: [(i, j), ...]}); a flat list of (i, j, k)
+    triples is also accepted."""
+    out = {}
+    for src in ((info or {}).get(key), cfg.get(key), (cfg.get("_gold") or {}).get(key)
+                if isinstance(cfg.get("_gold"), dict) else None):
+        if isinstance(src, dict):
+            for k, v in src.items():
+                out.setdefault(int(k), set()).update(tuple(p)[:2] for p in (v or []))
+        elif isinstance(src, (list, tuple, set)):
+            for p in src:
+                p = tuple(p)
+                if len(p) == 3:
+                    out.setdefault(int(p[2]), set()).add(p[:2])
+    return out
+
+
+def support_nodes():
+    """H35: nodes of the live model restrained in all three translations (foundations, stepped bases)."""
+    out = set()
+    try:
+        for t in ops.getFixedNodes():
+            if {1, 2, 3} <= set(ops.getFixedDOFs(t)):
+                out.add(t)
+    except Exception:
+        pass
+    return out
+
+
 def floor_beam_gaps(cfg, transf="Linear"):
     """Column-line floor-grid beam positions that have NO beam element in the model = the un-modelled
     gravity girders. Coordinate-based, so it works for the parametric builder AND any custom_build.
@@ -1901,6 +2439,15 @@ def floor_beam_gaps(cfg, transf="Linear"):
                     continue
                 seen.add(m); stack.append(m)
         return False
+    # H35: a declared 'no beams into these nodes' (omit_beams_at) and a pair of supports (stepped bases on the grade)
+    # are not missing floor beams
+    omit = declared_node_sets(cfg, info, "omit_beams_at")
+    sup = support_nodes() | {ntag(i, j, k) for k, v in declared_node_sets(cfg, info, "stepped_bases").items()
+                             for (i, j) in v}
+
+    def _omitted(t):
+        k = t // 100000; r = t % 100000
+        return (r // 100, r % 100) in omit.get(k, set())
     gaps = []
     for z, pts in byz.items():
         xs = sorted({round(p[0], 3) for p in pts}); ys = sorted({round(p[1], 3) for p in pts})
@@ -1909,7 +2456,8 @@ def floor_beam_gaps(cfg, transf="Linear"):
         for (gi, gj), (x, y, t) in at.items():
             for (di, dj) in ((1, 0), (0, 1)):
                 nb = at.get((gi+di, gj+dj))
-                if nb and frozenset((t, nb[2])) not in modelled and not _chained(t, nb[2]):
+                if nb and frozenset((t, nb[2])) not in modelled and not _chained(t, nb[2]) \
+                        and not (_omitted(t) or _omitted(nb[2])) and not (t in sup and nb[2] in sup):
                     gaps.append((z, (x, y), (nb[0], nb[1])))
     return gaps
 
