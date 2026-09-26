@@ -2,6 +2,7 @@ IN_CFS_Ex1 — 4-storey residential CFS building, hot-rolled SCBF, New Delhi (In
 
 Location: New Delhi (IS 1893 Annex E Zone IV — retrieve Z; soil medium, Type II). Wind: Delhi basic wind speed
 from IS 875 Part 3 Annex A, terrain category 3, inland (outside the cyclone belt).
+Occupancy: residential, 4 storeys x 96 m2 (4 flats per floor, < 200 persons) -> I = 1.0 (IS 1893 Table 8 (iii)).
 
 Geometry (metres):
 - 4 storeys @ 3.0 m; plan ~12 m x 8 m; residential (4 flats per floor, < 200 persons)

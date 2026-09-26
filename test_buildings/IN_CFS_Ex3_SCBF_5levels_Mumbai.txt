@@ -3,6 +3,8 @@ IN_CFS_Ex3 — 5-storey residential CFS building, hot-rolled SCBF, Mumbai (India
 Location: Mumbai (Zone III — retrieve Z; soil medium / soft — retrieve Sa/g for the declared type). Coastal wind:
 retrieve IS 875 Part 3 (Vb, terrain category 2/3 declared, Cpe, Cpi); Mumbai is on the west coast outside the
 6.3.4 cyclone belt (state it with the cite); prove wind vs EQ storey forces.
+Occupancy: residential, 5 storeys x 288 m2 = 1,440 m2 (< 2,000 m2; persons not stated) -> I = 1.0
+(IS 1893 Table 8 (iii), owner ruling D8).
 
 Geometry (metres):
 - 5 storeys @ 3.0 m; plan ~24 m x 12 m; double-loaded corridor

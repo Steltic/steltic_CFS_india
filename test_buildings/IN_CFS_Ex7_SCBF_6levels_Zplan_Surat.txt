@@ -1,7 +1,10 @@
 IN_CFS_Ex7 — 6-storey hotel, Z-plan, hot-rolled SCBF, Surat cyclone belt (India)
 
 Location: Surat (Zone III — retrieve Z; soil — retrieve). Surat is INSIDE the Gujarat-coast cyclone belt
-(IS 875 Part 3 6.3.4: k4, Kd 1.0) — retrieve Vb, terrain, Cpe / Cpi; prove wind vs EQ.
+(IS 875 Part 3 6.3.4: k4 = 1.00 (all other structures -- a hotel, wind_structure_class = 'other'), Kd = 1.0) —
+retrieve Vb, terrain, Cpe / Cpi; prove wind vs EQ.
+Occupancy: hotel (commercial), 6 storeys, > 2,000 m2 in total -> I = 1.2 by owner ruling D8 (floor area > 2,000 m2
+as the proxy for the Table 8 (ii) '> 200 persons'; persons not stated).
 
 Geometry (metres):
 - 6 storeys; L1 lobby @ 3.3 m, typical @ 2.9 m; Z-plan — two offset bars ~46 m x 18 m joined by an ~18 m corridor
@@ -14,6 +17,10 @@ mechanical allowance.
 
 Design basis (programme rulings D3 / D5 / L7 — fixed, do not substitute):
 - Lateral system: hot-rolled SCBF, R 4.5 (IS 1893 Table 9; Zone III per L7); one 3-D model of the Z-plan
+- Re-entrant plan (IS 1893 Table 5(ii), Amd 2): one 3-D model; the HR run adds the flexible-floor-diaphragm 3-D
+  dynamic analysis to the rigid-diaphragm case and envelopes the two when lateral_frame.diaphragm_stiffness is
+  declared -- for the cement-board / CFS-joist floor {type: 'custom', Gd_kN_per_m (product / test in-plane shear
+  stiffness), source, cite}, an EOR input (VERIFY); without it the job stays PARTIAL (ruling R7)
 - Cold-formed members: IS 801:1975 working stress (F = 0.60 Fy; IS 875 Part 5 cl. 8.1 combinations at 1.0;
   +33 1/3 % allowable only with WL / EL, cl. 6.1.2; effective widths at 0.75 f for those) with IS 811:1987 sections
   (Fy declared from IS 1079 / IS 801 Table 2, never from the catalogue). They are gravity / wind members only.

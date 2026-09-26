@@ -2,6 +2,9 @@ IN_CFS_Ex4 — 6-storey student residence, hot-rolled OCBF, Bengaluru (India)
 
 Location: Bengaluru (Zone II — retrieve Z; soil — retrieve). Wind: retrieve IS 875 Part 3 (Bengaluru Vb) and
 compare to EQ.
+Occupancy: student residence (residential), 6 storeys x ~432 m2 = ~2,600 m2 -> I = 1.2 by owner ruling D8 (floor
+area > 2,000 m2 as the proxy for the Table 8 (ii) '> 200 persons'; persons not stated); a
+residence is not a Table 8 (i) educational building (occupancy educational: False).
 
 Geometry (metres):
 - 6 storeys; L1 @ 3.3 m, typical upper @ 3.0 m; plan ~36 m x 12 m; double-loaded corridor
