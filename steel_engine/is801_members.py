@@ -361,9 +361,20 @@ def bending_allowable(sec, Fy_MPa, L_unbraced_mm, Cb=1.0, wind_eq=False, compres
     Fy = Fy_MPa * MPA_TO_KGF
     F = 0.60 * Fy
     typ = sec["type"]
+    if typ == "LZ":
+        # C15: a lipped zed bent about x-x (web normal) is not bent about a principal axis (tan alpha != 0): the stress
+        # needs the principal-axis (u-v) resolution / lateral restraint statement that this module does not implement.
+        # Refused (found:false) rather than returning a single-axis Fb and Ma that look evaluated.
+        return {"ok": None, "found": False, "Fb_kgf_cm2": None, "Fb_MPa": None, "Fb1_kgf_cm2": None, "Fb1_MPa": None,
+                "Sxc_cm3": None, "Sx_eff_cm3": None, "Ma_Nmm": None, "Ma_kNm": None, "Cb": Cb, "ltb_clause": None,
+                "notes": [], "allowable_increase": INCREASE_WL_EL if wind_eq else 1.0, "capacity_basis": "IS801_allowable",
+                "clause": "IS 801 6.3 (zed)", "source": SRC,
+                "cite": "Fb for zeds: 6.3 with 0.18 / 0.9 pi^2 E Cb/Fy limits (point-symmetric section)",
+                "note": "LZ (lipped zed) bending not evaluated: principal-axis (u-v) bending of a point-symmetric zed is not "
+                        "implemented (C15) -- use a lipped channel, or supply an EOR / test capacity"}
     d = sec["h"] / 10.0
     Ix, Iy = sec["Ix"] / 1e4, sec["Iy"] / 1e4
-    Sxc = Ix / (d / 2.0) if typ != "LZ" else Ix / (d / 2.0)
+    Sxc = Ix / (d / 2.0)
     Iyc = Iy / 2.0
     fb1 = F
     notes = []
@@ -520,6 +531,8 @@ def combined_67(sec, Fy_MPa, P_N, Mx_Nmm, KLx_mm, KLy_mm, L_unbraced_mm, cm_case
         return dict(comp, dc=None, value=None, limit=None)
     bend = bending_allowable(sec, Fy_MPa, L_unbraced_mm, Cb=Cb, wind_eq=wind_eq,
                              compression_flange_restrained=compression_flange_restrained)
+    if bend.get("ok") is None:
+        return dict(bend, dc=None, value=None, limit=None, clause="IS 801 6.7 / " + str(bend.get("clause")))
     inc = INCREASE_WL_EL if wind_eq else 1.0
     Fy = Fy_MPa * MPA_TO_KGF
     A = sec["A"] / 100.0

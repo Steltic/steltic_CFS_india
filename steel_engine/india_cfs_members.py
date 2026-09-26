@@ -71,6 +71,10 @@ def _member_record(role, spec, sec, fy, combos, checks_by_combo, extra=None):
     return rec
 
 
+def _rnd(x, n=2):
+    return round(x, n) if isinstance(x, (int, float)) else x
+
+
 def _row(label, name, r, extra=None):
     o = {"combo": label, "check": name, "value": r.get("value"), "limit": r.get("limit"), "dc": r.get("dc"), "ok": r.get("ok"),
          "clause": r.get("clause"), "cite": r.get("cite"), "allowable_increase": r.get("allowable_increase", 1.0),
@@ -188,7 +192,8 @@ def design_joists(cfg):
         Mx = w * span ** 2 / 8.0; V = w * span / 2.0
         b = M.bending_allowable(sec, fy, float(jt.get("L_unbraced_mm", span)), Cb=1.0, compression_flange_restrained=restr)
         rows.append(_row(c["label"], "6.1/6.2/6.3 bending", M._rec(Mx, b["Ma_Nmm"], b["clause"], b["cite"], allowable_increase=1.0),
-                         {"M_Nmm": round(Mx, 1), "Fb_MPa": round(b["Fb_MPa"], 2), "Sx_eff_cm3": round(b["Sx_eff_cm3"], 2), "ltb": b["ltb_clause"]}))
+                         {"M_Nmm": round(Mx, 1), "Fb_MPa": _rnd(b["Fb_MPa"]), "Sx_eff_cm3": _rnd(b["Sx_eff_cm3"]), "ltb": b["ltb_clause"],
+                          **({"note": b["note"]} if b.get("note") else {})}))
         rows.append(_row(c["label"], "6.4.1 web shear", M.web_shear_64(sec, fy, V), {"V_N": round(V, 1)}))
         rows.append(_row(c["label"], "6.5 web crippling (end reaction)",
                          M.web_crippling_65(sec, fy, V, float(jt.get("bearing_mm", 50.0)), end=True, back_to_back=sec.get("n_ply", 1) == 2)))
@@ -252,7 +257,8 @@ def design_purlins(cfg, role="purlin"):
                                 compression_flange_restrained=(not uplift and Lu_top == 0.0))
         rows.append(_row(c["label"], "6.1/6.2/6.3 bending (%s)" % ("uplift, bottom flange" if uplift else "gravity"),
                          M._rec(abs(Mx), b["Ma_Nmm"], b["clause"], b["cite"], allowable_increase=b["allowable_increase"]),
-                         {"M_Nmm": round(Mx, 1), "w_N_per_mm": round(w, 4), "Fb_MPa": round(b["Fb_MPa"], 2), "ltb": b["ltb_clause"]}))
+                         {"M_Nmm": round(Mx, 1), "w_N_per_mm": round(w, 4), "Fb_MPa": _rnd(b["Fb_MPa"]), "ltb": b["ltb_clause"],
+                          **({"note": b["note"]} if b.get("note") else {})}))
         rows.append(_row(c["label"], "6.4.1 web shear", M.web_shear_64(sec, fy, V, wind_eq=we), {"V_N": round(V, 1)}))
         rows.append(_row(c["label"], "6.5 web crippling (support)",
                          M.web_crippling_65(sec, fy, V, float(pu.get("bearing_mm", 50.0)), end=False, back_to_back=sec.get("n_ply", 1) == 2, wind_eq=we)))
