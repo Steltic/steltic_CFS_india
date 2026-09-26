@@ -397,6 +397,8 @@ def frame_build(cfg, transf="PDelta"):
         # grade-level support nodes of a split-level site stay out of the diaphragm constraint (they are fixed)
         freek = (g.get("free_nodes") or {}).get(k) or set()          # C11: declared free nodes stay out of the diaphragm
         sl = [E.ntag(i, j, k) for (i, j) in pres[k] if E.ntag(i, j, k) not in grade_nodes and (i, j) not in freek] + link_nodes.get(k, [])
+        # X01: the HR flexible-diaphragm variant (india_flexible_diaphragm.build_flexible) intercepts THIS call -- the
+        # slave list is the floor plate that gets the deck membrane (free / grade nodes stay out of it as well)
         ops.rigidDiaphragm(3, E.mtag(k), *sl)
         w = E.floor_w(cfg, k); m = w / E.g
         pts = pres[k]; xs = [XY(i, j)[0] for i, j in pts]; ys = [XY(i, j)[1] for i, j in pts]

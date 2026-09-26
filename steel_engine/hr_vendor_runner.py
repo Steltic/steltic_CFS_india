@@ -133,6 +133,9 @@ def build_cfg(spec):
                 cfg["seis"][key] = spec[key]
     if spec.get("diaphragm_7_6_4"):
         cfg["diaphragm_7_6_4"] = spec["diaphragm_7_6_4"]
+    for key in ("diaphragm_stiffness", "flexible_diaphragm_analysis", "flexible_diaphragm_eor"):   # X01 (Table 5(ii))
+        if spec.get(key) is not None:
+            cfg[key] = spec[key]
     if spec.get("default_strong"):
         cfg["default_strong"] = spec["default_strong"]
     cfg.update(spec.get("hr_cfg_extra") or {})              # declared HR cfg keys (WP6 gold packages), verbatim
