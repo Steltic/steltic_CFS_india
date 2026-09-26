@@ -114,7 +114,7 @@ def build_cfg():
                                               "shear test (IS 801 8.1 'as determined from tests') -- VERIFY"},
                       "cladding_kNm2": 0.5},
             "joists": {"section": "CLR180X50X20X3.15", "spacing_mm": 400.0, "span_mm": 4000.0, "bearing_mm": 50.0,
-                       "compression_flange_restrained": True, "deflection_limit_ratio": 240, "deflection_cite": "IS 800:2007 Table 6 (read-only retrieval, serviceability_limits_table6): floor beams, elements not susceptible to cracking, span/240"},
+                       "compression_flange_restrained": True, "deflection_limit_ratio": 300, "deflection_cite": "IS 800:2007 Table 6 (read-only retrieval, serviceability_limits_table6): other buildings, floor and roof, elements not susceptible to cracking, span/300"},
         },
         "diaphragm_capacity": {"v_allow_kN_per_m": 6.0, "allowable_increase": 1.0, "basis": "test",
                                "source": "EOR input: 18 mm cement-bonded board on CFS joists at 400 with screws at 150 mm edge / 300 mm field; "
