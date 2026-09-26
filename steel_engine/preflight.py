@@ -71,6 +71,13 @@ def check(cfg) -> list:
             say("ERROR", "loads.%s = %s kN/m2 implausible (psf entered?)" % (k, v))
     if ld.get("partition_seismic_kNm2") is not None and float(ld["partition_seismic_kNm2"]) < 0.5 and not cfg.get("portal"):
         say("ERROR", "partitions in W shall not be less than 0.5 kN/m2 (IS 1893 7.3.6)")
+    elif ld.get("partition_seismic_kNm2") is not None and ld.get("partition_design_kNm2") is not None \
+            and float(ld["partition_seismic_kNm2"]) < float(ld["partition_design_kNm2"]) - 1e-9 and not cfg.get("portal"):
+        # H22 / ruling R1
+        say("WARN", "loads.partition_seismic_kNm2 = %s is below the partition design allowance %s kN/m2: IS 1893 7.3.6 "
+                    "'In case the minimum values of seismic weights corresponding to partitions given in parts of IS 875 are "
+                    "higher, the higher values shall be used' (default when not declared: max(0.5, allowance))"
+            % (ld["partition_seismic_kNm2"], ld["partition_design_kNm2"]))
     # ---- lateral system (D3 / L7) ----
     lf = cfg.get("lateral_frame")
     if cfg.get("portal"):
@@ -89,30 +96,42 @@ def check(cfg) -> list:
     if lf:
         try:
             import india_cfs_lateral as L
-            L.resolve_system(site.get("zone"), lf.get("system"), sum(float(h) for h in H) if H else None)
+            L.resolve_system_full(site.get("zone"), lf.get("system"), sum(float(h) for h in H) if H else None,
+                                  lf.get("R_x"), lf.get("R_y"), lf.get("system_x"), lf.get("system_y"))
         except Exception as ex:
             say("ERROR", "lateral system: %s" % ex)
         for k in ("NX", "NY", "bay_x_m", "bay_y_m", "col", "beam"):
             if lf.get(k) is None:
                 say("ERROR", "lateral_frame.%s required" % k)
-        if str(lf.get("system", "")).upper() in ("SCBF", "OCBF", "EBF") and not lf.get("brace"):
+        try:
+            import india_cfs_lateral as L
+            braced_sys = any(c in L.BRACED_SYSTEMS for c in L.system_components(lf.get("system")))
+        except Exception:
+            braced_sys = str(lf.get("system", "")).upper() in ("SCBF", "OCBF", "EBF")
+        if braced_sys and not lf.get("brace"):
             say("ERROR", "lateral_frame.brace (IS 808 / IS 1161 label, IS 2062 E250 B0 per IS 800 12.8.2.1) required")
         if not lf.get("connections"):
             say("ERROR", "lateral_frame.connections (brace_end / beam_shear / column_base geometry for india_connection_design) required")
+    if lf and not cfg.get("portal"):
+        import india_cfs_frame_build as FB
+        out += FB.framed_area_issues(cfg)                  # C06: framed floor / roof area vs the declared plan
     cm = cfg.get("cfs_members") or {}
     if not cfg.get("portal") and not cm:
         say("ERROR", "cfg['cfs_members'] (studs / joists to IS 801) required")
     if cm and cm.get("Fy_MPa") is None:
         say("ERROR", "cfs_members.Fy_MPa + grade_cite required (IS 811 has no default grade)")
-    for role in ("studs", "joists", "purlins", "girts", "rafters", "columns"):
-        spec = cm.get(role) if isinstance(cm.get(role), dict) else None
-        if spec and spec.get("section"):
-            try:
-                import is811_sections as S
-                n, base = S.parse_designator(spec.get("designator") or spec["section"])
-                S.props(base)
-            except Exception as ex:
-                say("ERROR", "cfs_members.%s: %s" % (role, ex))
+    import india_cfs_members as CMB
+    for role in ("studs", "joists", "purlins", "girts", "rafters", "columns", "eave_struts", "headers"):
+        for spec in CMB.groups(cm, role):                   # C14: one group or a list of groups
+            if spec.get("section"):
+                try:
+                    import is811_sections as S
+                    n, base = S.parse_designator(spec.get("designator") or spec["section"])
+                    S.props(base)
+                except Exception as ex:
+                    say("ERROR", "cfs_members.%s: %s" % (role, ex))
+    if cm:
+        out += CMB.wind_preflight(cfg)                      # C02: member wind derivable for studs / purlins / girts
     out += G.validate_india_cfs_p0(cfg)
     return out
 

@@ -29,7 +29,7 @@ below, not with a foreign example.
 | Working-stress combinations | IS 875-5 8.1, Notes 1 / 4 / 5 | `india_cfs_basis.cfs_combinations` | both |
 | Zone, Z, I, R, Sa/g, Ah, W, VB, Ta, RSA | IS 1893 Annex E, Tables 3 / 7 / 8 / 9 / 10, 6.4.2, 7.3, 7.6.2, 7.7 | vendored `india_seismic` (HR), `india_cfs_portal.seismic_elastic` | both |
 | Storey drift 0.004 h | IS 1893 7.11.1 | HR engine / portal `drift_table` | both |
-| Sway / deflection limits (read-only) | IS 800 Table 6 (`purpose = serviceability_limits_table6`) | portal `drift_table`, joist deflection row | Ex5 h/150, Ex1 L/240 |
+| Sway / deflection limits (read-only) | IS 800 Table 6 (`purpose = serviceability_limits_table6`) | portal `drift_table`, joist deflection row | Ex5 h/150, Ex1 floor span/300 (other buildings, not susceptible to cracking) |
 | Hot-rolled braced frame, connections, bases | IS 800 Section 12, 7, 8, 10, 11; IS 18168 (`purpose = lateral_frame_is800`) | vendored HR engine via `india_cfs_lateral.run_lateral` | Ex1 |
 | All-CFS portal bases (working stress) | IS 800 11.6.2, 11.4.1 (c) | `india_cfs_portal.base_check` (`IS800_WSM`) | Ex5 |
 | Lateral system by zone (D3 / L7 gate) | IS 1893 Table 9 + Note 1; IS 18168 1.3 | `india_cfs_lateral.resolve_system` | — |

@@ -16,8 +16,20 @@ spec["gold"] = {
   "ebf_beam_sec": {"X": {"1-4": sec}, "Y": {...}}, "ebf_link_sec": {...}, "ebf_brace_sec": {"1-4": sec},
   "brace_sec": {"1-4": sec},
   "moment_lines": [["X", j], ["Y", i]],             # rigid beam-column joints along a frame line
-  "col_sec": {"lateral": {"1-4": sec}, "gravity": {"1-4": sec}}, "beam_sec": {"floor_X": sec, "floor_Y": sec, "roof_X": sec, "roof_Y": sec},
+  "col_sec": {"lateral": {"1-4": sec}, "gravity": {"1-4": sec}}, "beam_sec": {"floor_X": sec | {"1-2": sec, "3-8": sec}, "floor_Y": ..,
+             "roof_X": sec, "roof_Y": sec},                     # C11: beam groups may be storey-ranged like col_sec
+  "col_sec_by_line": {"X0": {"1-4": sec}, "Y3": sec, "2,0": sec},   # C11: per-line (or per-node "i,j") overrides, e.g. stiffer
+  "beam_sec_by_line": {"X0": {"1-4": sec}, "Y3": sec},              #      end frames; line "Xj" = y-grid line j, "Yi" = x-grid line i
+  "sfrs_base": "fixed" | "pinned" | {"X0": "pinned", "Y2": "fixed", "1,0": "pinned", "default": "fixed"},
+                                                        # C11: SFRS column bases (default lateral_frame.base, else fixed)
+  "max_beam_span_m": 8.0,                               # C11: beams join CONSECUTIVE present nodes on a grid line up to this
+                                                        # span (default = the largest grid bay, i.e. adjacent nodes only)
+  "free_nodes": {"2": [[i, j], ...]},                   # C11: nodes of level k kept out of that level's rigid diaphragm
+  "plan_area_m2": 1200.0 | {"1": 800.0, "2": 1200.0},   # C06: declared floor / roof plan area per level (framed-area check)
+  "voids_m2": {"1": 40.0},                              # C06: declared voids (stair / lift / double height) per level
   "gravity_base": "pinned" | "fixed", "default_strong": "X" }
+Columns run between the consecutive levels at which their node exists (a high-bay column passes a level where the
+node is absent, C11).
 """
 from __future__ import annotations
 
@@ -68,14 +80,56 @@ def make_gold(spec):
 
     col_groups = g.get("col_sec") or spec.get("col_sec") or {}
     beam_groups = g.get("beam_sec") or spec.get("beam_sec") or {}
+    col_by_line = g.get("col_sec_by_line") or {}
+    beam_by_line = g.get("beam_sec_by_line") or {}
+
+    def _grp(v, k):
+        return _rng_pick(v, k) if isinstance(v, dict) else v
+
+    # frame lines on which a column is part of the SFRS ("Xj" = the y-grid line j along X, "Yi" = the x-grid line i)
+    col_lines = {}
+    for k in range(1, NF + 1):
+        for (d, i, j) in xbays(k) + ebf_bays(k):
+            for n in ((i, j), ((i + 1, j) if d == "X" else (i, j + 1))):
+                col_lines.setdefault(n, set()).add("X%d" % j if d == "X" else "Y%d" % i)
+    for (d, kk) in mset:
+        for q in range((NX if d == "X" else NY) + 1):
+            col_lines.setdefault((q, kk) if d == "X" else (kk, q), set()).add("%s%d" % (d, kk))
 
     def col_sec(i, j, k):
+        for key in ("%d,%d" % (i, j), "Y%d" % i, "X%d" % j):     # C11: per-node / per-line override first
+            if key in col_by_line:
+                v = _grp(col_by_line[key], k)
+                if v:
+                    return v
         grp = col_groups.get("lateral" if sfrs_col(i, j) else "gravity") or {}
         return _rng_pick(grp, k) or spec["col"]
 
     def beam_sec(i, j, k, dirn):
+        key = ("X%d" % j) if dirn == "X" else ("Y%d" % i)
+        if key in beam_by_line:
+            v = _grp(beam_by_line[key], k)
+            if v:
+                return v
         roof = (k == NF)
-        return (beam_groups.get(("roof" if roof else "floor") + "_" + dirn) or beam_groups.get("roof" if roof else "floor") or spec["beam"])
+        v = beam_groups.get(("roof" if roof else "floor") + "_" + dirn) or beam_groups.get("roof" if roof else "floor")
+        return _grp(v, k) or spec["beam"]          # C11: a storey-ranged group {"1-2": sec, "3-8": sec} like col_sec
+
+    base_decl = g.get("sfrs_base") or spec.get("base") or "fixed"
+
+    def sfrs_base(i, j):
+        """C11: base fixity of an SFRS column -- gold.sfrs_base (string or per node / line dict) else lateral_frame.base."""
+        if not isinstance(base_decl, dict):
+            return str(base_decl)
+        if "%d,%d" % (i, j) in base_decl:
+            return str(base_decl["%d,%d" % (i, j)])
+        vals = {str(base_decl[ln]) for ln in col_lines.get((i, j), ()) if ln in base_decl}
+        if len(vals) > 1:
+            raise ValueError("gold.sfrs_base: column (%d, %d) is on frame lines %s with conflicting bases %s -- declare the "
+                             "node key '%d,%d'" % (i, j, sorted(col_lines.get((i, j), ())), sorted(vals), i, j))
+        if vals:
+            return vals.pop()
+        return str(base_decl.get("default", spec.get("base") or "fixed"))
 
     def col_strong(i, j):
         for (d, kk) in mset:
@@ -100,9 +154,11 @@ def make_gold(spec):
     stepped = {int(k): {tuple(p) for p in v} for k, v in (g.get("stepped_bases") or {}).items()}   # split-level: supports at level k
     omit = {int(k): {tuple(p) for p in v} for k, v in (g.get("omit_beams_at") or {}).items()}      # no beams into these nodes at level k
 
+    free = {int(k): {tuple(p) for p in v} for k, v in (g.get("free_nodes") or {}).items()}          # C11: out of the diaphragm
     out = {"present": present, "sfrs_col": sfrs_col, "col_sec": col_sec, "beam_sec": beam_sec, "col_strong": col_strong,
            "releases": releases, "xbays": xbays, "brace_sec": brace_sec, "gravity_base": g.get("gravity_base", "pinned"),
-           "lateral_cols": lateral_cols, "stepped_bases": stepped, "omit_beams_at": omit}
+           "lateral_cols": lateral_cols, "stepped_bases": stepped, "omit_beams_at": omit, "sfrs_base": sfrs_base,
+           "free_nodes": free, "max_beam_span_m": g.get("max_beam_span_m")}
     if g.get("ebf_bays"):
         out.update({"ebf_bays": ebf_bays, "e_link_mm": float(g["e_link_mm"]), "ebf_beam_column_pinned": bool(g.get("ebf_beam_column_pinned")),
                     "ebf_beam_sec": lambda dirn, k: _rng_pick((g.get("ebf_beam_sec") or {}).get(dirn), k),
@@ -127,6 +183,73 @@ def attach(cfg, spec):
     if g.get("ebf_bays"):
         cfg["brace_config"] = "chevron"
     return cfg
+
+
+def _cells_area(NX, NY, P, XY):
+    """Plan area of the grid cells whose four corner nodes are all present (the framed floor / roof plate)."""
+    a = 0.0
+    for i in range(NX):
+        for j in range(NY):
+            if {(i, j), (i + 1, j), (i, j + 1), (i + 1, j + 1)} <= set(P):
+                (x0, y0), (x1, y1) = XY(i, j), XY(i + 1, j + 1)
+                a += abs(x1 - x0) * abs(y1 - y0)
+    return a
+
+
+def framed_area_m2(spec, k):
+    """C06: framed plan area (m2) of level k of the frame that this builder (gold) or the regular grid builds."""
+    NX, NY = int(spec["NX"]), int(spec["NY"])
+    g = spec.get("gold")
+    xs = [float(x) for x in (g or {}).get("xcoords_m") or [i * float(spec["bay_x_m"]) for i in range(NX + 1)]]
+    ys = [float(y) for y in (g or {}).get("ycoords_m") or [j * float(spec["bay_y_m"]) for j in range(NY + 1)]]
+    XY = lambda i, j: (xs[i], ys[j])
+    if g:
+        P = make_gold(spec)["present"](k)
+    else:
+        P = {(i, j) for i in range(NX + 1) for j in range(NY + 1)}
+    return _cells_area(NX, NY, P, XY)
+
+
+def framed_area_issues(cfg):
+    """C06 (CFS-C-05 e): ERROR when the framed floor / roof area of a level (from the model the builder draws) is below
+    0.9 x the declared plan area of that level: gold.plan_area_m2 (number or {level: m2}), else geometry plan_x x plan_y
+    minus the declared voids (gold.voids_m2 / geometry.voids_m2, number or {level: m2}).  A level the model drops
+    silently leaves its gravity load and seismic weight out of the analysis (the Ex10 high-bay roof)."""
+    lf = cfg.get("lateral_frame") or {}
+    geo = cfg.get("geometry") or {}
+    H = list(geo.get("heights_m") or [])
+    if not lf or not H or lf.get("NX") is None or lf.get("NY") is None:
+        return []
+    g = lf.get("gold") if lf.get("custom_build_module") else None
+    spec = {"NX": lf["NX"], "NY": lf["NY"], "bay_x_m": lf.get("bay_x_m"), "bay_y_m": lf.get("bay_y_m"), "heights_m": H,
+            "gold": g, "col": lf.get("col"), "beam": lf.get("beam"), "brace": lf.get("brace"), "base": lf.get("base"),
+            "moment_lines": lf.get("moment_lines")}
+
+    def pick(v, k):
+        if isinstance(v, dict):
+            return v.get(str(k), v.get(k, _rng_pick(v, k)))
+        return v
+    out = []
+    for k in range(1, len(H) + 1):
+        decl = pick((g or {}).get("plan_area_m2"), k)
+        src = "gold.plan_area_m2"
+        if decl is None:
+            if geo.get("plan_x_m") is None or geo.get("plan_y_m") is None:
+                continue
+            voids = pick((g or {}).get("voids_m2"), k) or pick(geo.get("voids_m2"), k) or 0.0
+            decl = float(geo["plan_x_m"]) * float(geo["plan_y_m"]) - float(voids)
+            src = "geometry plan_x x plan_y - voids %.1f m2" % float(voids)
+        try:
+            fa = framed_area_m2(spec, k)
+        except Exception as ex:                                     # a malformed gold block is reported, not hidden
+            out.append(("ERROR", "framed-area check (C06): level %d not evaluable: %s" % (k, ex)))
+            continue
+        if fa < 0.9 * float(decl) - 1e-6:
+            out.append(("ERROR", "level %d: framed %s area %.1f m2 < 0.9 x declared plan area %.1f m2 (%s) -- part of the plate "
+                                 "is not framed by the model, so its gravity load and seismic weight are dropped; frame it (gold "
+                                 "present / multi-level columns / free_nodes) or declare the voids" %
+                        (k, "roof" if k == len(H) else "floor", fa, float(decl), src)))
+    return out
 
 
 def _xy(cfg, i, j):
@@ -155,14 +278,19 @@ def frame_build(cfg, transf="PDelta"):
         for (i, j) in node_sets[k]:
             x, y = XY(i, j); ops.node(E.ntag(i, j, k), x, y, z[k])
     bases = {}
+    def _is_fixed(i, j):
+        # C11: SFRS columns take gold.sfrs_base / lateral_frame.base (per line), gravity columns gravity_base
+        if g["sfrs_col"](i, j):
+            return str((g.get("sfrs_base") or (lambda a, b: "fixed"))(i, j)).lower() == "fixed"
+        return g.get("gravity_base", "pinned") == "fixed"
     for (i, j) in pres[0]:
-        fixed = g["sfrs_col"](i, j) or g.get("gravity_base", "pinned") == "fixed"
+        fixed = _is_fixed(i, j)
         ops.fix(E.ntag(i, j, 0), 1, 1, 1, *((1, 1, 1) if fixed else (0, 0, 0)))
         bases[(i, j)] = "fixed" if fixed else "pinned"
     grade_nodes = set()
     for kb, pts_b in stepped.items():                       # split-level site: columns founded on the uphill grade at level kb
         for (i, j) in pts_b:                                # (a column stub below it, if declared in present "0", is a retained basement stub)
-            fixed = g["sfrs_col"](i, j) or g.get("gravity_base", "pinned") == "fixed"
+            fixed = _is_fixed(i, j)
             ops.fix(E.ntag(i, j, kb), 1, 1, 1, *((1, 1, 1) if fixed else (0, 0, 0)))
             bases[(i, j)] = ("fixed" if fixed else "pinned") + "@L%d" % kb
             grade_nodes.add(E.ntag(i, j, kb))
@@ -176,27 +304,43 @@ def frame_build(cfg, transf="PDelta"):
     for i in range(NX + 1):
         for j in range(NY + 1):
             sd = g["col_strong"](i, j)
-            for k in range(NF):
-                if (i, j) in node_sets[k] and (i, j) in node_sets[k + 1]:
-                    sec = g["col_sec"](i, j, k + 1)
-                    E.add_column(et, E.ntag(i, j, k), E.ntag(i, j, k + 1), sec, sd)
-                    eles.append((et, "col", sec, E.ntag(i, j, k), E.ntag(i, j, k + 1))); col_tag[(i, j, k + 1)] = et; et += 1
+            # C11: a column joins the CONSECUTIVE levels at which its node exists (a high-bay column passes a level
+            # where the node is absent, instead of being dropped)
+            lv = [k for k in range(NF + 1) if (i, j) in node_sets[k]]
+            for ka, kb_ in zip(lv, lv[1:]):
+                sec = g["col_sec"](i, j, kb_)
+                E.add_column(et, E.ntag(i, j, ka), E.ntag(i, j, kb_), sec, sd)
+                eles.append((et, "col", sec, E.ntag(i, j, ka), E.ntag(i, j, kb_)))
+                for kk in range(ka + 1, kb_ + 1):
+                    col_tag[(i, j, kk)] = et
+                et += 1
     ops.uniaxialMaterial("Elastic", 1, E.E)
     xb = g.get("xbays") or (lambda k: [])
     eb = g.get("ebf_bays") or (lambda k: [])
     e_link = float(g.get("e_link_mm") or 0.0)
+    # C11: beams join consecutive present nodes of a grid line up to max_beam_span_m (default = the largest grid bay,
+    # i.e. adjacent nodes only on a uniform grid); an omitted (grade) node breaks the line
+    gx = [XY(i, 0)[0] for i in range(NX + 1)]; gy = [XY(0, j)[1] for j in range(NY + 1)]
+    max_bay = max([b - a for a, b in zip(gx, gx[1:])] + [b - a for a, b in zip(gy, gy[1:])] or [0.0])
+    max_span = float(g["max_beam_span_m"]) * 1000.0 if g.get("max_beam_span_m") else max_bay
     for k in range(1, NF + 1):
         P = node_sets[k]
         ebays = set(eb(k)); xbays = set(xb(k))
         for dirn in ("X", "Y"):
-            rng = [(i, j) for j in range(NY + 1) for i in range(NX)] if dirn == "X" else \
-                  [(i, j) for i in range(NX + 1) for j in range(NY)]
-            for (i, j) in rng:
-                b = (i + 1, j) if dirn == "X" else (i, j + 1)
-                if (i, j) not in P or b not in P or (i, j) in omit.get(k, set()) or b in omit.get(k, set()):
-                    continue
+            pairs = []
+            for q in range((NY if dirn == "X" else NX) + 1):
+                on = [((p, q) if dirn == "X" else (q, p)) for p in range((NX if dirn == "X" else NY) + 1)]
+                on = [n for n in on if n in P]
+                for a_, b_ in zip(on, on[1:]):
+                    if a_ in omit.get(k, set()) or b_ in omit.get(k, set()):
+                        continue
+                    span = (XY(*b_)[0] - XY(*a_)[0]) if dirn == "X" else (XY(*b_)[1] - XY(*a_)[1])
+                    if span > max_span + 1e-6:
+                        continue
+                    pairs.append((a_, b_))
+            for ((i, j), b) in pairs:
                 A, B = E.ntag(i, j, k), E.ntag(*b, k)
-                if (dirn, i, j) in ebays:
+                if (dirn, i, j) in ebays and b == ((i + 1, j) if dirn == "X" else (i, j + 1)):
                     xa, ya = XY(i, j); xb_, yb_ = XY(*b)
                     L = (xb_ - xa) if dirn == "X" else (yb_ - ya)
                     s1 = (L - e_link) / 2.0; s2 = (L + e_link) / 2.0
@@ -242,7 +386,8 @@ def frame_build(cfg, transf="PDelta"):
             if a in node_sets[k] and b in node_sets[k - 1]:
                 ops.element("Truss", et, E.ntag(*a, k), E.ntag(*b, k - 1), brA, 1)
                 eles.append((et, "brace", brs, E.ntag(*a, k), E.ntag(*b, k - 1))); et += 1
-    info = {"cm": cm, "present": pres, "z": z, "NF": NF, "ele": eles, "links": links, "bases": bases}
+    info = {"cm": cm, "present": pres, "z": z, "NF": NF, "ele": eles, "links": links, "bases": bases,
+            "framed_area_m2": {k: _cells_area(NX, NY, pres[k], XY) / 1e6 for k in range(1, NF + 1)}}
     link_nodes = {}
     for ln in links:
         for (t, kind, sec, n1, n2) in eles:
@@ -250,7 +395,8 @@ def frame_build(cfg, transf="PDelta"):
                 link_nodes.setdefault(ln["storey"], []).extend([n1, n2])
     for k in range(1, NF + 1):
         # grade-level support nodes of a split-level site stay out of the diaphragm constraint (they are fixed)
-        sl = [E.ntag(i, j, k) for (i, j) in pres[k] if E.ntag(i, j, k) not in grade_nodes] + link_nodes.get(k, [])
+        freek = (g.get("free_nodes") or {}).get(k) or set()          # C11: declared free nodes stay out of the diaphragm
+        sl = [E.ntag(i, j, k) for (i, j) in pres[k] if E.ntag(i, j, k) not in grade_nodes and (i, j) not in freek] + link_nodes.get(k, [])
         ops.rigidDiaphragm(3, E.mtag(k), *sl)
         w = E.floor_w(cfg, k); m = w / E.g
         pts = pres[k]; xs = [XY(i, j)[0] for i, j in pts]; ys = [XY(i, j)[1] for i, j in pts]

@@ -95,7 +95,10 @@ Table 2 cite (IS 801 Table 2 lists Fy 21 / 24 / 30 / 36 kgf/mm² → F = 1250 / 
   `lateral_frame_basis = "IS800_LSD"`). Both families must be present and labelled; a mixed or partial-factor
   CFS family is refused by `india_cfs_basis.validate_load_plan`.
 
-Every retrieval hit goes into `load_plan.retrieval` as `{"stem", "query", "found", "cite", "file", "purpose"}`.
+Every retrieval hit goes into `load_plan.retrieval` as `{"stem", "query", "found", "cite", "file", "quote", "purpose"}`:
+a `found: true` row names the stored hit (`file`: `rag/<slug>.json` in the job folder) and a `quote` copied verbatim from
+it (without a quote, every number in the cite must appear in the stored hit). `consistency.check` runs the vendored
+`rag_evidence_issues` on these rows — a cite string alone does not pass.
 A `found: false` row is an honest answer; a cite that contains "EXAMPLE" or "not-for-construction" turns the
 whole job into `example_only`. Never invent a clause number, a table value or a zone.
 
@@ -108,7 +111,7 @@ cfg = {
   "occupancy": {"use", "area_m2", "persons", "note"},               # -> I (IS 1893 Table 8)
   "geometry": {"plan_x_m", "plan_y_m", "heights_m": [..]},
   "loads": {"D_floor", "D_roof", "L_floor", "Lr", "clad", "partition_design_kNm2", "partition_seismic_kNm2", "snow", "cite"},
-  "lateral_frame": {"system": "SCBF"|"OCBF"|"EBF"|"SMF", "R", "NX", "NY", "bay_x_m", "bay_y_m", "braced_bays",
+  "lateral_frame": {"system": "SCBF"|"OCBF"|"EBF"|"SMF"|"SMF+SCBF"|.., "R", "NX", "NY", "bay_x_m", "bay_y_m", "braced_bays",
                     "brace_config", "base", "col", "beam", "brace", "col_sec", "beam_sec", "steel_grade",
                     "brace_grade", "deck_span", "diaphragm", "apply_is18168", "connections", "diaphragm_7_6_4"},
   "cfs_members": {"Fy_MPa", "grade_cite",
@@ -128,6 +131,84 @@ All-CFS elastic portal (Ex5 only): `"all_cfs_portal": True`, `"portal": {"spans_
 Sections are IS 811 labels only (`CLR…`, `CLS…`, `CWR…`, `CWS…`, `EA…`, `UA…`, `HS…`, `HRH…` / `HRB…` hat, `LZ…`);
 `n_ply` 1 or 2 (two channels back to back with IS 801 7.3 interconnection). Hot-rolled sections are IS 808 labels
 (`WPB…`, `NPB…`, `ISMB…`) in E250 / E350 per IS 2062.
+
+## Advanced cfg keys (optional; all backward compatible — use them when the building needs them)
+
+**Lateral system** (`cfg['lateral_frame']`)
+* `system` may be MIXED: `"SMF+SCBF"`, `"EBF+SMF"`, … — every component passes the zone gate, R = min over the
+  components (IS 1893 Table 9); the declared braced bays AND moment lines are kept; the package names the real system.
+  `R_x` / `R_y` (number, optional): per-direction R, each validated against the Table 9 R of `system_x` / `system_y`
+  (e.g. `"system_x": "SMF", "system_y": "SCBF"`; without them each direction takes every component) — passed to the
+  HR engine as cfg `R_x` / `R_y` / `system_x` / `system_y`. `R` (if given) must equal the min.
+* `base`: `"fixed"` (default) | `"pinned"` — honoured by both builders for the SFRS column bases.
+* `member_wind`: `True` forces / `False` suppresses `load_plan.member_wind` for the HR run. It is emitted automatically
+  for a single-storey (or `geometry.roof_pitch_deg`) building from `india_wind_tables.lowrise_member_wind` (Table 5 walls,
+  Table 6 roof, Cpi from the opening ratio), so the wall columns carry the girt reactions; a declared
+  `load_plan.member_wind` is kept.
+* `custom_build_module`: `"india_cfs_frame_build"` (or a job-local `.py` path) — the JSON-declared builder for plans that
+  are not a full NX × NY rectangle; it reads `lateral_frame.gold`:
+  `xcoords_m` / `ycoords_m` (non-uniform grid), `present` (`{"default": [[i, j]..], "0": base set, "3-5": [..]}` — the
+  column nodes per level), `stepped_bases`, `omit_beams_at`, `xbays`, `ebf_bays`, `e_link_mm`, `ebf_beam_column_pinned`,
+  `ebf_beam_sec` / `ebf_link_sec` / `ebf_brace_sec`, `brace_sec`, `moment_lines`, `col_sec` (`{"lateral": {"1-4": sec},
+  "gravity": {..}}`), `beam_sec` (`floor_X` / `floor_Y` / `roof_X` / `roof_Y`, each a section or storey-ranged
+  `{"1-2": sec, "3-8": sec}`), `col_sec_by_line` / `beam_sec_by_line` (`{"X0": sec | {"1-4": sec}, "Y3": .., "2,0": ..}` —
+  line `Xj` = y-grid line j, `Yi` = x-grid line i, `"i,j"` = one column; e.g. stiffer end frames), `sfrs_base`
+  (`"fixed"` | `"pinned"` | `{"X0": "pinned", "Y2": "fixed", "1,0": "pinned", "default": "fixed"}`; conflicting lines at one
+  column are refused — declare the node key), `max_beam_span_m` (beams join consecutive present nodes of a grid line up
+  to this span; default the largest bay), `free_nodes` (`{"2": [[i, j]..]}` kept out of that level's rigid diaphragm),
+  `plan_area_m2` / `voids_m2` (number or `{level: m2}`, for the framed-area check), `gravity_base`, `default_strong`.
+  Columns run between the consecutive levels at which their node exists (a high-bay column passes a missing level).
+  **Framed-area check**: preflight ERROR when a level's framed plate (cells with all four corners present) is below
+  0.9 × the declared plan area (`gold.plan_area_m2`, else `plan_x_m × plan_y_m − voids_m2`) — a dropped roof or floor
+  silently removes gravity load and seismic weight.
+* `d_x_m` / `d_y_m` (Ta base dimension), `Ta_override` (`{"X", "Y", "formula"}`), `default_strong`.
+* Passed to the HR engine as declared (HR meaning): `K_factors` (`{"lateral_col": {"Kz", "Ky"}, "gravity_col": .., "brace": ..,
+  "basis"}`, default 1.0 braced), `LLT_sag_mm` / `LLT_hog_mm` (`{"floor", "roof"}` unbraced lengths for beam LTB),
+  `brace_process` (hot / cold formed hollow braces), `collector_basis`, `floor_system` (text for the report),
+  `section12_inputs` (declared IS 800 Section 12 / IS 18168 detail inputs).
+* `hr_cfg_extra`: HR cfg keys passed verbatim to the vendored engine, e.g. `D_by_level` / `L_by_level` (`{level: kN/m²}`),
+  `is18168_table2`, `grade_by_section`, `custom_sections`, `column_imposed_load_reduction`, `composite_scope`
+  (`"bare_steel"`: IS 800 bare-steel + construction-stage checks, IS 11384 not in the corpus), `construction_stage`
+  (`{D_wet_kNm2, L_const_kNm2, LLT_mm}`), `building_type` (`"industrial"` selects the IS 800 Table 6 industrial rows),
+  `deflection_key_roof` (an IS 800 Table 6 row key for roof beams, e.g. `"rafter_profiled_sheeting"` = span/180),
+  `finishes_susceptible_to_cracking`, `cladding_brittle`.
+
+**Geometry / wind / diaphragm** (`cfg['geometry']`, `cfg['load_plan']`)
+* `opening_ratio` (0–1): Cpi by IS 875-3 7.3.2 (≤ 5 % → ±0.2, 5–20 % → ±0.5, > 20 % → ±0.7); not declared → ±0.2 with
+  a preflight WARN. `roof_pitch_deg` (Table 6 roof Cpe for purlins; low-rise member wind).
+* `wind_exposure = {level: {width_X_m, width_Y_m, height_m}}`: per-level exposed face width (the face loaded by wind
+  along X / Y) and tributary height, for mixed-height buildings. A declared `load_plan.story_forces.W_X` / `W_Y` is kept
+  (not overwritten) when `load_plan.wind_story_forces_cite` and `story_forces_units` (`"N"` | `"kN"`) are given.
+* Diaphragm: `diaphragm_depth_X_m` / `_Y_m`, `diaphragm_span_X_m` / `_Y_m`, `diaphragm_lines_X` / `_Y` — each a number or
+  per storey `{storey: value}`; ONE braced line is allowed (v = F/B, cantilever chord (F/L) a²/(2B), a = the longer
+  overhang). `cfg['diaphragm_capacity'].v_allow_kN_per_m` is a number or `{storey: value | {value, cite}}`.
+  `reentrant_lines_X` / `_Y` = `[{"line", "B_short_m", "B_m"?, "storeys"?, "capacity_kN"?, "cite"?}]` → collector rows
+  F (1 − B_short/B); without a declared capacity they are found:false and block COMPLETE.
+* Snow: `loads.snow` (kN/m², IS 875-4) — or top-level `snow`, or `load_plan.snow_summary.applicable = True` — adds the
+  DL+SL rows (IS 875-5 8.1 Note 1).
+* Partitions in W: `loads.partition_seismic_kNm2`, default max(0.5, `partition_design_kNm2`) (IS 1893 7.3.6, ruling R1);
+  declared below the design allowance → preflight WARN.
+
+**CFS members** (`cfg['cfs_members']`) — every role is ONE group or a LIST of groups (each may carry `name`):
+* Member wind is derived for every stud / purlin / girt from IS 875-3 (`india_cfs_members.member_pd`): pz at the member
+  height, Table 4 Ka for the ELEMENT area (spacing × span), Table 5 / Table 6 Cpe governing over every face and both wind
+  angles, local strips (Table 5 local, Table 6 local; Kd = 1.0 there, 7.2.1 Note 2), Cpi from the opening ratio.
+  `zone`: `"all"` (default: the more severe of interior and local strips) | `"general"` | `"edge"`. Declared
+  `Cpe_windward` / `Cpe_leeward` / `Cpe_local` / `Cpi` (+ `Cpi_cite`) and declared `wind_uplift_kNm2` /
+  `wind_suction_kNm2` / `wind_pressure_kNm2` can only make the pressure more severe. Underivable wind is a preflight ERROR.
+* `studs.storeys`: default every storey (ids `stud-S<k>-…`). `joists`: per-group `D_kNm2`, `L_kNm2` (+ `L_cite`),
+  `partition_kNm2`. `purlins.point_loads`: `[{"P_kN", "a_m", "kind": "D" | "L", "cite"}]` (evaporator units).
+  `eave_struts`: `{section, n_ply, span_mm, P_N, P_cite, L_unbraced_mm}` (IS 801 6.7 with the 6.1.2 increase).
+  `headers`: `{section, n_ply, span_mm, w_dead_kN_per_m, w_live_kN_per_m, load_cite, bearing_mm, deflection_limit_ratio}`.
+* Lipped zeds (`LZ…`) are refused in bending (found:false) until principal-axis bending is implemented — use channels.
+* Floor deflection criterion: IS 800 Table 6 "other buildings, floor": span/300 (elements not susceptible to cracking) or
+  span/360 (susceptible) — span/240 is the industrial row, not a floor of an ordinary building.
+
+**All-CFS portal** (`cfg['portal']`, Ex5): gable wind uses IS 875-3 Table 5 of the building (θ 90: C − D);
+`mezzanine.beams` = `{section, n_ply, span_mm, trib_width_mm, bearing_mm, compression_flange_restrained,
+deflection_limit_ratio}` (IS 801 6.1–6.5; undeclared → not evaluated); posts of a self-braced mezzanine carry the bracing
+overturning axial under EL; `cfs_connections_spec.base.anchors.embedment_capacity_N` + `embedment_source` = the anchorage
+capacity per anchor (EOR input, IS 456 not in the corpus — VERIFY; anchors in tension without it are not evaluated).
 
 ## Hard rules (the gates enforce them; do not argue with a refusal)
 1. One `complete` authority: `india_cfs_gates.design_status`. It is `complete` only when the hot-rolled frame status

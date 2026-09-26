@@ -1,0 +1,15 @@
+{
+ "found": true,
+ "query": "6.1 basic design stress 6.1.2 wind earthquake",
+ "type": "exact_section",
+ "stem": "IS_801_1975",
+ "hits": [
+  {
+   "found": true,
+   "doc": "IS_801_1975",
+   "text": " ' <!-- pdf_page=14 printed_label=13 printed_label_qualified=13 part=standard --> <!-- recovered from PDF p.14 by manual transcription 2026-09-20; verified against page image --> IS : 801-1975 *(6.1.1.1(d) continued)* Application of all provisions of the code may be based upon the properties of the flat steel before forming or on 6.1.1.1(b) or (c) as applicable. e) The effect on mechanical properties of any welding that is to be applied to the member shall be determined on the basis of tests of full section specimens containing within the gauge length such welding as the manufacturer intends to use. Any necessary allowance for such effect shall be made in the structural use of the member. **6.1.2 Wind, Earthquake, and Combined Forces** **6.1.2.1 Wind or earthquake only** — Members and assemblies subject only to stresses produced by wind or earthquake forces may be proportioned for stresses 33⅓ percent greater than those specified for dead and live load stresses. A corresponding increase may be applied to the allowable stresses in connections and details. **6.1.2.2 Combined forces** — Members and assemblies subject to stress produced by a combination of wind or earthquake and other loads may be proportioned for unit stress 33⅓ percent greater than those specified for dead and live load stresses, provided the section thus required is not less than that required for the combination of dead load and live load. For primary a",
+   "source": "engineering_rag_india/documents/standards/IS_801_1975/markdown/IS_801_1975.search.md"
+  }
+ ],
+ "note": "stored corpus hit for this retrieval row (C12 / L-13: consistency checks the quote against it)"
+}

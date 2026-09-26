@@ -140,7 +140,13 @@ def build_report_cfs_india(name, cfg, pkg, root):
     out.append("<h2>6. Diaphragm path to the frame lines</h2>")
     out.append(_t(["storey", "dir", "F EQ (kN)", "F W (kN)", "governing", "unit shear (kN/m)", "chord (kN)", "capacity", "result"],
                   [(r["storey"], r["dir"], _kN(r["F_EQ_N"]), _kN(r["F_W_N"]), r["governing"], _f(r["v_unit_kN_per_m"], 2), _f(r["chord_force_kN"], 1),
-                    r.get("capacity") or "found:false (EOR product / test value)", _ok(r.get("ok"))) for r in pkg.get("diaphragm") or []]))
+                    r.get("capacity") or "found:false (EOR product / test value)", _ok(r.get("ok")))
+                   for r in pkg.get("diaphragm") or [] if r.get("kind") != "collector"]))
+    coll = [r for r in pkg.get("diaphragm") or [] if r.get("kind") == "collector"]
+    if coll:                                                  # C03: re-entrant collectors
+        out.append(_t(["storey", "dir", "re-entrant line", "B_short / B (m)", "collector force (kN)", "capacity (kN)", "result"],
+                      [(r["storey"], r["dir"], r.get("line"), "%s / %s" % (_f(r.get("B_short_m"), 2), _f(r.get("B_m"), 2)),
+                        _f(r.get("F_collector_kN"), 2), r.get("capacity") or "found:false (EOR input)", _ok(r.get("ok"))) for r in coll]))
     # ---- 7 connections ----
     out.append("<h2>7. Cold-formed connections and anchors (IS 801 7.2 / 7.5)</h2>")
     cn = pkg.get("cfs_connections") or []

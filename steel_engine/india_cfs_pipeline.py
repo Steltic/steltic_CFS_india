@@ -163,20 +163,13 @@ def design_and_report(name, cfg, outdir=None, do_report=True):
         ws = por.get("wind_summary") or {}
         cfg["load_plan"]["wind_summary"] = ws
         cfg["load_plan"]["seismic_summary"] = por.get("seismic_summary")
-        # secondary members (purlins / girts / mezzanine joists) with the member-level pressures of the portal patterns
+        # secondary members (purlins / girts / mezzanine joists): C02 -- member-level IS 875-3 pressures are derived in
+        # india_cfs_members.member_pd (element Ka, governing Cpe, local strips, Cpi), not copied from the frame patterns
         cm = cfg.get("cfs_members") or {}
-        pats = ws.get("patterns") or []
-        if cm.get("purlins") and pats:
-            roof = [p["roof_windward_kNm2"] for p in pats] + [p["roof_leeward_kNm2"] for p in pats]
-            cm["purlins"]["wind_uplift_kNm2"] = min(roof)          # most negative net (suction)
-            cm["purlins"]["wind_pressure_kNm2"] = max(max(roof), 0.0)
-        if cm.get("girts") and pats:
-            walls = [p["wall_windward_kNm2"] for p in pats] + [p["wall_leeward_kNm2"] for p in pats]
-            cm["girts"]["wind_suction_kNm2"] = -min(min(walls), 0.0)
-            cm["girts"]["wind_pressure_kNm2"] = max(walls)
         if cm.get("joists") and cfg.get("mezzanine"):
             cfg["loads"]["D_floor"] = cfg["mezzanine"]["D_kNm2"]; cfg["loads"]["L_floor"] = cfg["mezzanine"]["L_kNm2"]
-        pkg["cfs_members"] += CM.design_all(dict(cfg, cfs_members={k: v for k, v in cm.items() if k in ("Fy_MPa", "grade_cite", "purlins", "girts", "joists")}))
+        pkg["cfs_members"] += CM.design_all(dict(cfg, cfs_members={k: v for k, v in cm.items() if k in ("Fy_MPa", "grade_cite", "purlins", "girts", "joists",
+                                                                                               "eave_struts", "headers")}))
         pkg["diaphragm"] = []
     else:
         lat = L.run_lateral(cfg, os.path.join(root, "lateral"), name=name + "_lateral")
@@ -186,7 +179,10 @@ def design_and_report(name, cfg, outdir=None, do_report=True):
         cfg["load_plan"]["story_forces_units"] = "N"
         spec = json.load(open(lat["spec"]))
         pkg["lateral_frame"] = {
-            "name": lat["name"], "system": spec["system"], "R": spec["R"], "R_cite": L.TABLE9_CITE, "vendored_commit": lat.get("vendored_commit"),
+            "name": lat["name"], "system": spec["system"], "system_components": spec.get("system_components"), "R": spec["R"],
+            "R_x": spec.get("R_x"), "R_y": spec.get("R_y"),
+            "R_cite": ((spec.get("load_plan") or {}).get("seismic_summary") or {}).get("R_cite") or L.TABLE9_CITE,
+            "vendored_commit": lat.get("vendored_commit"),
             "root": lat["root"], "report_html": lat.get("report_html"), "status": lat.get("status"), "error": lat.get("error"),
             "seismic_summary": hr_plan.get("seismic_summary"), "seismic_analysis": lat.get("seismic_analysis"), "seismic_calc": lat.get("seismic_calc"),
             "members": lat.get("members"), "connections": lat.get("connections"), "drift_table": lat.get("drift_table"), "drift_max": lat.get("drift_max"),

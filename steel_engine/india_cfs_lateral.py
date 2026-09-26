@@ -45,12 +45,21 @@ class LateralSystemError(ValueError):
     pass
 
 
-def resolve_system(zone, system=None, height_m=None):
-    """Return (system, R, cite) for a CFS building's hot-rolled frame in a zone; refuse banned combinations."""
-    zone = str(zone).upper()
-    if zone not in SYSTEM_BY_ZONE:
-        raise LateralSystemError("zone %r not in II-V" % zone)
-    sysn = (system or SYSTEM_BY_ZONE[zone][0]).upper()
+BRACED_SYSTEMS = ("OCBF", "OBF", "SCBF", "SBF", "EBF")
+MOMENT_SYSTEMS = ("SMF", "SMRF", "OMF", "OMRF")
+
+
+def system_components(system):
+    """'SMF+SCBF' / 'EBF + SMF' / 'SCBF' -> ['SMF', 'SCBF'] (upper-case, order kept, duplicates dropped)."""
+    out = []
+    for p in str(system or "").replace("&", "+").replace("/", "+").split("+"):
+        p = p.strip().upper()
+        if p and p not in out:
+            out.append(p)
+    return out
+
+
+def _check_component(zone, sysn, height_m):
     if sysn in ("OCBF", "OBF", "OMF", "OMRF") and zone in ("III", "IV", "V"):
         raise LateralSystemError("%s is not permitted in Zone %s (IS 1893 Table 9 Note 1 as amended, decision D4)" % (sysn, zone))
     if sysn in ("SCBF", "SBF") and zone == "V":
@@ -61,7 +70,50 @@ def resolve_system(zone, system=None, height_m=None):
                                  % (zone, height_m))
     if sysn not in TABLE9_R:
         raise LateralSystemError("system %r has no IS 1893 Table 9 row (D3: no foreign design basis)" % sysn)
-    return sysn, TABLE9_R[sysn], TABLE9_CITE
+
+
+def resolve_system_full(zone, system=None, height_m=None, R_x=None, R_y=None, system_x=None, system_y=None):
+    """C10: a single or MIXED system ('SMF+SCBF', 'EBF+SMF', ...).  Every component passes the zone gate; R = min over
+    the components (IS 1893 Table 9 via the least-ductile component) unless per-direction R_x / R_y are declared -- each
+    validated against the Table 9 R of that direction's system (system_x / system_y when given, else every component),
+    the same rule as the HR india_seismic_gates.resolve_system_R.  Returns {system, components, R, R_x, R_y, cite, ...}."""
+    zone = str(zone).upper()
+    if zone not in SYSTEM_BY_ZONE:
+        raise LateralSystemError("zone %r not in II-V" % zone)
+    comps = system_components(system) or [SYSTEM_BY_ZONE[zone][0]]
+    for c in comps:
+        _check_component(zone, c, height_m)
+    R = min(TABLE9_R[c] for c in comps)
+    out = {"system": "+".join(comps), "components": comps, "mixed": len(comps) > 1, "R": R, "cite": TABLE9_CITE,
+           "braced": any(c in BRACED_SYSTEMS for c in comps), "moment": any(c in MOMENT_SYSTEMS for c in comps)}
+    for d, decl, dsys in (("x", R_x, system_x), ("y", R_y, system_y)):
+        dcomps = system_components(dsys) if dsys else comps
+        for c in dcomps:
+            _check_component(zone, c, height_m)
+            if c not in comps:
+                raise LateralSystemError("system_%s component %s is not part of the declared system %s" % (d, c, out["system"]))
+        Rt = min(TABLE9_R[c] for c in dcomps)
+        out["R_%s_table9" % d] = Rt
+        if decl is not None:
+            if float(decl) > Rt + 1e-9:
+                raise LateralSystemError("R_%s = %s exceeds the IS 1893 Table 9 value %s for the %s-direction system %s"
+                                         % (d, decl, Rt, d.upper(), "+".join(dcomps)))
+            out["R_" + d] = float(decl)
+            out["R_%s_declared" % d] = True
+        else:
+            out["R_" + d] = R
+            out["R_%s_declared" % d] = False
+    if out["mixed"]:
+        out["cite"] = TABLE9_CITE + "; mixed system %s: R = min over the components (%s) unless R_x / R_y are declared" % (
+            out["system"], ", ".join("%s %s" % (c, TABLE9_R[c]) for c in comps))
+    return out
+
+
+def resolve_system(zone, system=None, height_m=None):
+    """Return (system, R, cite) for a CFS building's hot-rolled frame in a zone; refuse banned combinations.  Mixed
+    systems ('SMF+SCBF') return the joined label and R = min over the components (C10)."""
+    r = resolve_system_full(zone, system, height_m)
+    return r["system"], r["R"], r["cite"]
 
 
 def _k2(site, z_m):
@@ -100,14 +152,23 @@ def wind_story_forces(cfg):
     z = 0.0
     for h in H:
         z += h; hs.append(z)
-    # frame tributary area for Ka (7.2.2.1 (a)): frame spacing x storey height
+    # frame tributary area for Ka (7.2.2.1 (a)), PER DIRECTION (C02 / CFS-D-10): the frames resisting wind along X are
+    # the lines y = const, spaced bay_y apart -> A = bay_y x storey height (and bay_x for wind along Y)
     lf = cfg.get("lateral_frame") or {}
-    sp = max(float(lf.get("bay_x_m", Lx)), float(lf.get("bay_y_m", Ly)))
-    Ka_rec = WT.resolve_ka(sp * max(H), site.get("Ka_corpus_hit"))
-    if not Ka_rec.get("found"):
-        raise LateralSystemError("Ka (Table 4) unresolved: %s" % Ka_rec.get("cite"))
-    Ka = float(Ka_rec["Ka"])
-    out.update(Ka=Ka, Ka_area_m2=sp * max(H), Ka_cite=Ka_rec.get("cite"))
+    Ka_d = {}
+    for d, bay_key, Lalt in (("X", "bay_y_m", Ly), ("Y", "bay_x_m", Lx)):
+        sp = float(lf.get(bay_key) or Lalt)
+        Ka_rec = WT.resolve_ka(sp * max(H), site.get("Ka_corpus_hit"))
+        if not Ka_rec.get("found"):
+            raise LateralSystemError("Ka (Table 4) unresolved: %s" % Ka_rec.get("cite"))
+        Ka_d[d] = (float(Ka_rec["Ka"]), sp * max(H), Ka_rec.get("cite"))
+        out.update({"Ka_%s" % d: Ka_d[d][0], "Ka_area_%s_m2" % d: Ka_d[d][1]})
+    dgov = max(Ka_d, key=lambda d: Ka_d[d][0])
+    out.update(Ka=Ka_d[dgov][0], Ka_area_m2=Ka_d[dgov][1], Ka_cite=Ka_d[dgov][2],
+               Ka_note="Ka per direction: frame spacing normal to the wind x storey height (7.2.2.1); Ka / Ka_area = the larger")
+    # C05: optional per-level exposed face (mixed-height buildings): geometry.wind_exposure = {level: {width_X_m,
+    # width_Y_m, height_m}} -- width_X_m = the face width loaded by wind along X, height_m = the tributary height
+    expo = {str(k): v for k, v in dict(geo.get("wind_exposure") or {}).items()}
     forces = {"W_X": {}, "W_Y": {}}
     htot = sum(H)
     w_, l_ = min(Lx, Ly), max(Lx, Ly)          # Table 5: w = lesser, l = greater plan dimension
@@ -122,6 +183,7 @@ def wind_story_forces(cfg):
         net = A_ - B_
         out["Cpe_%s" % d] = {"windward": A_, "leeward": B_, "net": net, "cite": cpe.get("cite"), "h_over_w": htot / w_,
                              "l_over_w": l_ / w_, "theta_deg": theta, "face_width_m": B}
+        Ka = Ka_d[d][0]
         for k, h in enumerate(H, start=1):
             roof = k == len(H)
             ztop = hs[k - 1]
@@ -130,11 +192,20 @@ def wind_story_forces(cfg):
             pz = 0.6 * Vz ** 2 / 1000.0            # kN/m2
             pd = max(Kd * Ka * Kc * pz, 0.70 * pz)
             trib = H[k - 1] / 2.0 + (H[k] / 2.0 if k < len(H) else 0.0)     # half storey below + half above
-            F = net * pd * B * trib * 1000.0      # N
+            ex = expo.get(str(k)) or {}
+            Bk = float(ex.get("width_%s_m" % d) or B)
+            if ex.get("height_m") is not None:
+                trib = float(ex["height_m"])
+            F = net * pd * Bk * trib * 1000.0      # N
             forces["W_" + d][str(k)] = [F if d == "X" else 0.0, F if d == "Y" else 0.0, 0.0]
             if d == "X":
                 out["storeys"].append({"k": k, "z_m": ztop, "k2": round(k2, 4), "Vz_mps": round(Vz, 3), "pz_kNm2": round(pz, 4),
-                                       "pd_kNm2": round(pd, 4), "trib_h_m": trib})
+                                       "pd_X_kNm2": round(pd, 4), "trib_h_m": trib, "face_width_X_m": Bk})
+            else:
+                row = out["storeys"][k - 1]
+                row.update(pd_Y_kNm2=round(pd, 4), face_width_Y_m=Bk, pd_kNm2=max(row["pd_X_kNm2"], round(pd, 4)))
+    if expo:
+        out["wind_exposure"] = expo
     out["pz_kNm2"] = max(s["pz_kNm2"] for s in out["storeys"]); out["pd_kNm2"] = max(s["pd_kNm2"] for s in out["storeys"])
     out["VB_x_kN"] = sum(v[0] for v in forces["W_X"].values()) / 1e3
     out["VB_y_kN"] = sum(v[1] for v in forces["W_Y"].values()) / 1e3
@@ -143,11 +214,84 @@ def wind_story_forces(cfg):
     return out, forces
 
 
+def lowrise_member_wind_plan(cfg, ws, plan):
+    """C02 / CFS-C-07 / CFS-D-09(b): load_plan['member_wind'] for a single-storey / low-rise HR lateral run (the HR
+    preflight requires it and the wall columns then carry the girt reactions of the Table 5 wall pressures), from the
+    vendored india_wind_tables.lowrise_member_wind: Table 5 walls, Table 6 roof by pitch, Cpi from the opening ratio
+    (7.3.2).  A declared member_wind is kept.  Returns (patterns, basis) or None when not a low-rise run."""
+    geo = cfg["geometry"]; lf = cfg.get("lateral_frame") or {}
+    H = list(geo["heights_m"])
+    if plan.get("member_wind"):
+        return None
+    lowrise = len(H) == 1 or bool(lf.get("member_wind")) or geo.get("roof_pitch_deg") is not None
+    if not lowrise or lf.get("member_wind") is False:
+        return None
+    Lx, Ly = float(geo["plan_x_m"]), float(geo["plan_y_m"])
+    w_, l_ = min(Lx, Ly), max(Lx, Ly)
+    top = ws["storeys"][-1]
+    pd = max(float(top.get("pd_X_kNm2") or 0.0), float(top.get("pd_Y_kNm2") or 0.0), float(top.get("pd_kNm2") or 0.0))
+    orat = geo.get("opening_ratio", (cfg.get("site") or {}).get("opening_ratio"))
+    pitch = float(geo.get("roof_pitch_deg") or 0.0)
+    ridge = "X" if Lx >= Ly else "Y"                          # the ridge runs along the greater plan dimension
+    mw = WT.lowrise_member_wind(pd, sum(H), w_, l_, pitch, 0.05 if orat is None else float(orat), ridge_axis=ridge)
+    if not isinstance(mw, dict) or not mw.get("found"):
+        raise LateralSystemError("low-rise member wind (IS 875-3 Tables 5 / 6, 7.3.2) unresolved: %s"
+                                 % (mw.get("note") if isinstance(mw, dict) else mw))
+    basis = {"pd_kNm2": pd, "h_m": sum(H), "w_m": w_, "l_m": l_, "roof_pitch_deg": pitch, "ridge_axis": ridge,
+             "opening_ratio": orat, "opening_ratio_note": None if orat is not None else
+             "geometry.opening_ratio not declared: 5 % assumed (Cpi +-0.2, IS 875-3 7.3.2.1) -- VERIFY",
+             "cite": str(mw.get("cite")) + "; pd = the roof-storey frame pd (Table 4 frame Ka)",
+             "source": "india_wind_tables.lowrise_member_wind (vendored)"}
+    return mw["patterns"], basis
+
+
+def merge_declared_wind(plan, forces):
+    """C05: a declared load_plan.story_forces W_X / W_Y (e.g. a mixed-height building worked by hand from IS 875-3) is
+    KEPT, not overwritten by the envelope storey forces -- it needs a cite (story_forces_cite or wind_story_forces_cite)
+    and story_forces_units ('N' | 'kN').  Returns (story_forces in N, {W_X: source, W_Y: source})."""
+    plan = plan or {}
+    decl = dict(plan.get("story_forces") or {})
+    units = str(plan.get("story_forces_units") or "").lower()
+    cite = plan.get("wind_story_forces_cite") or plan.get("story_forces_cite")
+    out = dict(decl)
+    src = {}
+    prev = ((plan.get("wind_summary") or {}).get("story_forces_source") or {})
+    for ref in ("W_X", "W_Y"):
+        generated = str(prev.get(ref) or "").startswith("IS 875-3 storey forces")    # a re-run: our own earlier output
+        if decl.get(ref) and not generated:
+            if not cite:
+                raise LateralSystemError("load_plan.story_forces.%s declared without a cite (wind_story_forces_cite): a declared "
+                                         "storey wind replaces the IS 875-3 envelope forces only with its source" % ref)
+            if units not in ("n", "kn"):
+                raise LateralSystemError("load_plan.story_forces.%s declared without story_forces_units ('N' or 'kN')" % ref)
+            f = 1000.0 if units == "kn" else 1.0
+            out[ref] = {str(k): [float(x) * f for x in v] for k, v in dict(decl[ref]).items()}
+            src[ref] = "declared (%s)" % cite
+        else:
+            out[ref] = forces[ref]
+            src[ref] = "IS 875-3 storey forces (india_cfs_lateral.wind_story_forces)"
+    for ref, v in list(out.items()):                          # other declared references (EQ_*) to N as well
+        if ref not in ("W_X", "W_Y") and units == "kn" and isinstance(v, dict):
+            out[ref] = {str(k): [float(x) * 1000.0 for x in vv] for k, vv in v.items()}
+    return out, src
+
+
+def partition_seismic_default(ld):
+    """IS 1893 7.3.6 (ruling R1): partitions in the seismic weight = the declared partition_seismic_kNm2, else
+    max(0.5, partition_design_kNm2) ('not less than 0.5 kN/m2 ... the higher values shall be used')."""
+    ld = ld or {}
+    if ld.get("partition_seismic_kNm2") is not None:
+        return float(ld["partition_seismic_kNm2"])
+    return max(0.5, float(ld.get("partition_design_kNm2") or 0.0))
+
+
 def build_hr_spec(cfg, name):
     """Declarative HR-frame spec (JSON) from the CFS cfg."""
     lf = cfg["lateral_frame"]; site = cfg["site"]; geo = cfg["geometry"]; ld = cfg["loads"]
     H = list(geo["heights_m"])
-    sysn, R, cite = resolve_system(site["zone"], lf.get("system"), sum(H))
+    rs = resolve_system_full(site["zone"], lf.get("system"), sum(H), lf.get("R_x"), lf.get("R_y"),
+                             lf.get("system_x"), lf.get("system_y"))
+    sysn, R, cite = rs["system"], rs["R"], rs["cite"]
     if lf.get("R") is not None and abs(float(lf["R"]) - R) > 1e-9:
         raise LateralSystemError("lateral_frame.R = %s but IS 1893 Table 9 gives %s for %s" % (lf["R"], R, sysn))
     I_rec = IS.importance_factor(cfg.get("occupancy"))
@@ -160,8 +304,9 @@ def build_hr_spec(cfg, name):
                [["Y", 0, j] for j in range(NY)] + [["Y", NX, j] for j in range(NY)]
     elif bays == "core":
         bays = [["X", NX // 2, NY // 2], ["Y", NX // 2, NY // 2]]
-    if sysn in ("SMF", "SMRF"):
-        bays = []
+    if not rs["braced"]:
+        bays = []                                           # pure moment frame: no braced bays
+    # C10: a mixed system (SMF+SCBF, EBF+SMF) keeps its declared braced bays and its moment lines
     ws, forces = wind_story_forces(cfg)
     plan = dict(cfg.get("load_plan") or {})
     plan["jurisdiction"] = "india"
@@ -170,20 +315,28 @@ def build_hr_spec(cfg, name):
                                    D_floor_kNm2=ld["D_floor"], D_roof_kNm2=ld["D_roof"], L_floor_kNm2=ld["L_floor"],
                                    L_roof_kNm2=ld["Lr"], clad_kNm2=ld.get("clad", 0.0),
                                    partition_kNm2=ld.get("partition_design_kNm2", 0.0), snow_kNm2=ld.get("snow", 0.0))
-    plan["story_forces"] = dict(plan.get("story_forces") or {}, **forces)
+    mwp = lowrise_member_wind_plan(cfg, ws, plan)
+    if mwp is not None:
+        plan["member_wind"], plan["wind_summary"]["member_wind_basis"] = mwp
+    plan["story_forces"], ws["story_forces_source"] = merge_declared_wind(plan, forces)
+    plan["wind_summary"].update(story_forces_source=ws["story_forces_source"])
     plan["story_forces_units"] = "N"
     plan["seismic_summary"] = dict(plan.get("seismic_summary") or {}, code=IS.IS1893_EDITION if hasattr(IS, "IS1893_EDITION") else "IS 1893 (Part 1):2016",
                                    site=site.get("city"), zone=site["zone"], Z=site["Z"], I=I_rec["I"], I_cite=I_rec.get("cite"),
-                                   I_row=I_rec.get("row"), R=R, R_cite=cite, system=sysn, soil=site["soil"])
+                                   I_row=I_rec.get("row"), R=R, R_cite=cite, system=sysn, soil=site["soil"],
+                                   **({"R_x": rs["R_x"], "R_y": rs["R_y"]} if (rs["R_x_declared"] or rs["R_y_declared"]) else {}))
     plan["combinations"] = "auto"
     plan["lateral_frame_basis"] = "IS800_LSD"
     plan.pop("cfs_combinations", None)                      # the HR run sees only the IS 800 set
     spec = {
-        "name": name, "system": sysn, "R": R, "Z": site["Z"], "I": I_rec["I"], "zone": site["zone"], "soil": site["soil"],
+        "name": name, "system": sysn, "system_components": rs["components"], "R": R,
+        "R_x": rs["R_x"] if rs["R_x_declared"] else None, "R_y": rs["R_y"] if rs["R_y_declared"] else None,
+        "system_x": lf.get("system_x"), "system_y": lf.get("system_y"), "Z": site["Z"], "I": I_rec["I"], "zone": site["zone"], "soil": site["soil"],
         "NX": NX, "NY": NY, "bay_x_m": float(lf["bay_x_m"]), "bay_y_m": float(lf["bay_y_m"]), "heights_m": H,
         "D_floor": ld["D_floor"], "D_roof": ld["D_roof"], "L_floor": ld["L_floor"], "Lr": ld["Lr"], "clad": ld.get("clad", 0.0),
         "snow": ld.get("snow", 0.0), "partition_design_kNm2": ld.get("partition_design_kNm2", 0.0),
-        "partition_seismic_kNm2": ld.get("partition_seismic_kNm2", 0.5), "partitions": ld.get("partitions", True),
+        # H22 / ruling R1: partitions in W default to max(0.5, the partition design allowance) (IS 1893 7.3.6)
+        "partition_seismic_kNm2": partition_seismic_default(ld), "partitions": ld.get("partitions", True),
         "braced_bays": bays, "moment_lines": lf.get("moment_lines") or [], "col": lf["col"], "beam": lf["beam"],
         "brace": lf.get("brace"), "col_sec": lf.get("col_sec") or {}, "beam_sec": lf.get("beam_sec") or {},
         "steel_grade": lf.get("steel_grade", "E250 B0"), "brace_grade": lf.get("brace_grade", "E250 B0"),
@@ -226,18 +379,35 @@ def run_lateral(cfg, job_dir, name=None, timeout_s=3600):
     return res
 
 
+def _per_storey(v, k, default=None):
+    """A number, or {storey: value} (keys int / str, optional 'default') -> the value for storey k."""
+    if isinstance(v, dict):
+        for key in (k, str(k)):
+            if key in v:
+                return v[key]
+        for rng, val in v.items():                          # '1-3' ranges
+            a_, _, b_ = str(rng).partition("-")
+            if a_.isdigit() and b_.isdigit() and int(a_) <= k <= int(b_):
+                return val
+        return v.get("default", default)
+    return v if v is not None else default
+
+
 def diaphragm_demands(cfg, lateral):
     """Storey diaphragm demands handed from the CFS floor / roof to the frame lines (IS 1893 7.6.3 storey forces at
-    gamma 1.0, IS 875-3 wind storey forces): unit shear into the two frame lines of each direction and the chord
-    force M/depth.  Capacities of a sheathed / decked CFS diaphragm need a cited product / test value -- IS 801 has no
-    diaphragm provision (9.1.4) -- so each capacity slot is found:false until the EOR supplies one."""
+    gamma 1.0, IS 875-3 wind storey forces): unit shear into the frame lines of each direction and the chord force
+    M/depth.  Capacities of a sheathed / decked CFS diaphragm need a cited product / test value -- IS 801 has no
+    diaphragm provision (9.1.4) -- so each capacity slot is found:false until the EOR supplies one.
+    C03: one braced line is allowed (v = F/B, cantilever chord); geometry.diaphragm_lines_X / _Y and
+    diaphragm_capacity.v_allow_kN_per_m may be per storey ({storey: value}); collector rows at the declared
+    re-entrant lines (geometry.reentrant_lines_X / _Y) carry F (1 - B_short/B)."""
     geo = cfg["geometry"]; H = list(geo["heights_m"])
     Lx, Ly = float(geo["plan_x_m"]), float(geo["plan_y_m"])
-    plan = (lateral.get("esm") or {}); sf_eq = (plan.get("story_forces") or {})
     lp = json.load(open(os.path.join(lateral["root"], "load_plan.json"))) if os.path.exists(os.path.join(lateral["root"], "load_plan.json")) else {}
     sf = lp.get("story_forces") or {}
     lf = cfg.get("lateral_frame") or {}
     NX, NY = int(lf["NX"]), int(lf["NY"])
+    bx, by = float(lf.get("bay_x_m") or Lx / max(NX, 1)), float(lf.get("bay_y_m") or Ly / max(NY, 1))
     # braced lines per direction (a line = a grid line with at least one braced bay); "perimeter" / "core" as in build_hr_spec
     bays = lf.get("braced_bays", "perimeter")
     if bays == "perimeter":
@@ -249,38 +419,75 @@ def diaphragm_demands(cfg, lateral):
         for (dd, kk) in (lf.get("moment_lines") or []):
             if dd == d:
                 lines[d] = sorted(set(lines[d]) | {int(kk)})
+    dcap = cfg.get("diaphragm_capacity") or {}
     rows = []
     for k in range(1, len(H) + 1):
         # storey force along X is resisted by the frame lines that run along X (y = const, length Lx = the diaphragm
         # depth B); with n equal lines at spacing s = Lspan / (n - 1) the rigid diaphragm hands F / n to each line:
         # v = F / (n B); chord = w s^2 / (8 B) with w = F / Lspan (continuous-diaphragm approximation; n = 2 is the
-        # simple span F / (2 B), F Lspan / (8 B)).  WP6-fix: B and Lspan were swapped (B = Ly for X), which under-stated
-        # v for the long direction of a rectangle; the line count was ignored.
-        for d, B, Lspan in (("X", Lx, Ly), ("Y", Ly, Lx)):
+        # simple span F / (2 B), F Lspan / (8 B)).  n = 1: the whole F goes into the one line (v = F / B) and the
+        # diaphragm cantilevers from it: chord = w a^2 / (2 B), a = the longer overhang (a = L/2 for a central line:
+        # F L / 8).  WP6-fix: B and Lspan were swapped; C03: max(2, n) halved the shear of a single line.
+        for d, B, Lspan, bay in (("X", Lx, Ly, by), ("Y", Ly, Lx, bx)):
             # non-rectangular plans: depth (line length) and span declared per direction
-            B = float(geo.get("diaphragm_depth_%s_m" % d) or B)
-            Lspan = float(geo.get("diaphragm_span_%s_m" % d) or Lspan)
-            nlines = max(2, int(geo.get("diaphragm_lines_%s" % d) or len(lines[d]) or 2))
-            s_span = Lspan / (nlines - 1)
+            B = float(_per_storey(geo.get("diaphragm_depth_%s_m" % d), k) or B)
+            Lspan = float(_per_storey(geo.get("diaphragm_span_%s_m" % d), k) or Lspan)
+            ndecl = _per_storey(geo.get("diaphragm_lines_%s" % d), k)
+            nlines = int(ndecl or len(lines[d]) or 2)
+            if nlines < 1:
+                raise LateralSystemError("geometry.diaphragm_lines_%s = %s at storey %d: at least one frame line" % (d, ndecl, k))
             Fe = abs(float((sf.get("EQ_" + d) or {}).get(str(k), [0, 0, 0])[0 if d == "X" else 1]))
             Fw = abs(float((sf.get("W_" + d) or {}).get(str(k), [0, 0, 0])[0 if d == "X" else 1]))
             F = max(Fe, Fw); gov = "EQ" if Fe >= Fw else "W"
-            # flexible-diaphragm tributary share to the two extreme frame lines (perimeter braced bays) or equal split
             v_unit = F / 1e3 / (nlines * B)   # kN/m along each of the n frame lines (length B = diaphragm depth)
-            M = (F / Lspan) * s_span ** 2 / 8.0   # N-m: diaphragm panel of span s between adjacent lines
+            w = F / Lspan                     # N/m
+            if nlines == 1:
+                pos = (lines[d][0] * bay) if (len(lines[d]) == 1 and not ndecl) else Lspan / 2.0
+                a_ = max(pos, Lspan - pos)
+                M = w * a_ ** 2 / 2.0         # N-m: cantilever each side of the single line
+                s_span = a_
+                mech = "single line: v = F/B, chord = (F/L) a^2/(2 B), a = %.2f m overhang" % a_
+            else:
+                s_span = Lspan / (nlines - 1)
+                M = w * s_span ** 2 / 8.0     # N-m: diaphragm panel of span s between adjacent lines
+                mech = "n = %d equal lines: v = F/(n B), chord = (F/L) s^2/(8 B), s = L/(n - 1)" % nlines
             chord = M / B                     # N
-            dcap = cfg.get("diaphragm_capacity") or {}
-            cap = dcap.get("v_allow_kN_per_m")
+            cap = _per_storey(dcap.get("v_allow_kN_per_m"), k)
+            ccite = dcap.get("cite")
+            if isinstance(cap, dict):
+                ccite = cap.get("cite") or ccite
+                cap = cap.get("value")
             rec_cap = {"capacity": None, "capacity_basis": "test", "allowable_increase": 1.0, "dc": None, "ok": None, "found": False}
             if cap:
                 inc = float(dcap.get("allowable_increase", 1.0))
                 rec_cap = {"capacity": float(cap) * inc, "value": v_unit, "limit": float(cap) * inc, "capacity_basis": dcap.get("basis", "test"),
                            "allowable_increase": inc, "dc": v_unit / (float(cap) * inc), "ok": v_unit <= float(cap) * inc, "found": True,
-                           "capacity_cite": dcap.get("cite"), "capacity_source": dcap.get("source")}
+                           "capacity_cite": ccite, "capacity_source": dcap.get("source")}
             rows.append({"storey": k, "dir": d, "F_EQ_N": Fe, "F_W_N": Fw, "governing": gov, "F_N": F, "n_lines": nlines,
                          "v_unit_kN_per_m": v_unit, "chord_force_kN": chord / 1e3, "span_m": Lspan, "panel_span_m": s_span, "depth_m": B, **rec_cap,
-                         "clause": "IS 1893 7.6.3 storey force (gamma 1.0) / IS 875-3 storey wind; rigid diaphragm on n equal frame lines: "
-                                   "shear = F/(n B) per unit length of line, chord = (F/L) s^2/(8 B), s = L/(n - 1)",
+                         "clause": "IS 1893 7.6.3 storey force (gamma 1.0) / IS 875-3 storey wind; rigid diaphragm on the frame lines: " + mech,
                          "note": "diaphragm shear capacity requires a cited test / product value for the deck or sheathing "
                                  "(IS 801 9.1.4 excludes diaphragms; no Indian table) -- EOR input"})
+            # C03 / CFS-C-17: collectors (drag struts) at declared re-entrant lines
+            for rl in (geo.get("reentrant_lines_%s" % d) or []):
+                st_ = rl.get("storeys") or rl.get("storey")
+                if st_ not in (None, "all"):
+                    sts = st_ if isinstance(st_, (list, tuple)) else [st_]
+                    if k not in [int(x) for x in sts]:
+                        continue
+                Bs = float(rl["B_short_m"]); Bf = float(rl.get("B_m") or B)
+                Fc = F * max(0.0, 1.0 - Bs / Bf)
+                crow = {"storey": k, "dir": d, "kind": "collector", "line": rl.get("line"), "F_N": F, "B_short_m": Bs, "B_m": Bf,
+                        "value": Fc / 1e3, "F_collector_kN": Fc / 1e3, "demand_level": "working",
+                        "clause": "re-entrant corner collector (drag strut): F (1 - B_short/B) of the storey force is dragged "
+                                  "across the re-entrant line into the frame line (IS 1893 7.6.3 storey force / IS 875-3 storey wind)",
+                        "limit": None, "dc": None, "ok": None, "found": False, "capacity_basis": rl.get("capacity_basis", "EOR_input"),
+                        "allowable_increase": 1.0,
+                        "note": "collector capacity: declare reentrant_lines_%s[].capacity_kN + cite (working-stress capacity of the "
+                                "drag member / its connections)" % d}
+                if rl.get("capacity_kN"):
+                    capk = float(rl["capacity_kN"])
+                    crow.update(limit=capk, capacity=capk, dc=(Fc / 1e3) / capk, ok=(Fc / 1e3) <= capk + 1e-9, found=True,
+                                capacity_cite=rl.get("cite"), note=None)
+                rows.append(crow)
     return rows
