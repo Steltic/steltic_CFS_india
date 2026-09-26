@@ -142,3 +142,11 @@ def test_reworded_uses_word_boundaries():
                                             ["partial safety factor", "gamma_m0", "gamma_m1"]]}
     assert not any("combinationss" in x for x in ws._reworded("load combinations IS 875 Part 5"))
     assert ws._reworded("partial safety factors for loads") == []
+
+
+def test_exact_table_recognised_by_caption_title_from_an_older_adapter():
+    ws, out = _run(lambda q, c, cl, t, n: {"results": [{"id": "x", "section": "7.3.5", "source": "IS_1893_Part_1_2016",
+                                                        "title": "Table 10 Percentage of Imposed Load"}]
+                                           if cl else []},
+                   "Table 10", type="exact_table", doc="IS_1893_Part_1_2016")
+    assert len(ws.wire) == 1 and out.get("exact_ids") == ["Table 10"]
