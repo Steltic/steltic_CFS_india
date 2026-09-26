@@ -138,6 +138,13 @@ def build_cfg(spec):
             cfg[key] = spec[key]
     if spec.get("default_strong"):
         cfg["default_strong"] = spec["default_strong"]
+    if spec.get("roof_planes"):                             # X02: true-slope pitched roof (metre or mm keys)
+        import importlib.util as _ilu
+        _sp = _ilu.spec_from_file_location("cfs_frame_build_rp", os.path.join(HERE, "india_cfs_frame_build.py"))
+        _m = _ilu.module_from_spec(_sp); _sp.loader.exec_module(_m)
+        cfg["roof_planes"] = _m.roof_planes_mm(spec["roof_planes"])
+    if spec.get("roof_regions"):                            # X02: roof bays of intermediate levels
+        cfg["roof_regions"] = {int(k): [tuple(b) for b in v] for k, v in dict(spec["roof_regions"]).items()}
     cfg.update(spec.get("hr_cfg_extra") or {})              # declared HR cfg keys (WP6 gold packages), verbatim
     for key in ("D_by_level", "L_by_level"):                # per-level pressures (podium / mezzanine): int level keys after JSON
         if cfg.get(key):

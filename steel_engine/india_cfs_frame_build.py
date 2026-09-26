@@ -43,6 +43,7 @@ _cells_area = _FB._cells_area
 framed_area_m2 = _FB.framed_area_m2
 _xy = _FB._xy
 frame_build = _FB.frame_build
+roof_planes_mm = _FB.roof_planes_mm            # X02 (gold roof planes in metres -> cfg['roof_planes'] in mm)
 
 
 def framed_area_issues(cfg):
