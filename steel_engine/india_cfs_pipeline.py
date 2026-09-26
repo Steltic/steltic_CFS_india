@@ -172,7 +172,7 @@ def design_and_report(name, cfg, outdir=None, do_report=True):
                                                                                                "eave_struts", "headers")}))
         pkg["diaphragm"] = []
     else:
-        lat = L.run_lateral(cfg, os.path.join(root, "lateral"), name=name + "_lateral")
+        lat = L.run_lateral(cfg, os.path.join(root, "lateral"), name=name + "_lateral", rag_dir=os.path.join(root, "rag"))
         hr_plan = json.load(open(os.path.join(lat["root"], "load_plan.json"))) if os.path.exists(os.path.join(lat["root"], "load_plan.json")) else {}
         cfg["load_plan"]["wind_summary"] = hr_plan.get("wind_summary") or cfg["load_plan"].get("wind_summary")
         cfg["load_plan"]["story_forces"] = hr_plan.get("story_forces")

@@ -285,6 +285,41 @@ def partition_seismic_default(ld):
     return max(0.5, float(ld.get("partition_design_kNm2") or 0.0))
 
 
+def hr_retrieval_rows(rows):
+    """FIX1: the CFS retrieval row names its stored hit as 'file' (e.g. 'rag/IS1893_table9_SBF.json'); the vendored HR
+    evidence gate (consistency.rag_evidence_issues, H30) reads 'hit_file' + 'quote'.  Map file -> hit_file exactly as the
+    CFS-level check does (consistency.rag_evidence), so the lateral sub-run checks the same stored hit -- never drop a row
+    or its found flag."""
+    if not isinstance(rows, list):
+        return rows
+    out = []
+    for h in rows:
+        if isinstance(h, dict) and h.get("file") and not h.get("hit_file"):
+            h = dict(h)
+            f = str(h["file"])
+            h["hit_file"] = f.split("rag/", 1)[-1] if "rag/" in f else f
+        out.append(h)
+    return out
+
+
+def copy_rag_hits(rag_dir, sub_root):
+    """FIX1: the HR sub-run is its own job folder (<job>/lateral/<name>); its consistency gate looks for the stored
+    retrieval hits in <sub_root>/rag/.  Copy the parent job's rag/ there (files only, the parent copy stays the record).
+    Returns the number of files copied."""
+    import shutil
+    if not rag_dir or not os.path.isdir(rag_dir):
+        return 0
+    dst = os.path.join(sub_root, "rag")
+    n = 0
+    for dp, dn, fn in os.walk(rag_dir):
+        rel = os.path.relpath(dp, rag_dir)
+        os.makedirs(os.path.join(dst, rel), exist_ok=True)
+        for f in fn:
+            shutil.copy2(os.path.join(dp, f), os.path.join(dst, rel, f))
+            n += 1
+    return n
+
+
 def build_hr_spec(cfg, name):
     """Declarative HR-frame spec (JSON) from the CFS cfg."""
     lf = cfg["lateral_frame"]; site = cfg["site"]; geo = cfg["geometry"]; ld = cfg["loads"]
@@ -328,6 +363,7 @@ def build_hr_spec(cfg, name):
     plan["combinations"] = "auto"
     plan["lateral_frame_basis"] = "IS800_LSD"
     plan.pop("cfs_combinations", None)                      # the HR run sees only the IS 800 set
+    plan["retrieval"] = hr_retrieval_rows(plan.get("retrieval"))
     spec = {
         "name": name, "system": sysn, "system_components": rs["components"], "R": R,
         "R_x": rs["R_x"] if rs["R_x_declared"] else None, "R_y": rs["R_y"] if rs["R_y_declared"] else None,
@@ -357,10 +393,15 @@ def build_hr_spec(cfg, name):
     return spec
 
 
-def run_lateral(cfg, job_dir, name=None, timeout_s=3600):
-    """Build the HR spec, run the vendored HR pipeline in a subprocess and return the lateral result summary."""
+def run_lateral(cfg, job_dir, name=None, timeout_s=3600, rag_dir=None):
+    """Build the HR spec, run the vendored HR pipeline in a subprocess and return the lateral result summary.
+    rag_dir: the parent job's stored retrieval hits (default <job_dir>/../rag); copied into the sub-run's own rag/ so
+    the HR evidence gate sees the hits that the load_plan retrieval rows cite (FIX1)."""
     name = name or (cfg.get("name") or "job") + "_lateral"
     os.makedirs(job_dir, exist_ok=True)
+    if rag_dir is None:
+        rag_dir = os.path.join(os.path.dirname(os.path.abspath(job_dir)), "rag")
+    copy_rag_hits(rag_dir, os.path.join(job_dir, name))
     spec = build_hr_spec(cfg, name)
     spec_path = os.path.join(job_dir, "lateral_frame_spec.json")
     json.dump(spec, open(spec_path, "w"), indent=1, default=str)
