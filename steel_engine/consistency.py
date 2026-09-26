@@ -22,6 +22,7 @@ import india_cfs_basis as B
 import india_cfs_gates as G
 
 TOL = 0.04
+LITERAL_DC = (0.8, 0.9, 1.0)
 
 
 def _num(x):
@@ -41,7 +42,10 @@ def _dc_issues(pkg):
                 r = abs(v) / c
                 if abs(r - dc) > TOL * max(dc, 1e-9) + 1e-6:
                     issues.append("%s: stored dc %.4f != value/limit %.4f" % (path, dc, r))
-            if _num(dc) and (v is None or c is None) and "checks" not in obj and dc in (0.8, 0.9, 1.0):
+            # C12: the literal-D/C rule applies only to a row with neither value / limit nor a derivation (checks, the
+            # governing check of a summary) -- and by tolerance, not by an exact float match
+            derived = any(k in obj for k in ("checks", "governing_check", "derived_from"))
+            if _num(dc) and (v is None or c is None) and not derived and any(abs(dc - x) <= 1e-6 for x in LITERAL_DC):
                 issues.append("%s: literal D/C %.2f without value / limit" % (path, dc))
             for k, val in obj.items():
                 walk(val, path + "." + str(k))
@@ -101,6 +105,29 @@ def _report_issues(root, pkg):
     return out
 
 
+def rag_evidence(root, cfg):
+    """L-13 / C12: every found:true retrieval row must be backed by a stored rag/ hit that contains its quote (or, without
+    a quote, the numbers of its cite) -- the vendored HR consistency.rag_evidence_issues, with the CFS row fields mapped
+    (file -> hit_file, quote).  Only run for a job folder (root) -- the stored hits live in <root>/rag/."""
+    if not root:
+        return []
+    plan = (cfg or {}).get("load_plan") or {}
+    rows = []
+    for h in plan.get("retrieval") or []:
+        if isinstance(h, dict):
+            h = dict(h)
+            if h.get("file") and not h.get("hit_file"):
+                h["hit_file"] = str(h["file"]).split("rag/", 1)[-1] if "rag/" in str(h["file"]) else h["file"]
+            rows.append(h)
+        else:
+            rows.append(h)
+    import importlib.util
+    sp = importlib.util.spec_from_file_location("hr_vendor_consistency", os.path.join(india_cfs_env.VENDOR, "consistency.py"))
+    mod = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(mod)
+    return mod.rag_evidence_issues({"retrieval": rows}, root)
+
+
 def _retrieval_issues(root, cfg):
     out = []
     plan = (cfg or {}).get("load_plan") or {}
@@ -127,6 +154,7 @@ def check(name, root=None, pkg=None, verbose=True):
     issues += _file_issues(root)
     issues += _report_issues(root, pkg)
     issues += _retrieval_issues(root, cfg)
+    issues += rag_evidence(root, cfg)
     if verbose:
         print("[consistency] %s: %d issue(s)" % (name, len(issues)))
         for x in issues:

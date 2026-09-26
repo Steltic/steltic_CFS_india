@@ -33,6 +33,8 @@ US_RE = re.compile(r"\b(AISI|S100|S240|S400|ASCE\s*7|ASCE7|AISC\s*3[456][018]|SD
                    r"Omega_?0|\bpsf\b|\bplf\b|\bkip\b|\bksi\b|Risk Category|Table 12\.\d)", re.I)
 SFIA_RE = re.compile(r"^\d{3,4}[SsTtUuFfLl]\d{2,3}-\d{2,3}$")
 DEMAND_CAP_RE = re.compile(r"cap\s*=\s*max\(.*\*\s*1\.(15|25)|DC\"?\s*[:=]\s*0\.8\b|seeded D/C", re.I)
+BLOCKING_RE = re.compile(r"analysis|7\.7\.1|RSA|ESM|irregular|Table 5|Table 6|gate|Amd|flexible|diaphragm|torsion|drift|"
+                         r"system|Table 9|18168", re.I)
 AUTHORITY = "india_cfs_gates.design_status (CFS) over india_seismic_gates.design_status (vendored HR, lateral frame)"
 
 IS800_STEMS = ("IS_800_2007", "IS800", "IS_800", "engineering_standards_IS800", "IS_18168_2023", "IS18168")
@@ -176,8 +178,27 @@ def lateral_issues(pkg) -> list:
     if lat.get("error"):
         return ["lateral frame run error: %s" % lat["error"]]
     if str(st.get("status")).lower() != "complete":
-        return ["lateral frame (HR authority) status %s: %s" % (st.get("status"), r) for r in (st.get("reasons") or [])[:60]] or \
-               ["lateral frame (HR authority) status %s" % st.get("status")]
+        rs = list(st.get("reasons") or [])
+        if not rs:
+            return ["lateral frame (HR authority) status %s" % st.get("status")]
+        # C12 (CFS-B-02): blocking reasons first (analysis method / irregularity / gates), per-element duplicates grouped,
+        # and a count of the rest instead of a silent cut at 60
+        seen, uniq = {}, []
+        for r in rs:
+            key = re.sub(r"(e|base-e|conn-)\d+|\d+(\.\d+)?", "#", str(r))
+            if key in seen:
+                seen[key] += 1
+                continue
+            seen[key] = 1
+            uniq.append((key, r))
+        rank = lambda r: 0 if BLOCKING_RE.search(str(r)) else 1
+        uniq.sort(key=lambda kr: rank(kr[1]))
+        cap = 60
+        out = ["lateral frame (HR authority) status %s: %s%s" % (st.get("status"), r, (" (+%d similar)" % (seen[k] - 1)) if seen[k] > 1 else "")
+               for k, r in uniq[:cap]]
+        if len(uniq) > cap:
+            out.append("lateral frame (HR authority): ... and %d more (see lateral/STATUS.md)" % (len(uniq) - cap))
+        return out
     return []
 
 

@@ -182,6 +182,21 @@ def build_cfg(spec):
     return cfg, r
 
 
+def _governing(checks, DC=None):
+    """C12 (CFS-A-02): value / limit / check / clause of the governing (max dc) HR check, so a summary D/C is traceable and
+    never reads as a literal constant."""
+    rows = checks.values() if isinstance(checks, dict) else (checks or [])
+    rows = [r for r in rows if isinstance(r, dict) and isinstance(r.get("dc"), (int, float))]
+    if not rows:
+        return {}
+    if isinstance(DC, (int, float)):
+        g = min(rows, key=lambda r: abs(r["dc"] - DC))          # the row the stored DC comes from (HR DC may exclude e.g. slenderness)
+    else:
+        g = max(rows, key=lambda r: r["dc"])
+    return {"value": g.get("value"), "limit": g.get("limit"), "governing_check": g.get("name") or g.get("check"),
+            "governing_clause": g.get("clause")}
+
+
 def _summary(cfg, out, root):
     import india_seismic_gates as G
     res = {"root": root, "blocked": bool(out.get("blocked")), "error": out.get("error"), "preflight": out.get("preflight")}
@@ -194,11 +209,13 @@ def _summary(cfg, out, root):
         "status": pkg.get("design_status"), "seismic_calc": pkg.get("seismic_calc"), "seismic_analysis": pkg.get("seismic_analysis"),
         "Ah": ss.get("Ah"), "VB_kN": ss.get("VB_kN"), "W_kN": ss.get("W_kN"), "Ta_s": {"X": ss.get("Ta_x_s"), "Y": ss.get("Ta_y_s")},
         "Sa_g": ss.get("Sa_g"), "I": ss.get("I"), "R": ss.get("R"), "Z": ss.get("Z"), "zone": ss.get("zone"),
-        "members": [{"id": m["id"], "role": m["inputs"]["role"], "section": m["inputs"]["section"], "DC": m.get("DC"),
-                     "governing_combo": m["inputs"].get("governing_combo"), "n": m["inputs"].get("n_elements")}
+        "members": [dict({"id": m["id"], "role": m["inputs"]["role"], "section": m["inputs"]["section"], "DC": m.get("DC"),
+                          "governing_combo": m["inputs"].get("governing_combo"), "n": m["inputs"].get("n_elements")},
+                         **_governing(m.get("checks"), m.get("DC")))
                     for m in pkg.get("members", [])],
-        "connections": [{"id": c["id"], "type": c["type"], "DC": c.get("DC"),
-                         "not_evaluated": [x["name"] for x in c.get("checks", []) if x.get("ok") is None]}
+        "connections": [dict({"id": c["id"], "type": c["type"], "DC": c.get("DC"),
+                              "not_evaluated": [x["name"] for x in c.get("checks", []) if x.get("ok") is None]},
+                             **_governing(c.get("checks"), c.get("DC")))
                         for c in pkg.get("connections", [])],
         "drift_table": pkg.get("drift_table"), "drift_max": max((d["drift"] for d in pkg.get("drift_table") or []), default=None),
         "irregularity": {k: (v.get("irregular") if isinstance(v, dict) else v) for k, v in (pkg.get("irregularity") or {}).items()

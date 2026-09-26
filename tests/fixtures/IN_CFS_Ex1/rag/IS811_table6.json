@@ -1,0 +1,15 @@
+{
+ "found": true,
+ "query": "Table 6 CLR100X50X15X2 CLR180X50X20X3.15",
+ "type": "exact_section",
+ "stem": "IS_811_1987",
+ "hits": [
+  {
+   "found": true,
+   "doc": "IS_811_1987",
+   "text": "7.50 | 9.69 | 12.3 | 3.54 | 123 | 101 | 3.16 | 2.86 | 30.8 | 22.6 | 8.55 | 0.995 | 2190 | | 100X 100X 15X2.00 | 100 | 15 | 2.00 | 3.00 | 4.91 | 6.26 | 3.90 | 115 | 79.9 | 4.29 | 3.58 | 23.1 | 13.1 | 9.06 | 0.082 | 1720 | | 100 X 100 x 20 x 3.15 | 100 | 20 | 3.15 | 4.73 | 7.74 | 9.86 | 4.07 | 174 | 127 | 4.21 | 3.59 | 34.9 | 21.5 | 9.55 | 0.321 | 3080 | | 100X 100X25X4.00 | 100 | 25 | 4.00 | 6.00 | 9.91 | 12.6 | 4.24 | 215 | 166 | 4.12 | 3.62 | 43.0 | 28.7 | 10.0 | 0.659 | 4660 | | 100X 100X25X5.00 | 100 | 25 | 5.00 | 7.50 | 12.0 | 15.3 | 4.27 | 255 | 194.9 | 4.07 | 3.56 | 50.9 | 33.6 | 10.1 | 1.24 | 5340 | <!-- pdf_page=20 printed_label=1987 printed_label_qualified=1987 part=standard --> 18 TABLE 6 CHANNELS WITH LIPS-RECTANGULAR <!-- image --> | DESIGNATION | | | DIMENSIONS | | | M-1 UNIT LENGTH | AREA OF SECTION GRAVITY | CENTRE MOMENT OF INERTIA | CENTRE MOMENT OF INERTIA | OF RADIUS OF GYRATION | OF RADIUS OF GYRATION | SECTION MODULUS | SECTION MODULUS | &EAR CENTRE | &EAR CENTRE | TORSION CONSTANT | WARPING CONSTANT | |---------------------|------|------|--------------|------|------|-------------------|---------------------------|----------------------------|----------------------------|-------------------------|-------------------------|-------------------|-------------------|---------------|---------------|--------------------|--------------------| | hXbxcXt mm | h mm | b mm | c mm | I mm | R mm | M kg/m | A",
+   "source": "engineering_rag_india/documents/standards/IS_811_1987/markdown/IS_811_1987.search.md"
+  }
+ ],
+ "note": "stored corpus hit for this retrieval row (C12 / L-13: consistency checks the quote against it)"
+}

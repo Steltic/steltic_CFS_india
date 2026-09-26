@@ -1,0 +1,15 @@
+{
+ "found": true,
+ "query": "Section 12.8 SCBF Table 4",
+ "type": "exact_section",
+ "stem": "IS_800_2007",
+ "hits": [
+  {
+   "found": true,
+   "doc": "IS_800_2007",
+   "text": " | | 11.2 | Tension Members | 84 | | 11.3 | Compression Members | 84 | | 11.4 | Members Subjected to Bending | 85 | | 11.5 | Combined Stresses | 85 86 | | 11.6 Connections SECTION | 12 DESIGN AND DETAILING FOR EARTHQUAKE LOADS | 87 | | 12.1 | 12.1 | 87 | | 12.2 | General Load and Load Combinations | 87 | | 12.3 | Response Reduction Factor | 87 | | 12.4 | Connections, Joints and Fasteners | 87 | | 12.5 | Columns | 87 | | 12.6 | Storey Drift | 88 | | 12.7 | Ordinary Concentrically Braced Frames (OCBF) | 88 | <!-- pdf_page=5 printed_label=iii printed_label_qualified=iii part=standard --> | | IS 8~0 :2007 | |-------------------------------------------------------------------|----------------| | 12.8 Special Concentrically Braced Frames (SCBF) | 88 | | 12.9 Eccentrically Braced Frames (EBF) | 89 | | 1~.10 Ordinav Moment Frames (OMF) | 89 | | 12.11 Special Moment Frames (SMF) | 90 | | 12.12 Column Bases | 90 | | SECTION 13 FATIGUE | 91 | | 13.1 General | 91 | | 13.2 Design | 91 | | 13.3 Detail Category | 92 | | 13.4 Fatigue Strength | 93 | | 13.5 Fatigue Assessment | 99 | | 13.6 Necessity for Fatigue Assessment | 100 | | SECTION 14 DESIGN ASSISTED BY TESTING | 100 | | 14.1 Need for Testing | 100 | | 14.2 Types of Test | 101 | | 14.3 Test Conditions | 102 | | 14.4 Test Loading | 102 | | 14.5 Criteria for Acceptance | 103 | | SECTION 15 DURABILITY | 103 | | 15.1 General | 103 | | 15.2 Requirements for Durability | 103 | | SECTION 16",
+   "source": "engineering_rag_india/documents/standards/IS_800_2007/markdown/IS_800_2007.search.md"
+  }
+ ],
+ "note": "stored corpus hit for this retrieval row (C12 / L-13: consistency checks the quote against it)"
+}

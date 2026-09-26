@@ -535,6 +535,15 @@ def seismic_elastic(cfg, secs, meta):
 
 
 # ------------------------------------------------------------------------------------------------ checks
+def _gov_row(c):
+    """C12: value / limit / check of the governing check row of a connection (summary D/C traceable, not 'literal')."""
+    rows = [r for r in (c.get("checks") or []) if isinstance(r.get("dc"), (int, float))]
+    if not rows:
+        return {"value": c.get("value"), "limit": c.get("limit")}
+    g = max(rows, key=lambda r: r["dc"])
+    return {"value": g.get("value"), "limit": g.get("limit"), "governing_check": g.get("check"), "governing_combo": g.get("combo")}
+
+
 def _mrow(label, name, r, extra=None):
     o = {"combo": label, "check": name, "value": r.get("value"), "limit": r.get("limit"), "dc": r.get("dc"), "ok": r.get("ok"),
          "clause": r.get("clause"), "cite": r.get("cite"), "allowable_increase": r.get("allowable_increase", 1.0),
@@ -918,10 +927,10 @@ def run(cfg, root):
               "load": gov_w}]
     lateral = {"system": "all-CFS portal (elastic, R 1.0)", "R": 1.0, "R_cite": seis["R_cite"], "seismic_basis": "elastic_R1", "statement": STATEMENT,
                "seismic_summary": {k: v for k, v in seis.items() if not k.startswith("_")}, "seismic_analysis": {"method": "ESM (IS 1893 7.6; regular, h < 15 m, Zone II)"},
-               "members": [{"id": m["id"], "role": m["role"], "section": m["designator"], "n": len(groups.get(m["role"], [1])), "DC": m["DC"],
-                            "governing_combo": max(((r["combo"], r["dc"]) for r in m["checks"] if isinstance(r.get("dc"), (int, float))), key=lambda x: x[1])[0] if m["DC"] else None}
+               "members": [dict(_gov_row(m), id=m["id"], role=m["role"], section=m["designator"], n=len(groups.get(m["role"], [1])), DC=m["DC"])
                            for m in members],
-               "connections": [{"id": c["id"], "type": c["type"], "DC": c.get("dc"), "not_evaluated": [k["check"] for k in c.get("checks", []) if k.get("ok") is None]}
+               "connections": [dict({"id": c["id"], "type": c["type"], "DC": c.get("dc"),
+                                     "not_evaluated": [k["check"] for k in c.get("checks", []) if k.get("ok") is None]}, **_gov_row(c))
                                for c in conns],
                "drift_table": drift, "drift_max": sway_e / He, "load_combinations_n": len(results), "status": None,
                "wind_vs_eq": {"H_base_wind_kN": Hw / 1e3, "H_base_eq_kN": Heq / 1e3, "VB_frame_kN": seis["VB_frame_kN"],
