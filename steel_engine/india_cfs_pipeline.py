@@ -122,7 +122,11 @@ def _portal_viewer(name, pkg, path):
     for t in g.get("supports", {}):
         x, y = P(*nodes[t])
         lines.append('<rect x="%.1f" y="%.1f" width="12" height="8" fill="#000"/>' % (x - 6, y))
-    mem = "".join("<tr><td>%s</td><td>%s</td><td>%s</td><td>%.2f</td></tr>" % (m["role"], m["section"], m.get("n_ply", 1), m["DC"])
+    # RR-BUG-3: a member without a D/C (e.g. the C07 mezzanine beam when mezzanine.beams is not declared) is shown as
+    # 'not evaluated', never formatted as a number
+    mem = "".join("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>"
+                  % (m.get("role"), m.get("section") or "not declared", m.get("n_ply", 1),
+                     ("%.2f" % m["DC"]) if isinstance(m.get("DC"), (int, float)) else "not evaluated")
                   for m in pkg.get("cfs_members", []))
     ss = (pkg.get("lateral_frame") or {}).get("seismic_summary") or {}
     n = int(g.get("n_frames") or 1); sp = float(g.get("spacing_mm") or 0.0) / 1000.0

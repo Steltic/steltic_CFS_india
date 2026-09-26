@@ -36,6 +36,11 @@ def _f(v, d=3):
     return "-" if not isinstance(v, (int, float)) else ("%%.%df" % d) % v
 
 
+def _dcf(v, d=3):
+    """RR-BUG-3: a D/C for display -- 'not evaluated' when there is none."""
+    return _f(v, d) if isinstance(v, (int, float)) else "not evaluated"
+
+
 def _e(s):
     return html.escape(str(s if s is not None else "-"))
 
@@ -112,9 +117,9 @@ def build_report_cfs_india(name, cfg, pkg, root):
         rel = os.path.relpath(lat["report_html"], root) if os.path.isabs(lat["report_html"]) else lat["report_html"]
         out.append("<p>Full frame report: <a href='%s'>%s</a> (13 chapters: members, Section 12, connections, bases, drift, irregularity).</p>" % (_e(rel), _e(rel)))
     out.append(_t(["member group", "role", "section", "n", "governing combination", "D/C"],
-                  [(m["id"], m["role"], m["section"], m.get("n"), m.get("governing_combo"), _f(m.get("DC"))) for m in lat.get("members") or []]))
+                  [(m["id"], m["role"], m["section"], m.get("n"), m.get("governing_combo"), _dcf(m.get("DC"))) for m in lat.get("members") or []]))
     out.append(_t(["connection", "type", "D/C", "not evaluated"],
-                  [(c["id"], c["type"], _f(c.get("DC")), "; ".join(c.get("not_evaluated") or [])) for c in lat.get("connections") or []]))
+                  [(c["id"], c["type"], _dcf(c.get("DC")), "; ".join(c.get("not_evaluated") or [])) for c in lat.get("connections") or []]))
     dt = lat.get("drift_table") or []
     out.append(_t(["storey", "dir", "drift", "limit", "ok"], [(d["storey"], d["dir"], _f(d["drift"], 5), d["limit"], _ok(d["ok"])) for d in dt]))
     cd = lat.get("capacity_design") or {}
@@ -126,7 +131,7 @@ def build_report_cfs_india(name, cfg, pkg, root):
     out.append("<h2>5. Cold-formed members (IS 801:1975 working stress, IS 811:1987 sections)</h2>")
     for m in pkg.get("cfs_members") or []:
         out.append("<h3>%s -- %s (%s), Fy %s MPa, spacing %s mm, length %s mm, <b>D/C %s</b> (%s)</h3>"
-                   % (_e(m["id"]), _e(m["designator"]), _e(m.get("role")), m.get("Fy_MPa"), m.get("spacing_mm"), m.get("length_mm"), _f(m.get("DC")), _ok(m.get("ok"))))
+                   % (_e(m["id"]), _e(m["designator"]), _e(m.get("role")), m.get("Fy_MPa"), m.get("spacing_mm"), m.get("length_mm"), _dcf(m.get("DC")), _ok(m.get("ok"))))
         if m.get("wind"):
             out.append("<p class='note'>wind: %s</p>" % _e(m["wind"]))
         if m.get("axial"):

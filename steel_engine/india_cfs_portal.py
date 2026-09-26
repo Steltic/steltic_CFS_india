@@ -721,8 +721,10 @@ def mezzanine_beam(cfg, fy):
         return {"id": "mezzanine-beam", "role": "mezzanine beam", "section": None, "designator": None, "DC": None, "ok": None,
                 "checks": [{"combo": "-", "check": "IS 801 6.1-6.5 mezzanine beam", "value": None, "limit": None, "dc": None, "ok": None,
                             "clause": "IS 801 6.1 / 6.3 / 6.4 / 6.5", "capacity_basis": "IS801_allowable", "allowable_increase": 1.0,
-                            "note": "mezzanine.beams (section, span_mm, trib_width_mm) not declared -- the beams that carry the "
-                                    "mezzanine joists to the posts are undesigned"}],
+                            "note": "mezzanine.beams not declared -- declare cfg['mezzanine']['beams'] = {section, n_ply, "
+                                    "span_mm, trib_width_mm, L_unbraced_mm, compression_flange_restrained, bearing_mm, "
+                                    "deflection_limit_ratio + cite} (C07); the beams that carry the mezzanine joists "
+                                    "to the posts are undesigned"}],
                 "demand_level": "working", "capacity_basis": "IS801_allowable", "design_basis": B.DESIGN_BASIS}
     trib = float(bm["trib_width_mm"]) / 1000.0
     spec = dict(bm, w_dead_kN_per_m=float(mz["D_kNm2"]) * trib, w_live_kN_per_m=float(mz["L_kNm2"]) * trib,
@@ -1027,7 +1029,11 @@ def run(cfg, root):
     reasons = []
     for m in members:
         if m["ok"] is not True:
-            reasons += ["%s: %s / %s dc %s ok %s" % (m["id"], r["combo"], r["check"], r.get("dc"), r.get("ok")) for r in m["checks"] if r.get("ok") is not True][:10]
+            # RR-BUG-3: an unevaluated row says why (its note, e.g. which cfg input to declare), not 'dc None'
+            reasons += [("%s: %s / %s not evaluated: %s" % (m["id"], r["combo"], r["check"], r["note"]))
+                        if (r.get("dc") is None and r.get("ok") is None and r.get("note"))
+                        else ("%s: %s / %s dc %s ok %s" % (m["id"], r["combo"], r["check"], r.get("dc"), r.get("ok")))
+                        for r in m["checks"] if r.get("ok") is not True][:10]
     for d in drift:
         if not d["ok"]:
             reasons.append("drift %s: %.5f > %.5f (%s)" % (d["load"], d["drift"], d["limit"], d["clause"]))
