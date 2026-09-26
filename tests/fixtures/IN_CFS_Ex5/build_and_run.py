@@ -19,6 +19,8 @@ Design decisions (the 'agent'):
     2 x CLR150X50X25X4) landing 4.5 m along the rafter (was 3.0 m), 2.5 m below the eave.
     C02 re-size: purlins CLR200X80X20X3.15 and girts CLR180X80X20X3.15 (were CLR150X50X20X3.15) for the member-level
     IS 875-3 pressures (element Ka, governing Cpe over all faces, Table 5 / 6 local strips with Kd 1.0, Cpi +-0.2).
+    C07: mezzanine beams 2 x CLR250X80X25X4 (3 m between posts); post rows include the bracing overturning axial under EL;
+    anchorage embedment 45.2 kN per M24 anchor declared as an EOR input (VERIFY); gable wind Cpe from Table 5 (+0.7 / -0.2).
   * Mezzanine: 12 m x 8 m over the first span at the end bay, at 3.5 m, on INDEPENDENT cold-formed posts (2 x CLR150X50X25X4
     at 3 m x 3 m); storage floor IL 7.5 kN/m2 (IS 875-2 Table 1 viii(a) minimum for warehouses, rag/IS875_P2_table1_storage.json),
     D 1.5; its seismic weight (D + 50 % IL, Table 10) enters the portal at 3.5 m (elastic, R 1.0).
@@ -67,7 +69,11 @@ def build_cfg():
                                   "note": "X-braced post bays (2 per direction) between the mezzanine deck and the slab"},
                       "use": "storage mezzanine (bulk storage <= 3 m high)",
                       "L_cite": "IS 875 (Part 2):1987 Table 1 viii(a) warehouses: 2.4 kN/m2 per m of storage height, minimum 7.5 kN/m2",
-                      "posts": {"section": "CLR150X50X25X4", "n_ply": 2, "trib_m2": 9.0, "note": "posts at 3 m x 3 m, pinned ends"}},
+                      "posts": {"section": "CLR150X50X25X4", "n_ply": 2, "trib_m2": 9.0, "note": "posts at 3 m x 3 m, pinned ends"},
+                      # C07: the beams carrying the mezzanine joists (3 m span, 3 m apart) to the posts, IS 801 6.1 - 6.5
+                      "beams": {"section": "CLR250X80X25X4", "n_ply": 2, "span_mm": 3000.0, "trib_width_mm": 3000.0, "bearing_mm": 100.0,
+                                "connector_spacing_mm": 300.0, "compression_flange_restrained": True, "deflection_limit_ratio": 300,
+                                "deflection_cite": "IS 800:2007 Table 6 (read-only): other buildings, floor, elements not susceptible to cracking, span/300"}},
         "cfs_members": {
             "Fy_MPa": 294.0, "grade_cite": "IS 1079 sheet, IS 801 Table 2 yield 30 kgf/mm2 (294 MPa) -> F = 1800 kgf/cm2",
             "columns": {"section": "CLR250X80X25X5", "n_ply": 2, "L_unbraced_mm": 1500.0, "connector_spacing_mm": 600.0},
@@ -90,7 +96,10 @@ def build_cfg():
             "knee": {"rows": 6, "cols": 2, "pitch_mm": 60.0, "gauge_mm": 120.0, "d_mm": 16.0, "edge_mm": 30.0, "bolt_class": "4.6"},
             "apex": {"rows": 4, "cols": 2, "pitch_mm": 60.0, "gauge_mm": 120.0, "d_mm": 16.0, "edge_mm": 30.0, "bolt_class": "4.6"},
             "base": {"B_mm": 500.0, "L_mm": 600.0, "t_plate_mm": 40.0, "fy_plate_MPa": 240.0, "fu_plate_MPa": 410.0, "col_d_mm": 250.0,
-                     "anchors": {"n_total": 6, "n_tension": 3, "d_mm": 24.0, "grade": "4.6", "f_mm": 250.0, "pitch_mm": 150.0, "edge_mm": 50.0},
+                     "anchors": {"n_total": 6, "n_tension": 3, "d_mm": 24.0, "grade": "4.6", "f_mm": 250.0, "pitch_mm": 150.0, "edge_mm": 50.0,
+                                 "embedment_capacity_N": 45200.0,
+                                 "embedment_source": "EOR input -- M24 anchor, 500 mm embedment in the M25 pedestal: pi x 24 x 500 x 1.2 MPa "
+                                                     "bond = 45.2 kN per anchor (IS 456 not in the corpus) -- VERIFY"},
                      "bearing_permissible_MPa": 6.0,
                      "bearing_cite": "EOR input -- permissible bearing on the M25 pedestal 6.0 MPa (working stress); IS 456 is not in the corpus -- VERIFY"},
         },

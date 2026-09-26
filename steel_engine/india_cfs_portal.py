@@ -653,6 +653,19 @@ def base_check(cfg, base, R_N, wind_eq, with_imposed=True):
         comb = (T_bolt / Asb / fatb) ** 2 + (V_bolt / Asb / fasb) ** 2
         checks["anchor combined"] = M._rec(comb, 1.0, "IS 800:2007 11.6.3 / 10.3.6 form", "(f/fa)^2 + (v/va)^2 <= 1 at working stress",
                                           capacity_basis="IS800_WSM", allowable_increase=1.0)
+    # C07: anchorage (embedment / bond / cone in the pedestal) -- IS 456 is not in the corpus, so the capacity per anchor is
+    # an EOR input slot: base.anchors.embedment_capacity_N + embedment_source (VERIFY); found:false when not declared
+    emb = an.get("embedment_capacity_N")
+    if emb:
+        checks["anchorage embedment (EOR)"] = M._rec(T_bolt, float(emb), "EOR input (IS 456 bond / cone, not in the corpus)",
+                                                     an.get("embedment_source") or "EOR-supplied anchorage capacity -- VERIFY",
+                                                     capacity_basis="EOR_input", allowable_increase=1.0, T_bolt_N=T_bolt)
+    elif T_bolt > 0:
+        checks["anchorage embedment (EOR)"] = {"value": T_bolt, "limit": None, "dc": None, "ok": None, "found": False,
+                                               "clause": "EOR input (IS 456 not in the corpus)", "capacity_basis": "EOR_input",
+                                               "allowable_increase": 1.0,
+                                               "cite": "declare base.anchors.embedment_capacity_N + embedment_source (working-stress "
+                                                       "anchorage capacity per anchor, EOR -- VERIFY)"}
     # plate bending: cantilever strip beyond the column flange under q_max (compression side)
     a = float(base.get("a_mm", (L_ - float(base.get("col_d_mm", L_ / 2.0))) / 2.0))
     Mstrip = q_max * a ** 2 / 2.0                                  # N-mm per mm width
@@ -697,6 +710,47 @@ def _bracing_block(cfg, bid, lb, F_by_case, fy, L_diag, cos, n_bays, n_sides, no
             "capacity_basis": "IS801_allowable", "allowable_increase": B.INCREASE_WL_EL, "demand_level": "working"}
 
 
+def mezzanine_beam(cfg, fy):
+    """C07: mezzanine beam role -- simply supported between posts / frames under (D + IL) x tributary width
+    (mezzanine.beams {section, n_ply, span_mm, trib_width_mm, L_unbraced_mm, compression_flange_restrained,
+    bearing_mm, deflection_limit_ratio + cite}); IS 801 6.1 / 6.2 / 6.3 bending, 6.4.1 shear, 6.4.3, 6.5 crippling.
+    Not declared -> an unevaluated record (the mezzanine floor load path is undesigned)."""
+    import india_cfs_members as CMB
+    mz = cfg["mezzanine"]; bm = mz.get("beams")
+    if not bm:
+        return {"id": "mezzanine-beam", "role": "mezzanine beam", "section": None, "designator": None, "DC": None, "ok": None,
+                "checks": [{"combo": "-", "check": "IS 801 6.1-6.5 mezzanine beam", "value": None, "limit": None, "dc": None, "ok": None,
+                            "clause": "IS 801 6.1 / 6.3 / 6.4 / 6.5", "capacity_basis": "IS801_allowable", "allowable_increase": 1.0,
+                            "note": "mezzanine.beams (section, span_mm, trib_width_mm) not declared -- the beams that carry the "
+                                    "mezzanine joists to the posts are undesigned"}],
+                "demand_level": "working", "capacity_basis": "IS801_allowable", "design_basis": B.DESIGN_BASIS}
+    trib = float(bm["trib_width_mm"]) / 1000.0
+    spec = dict(bm, w_dead_kN_per_m=float(mz["D_kNm2"]) * trib, w_live_kN_per_m=float(mz["L_kNm2"]) * trib,
+                load_cite="mezzanine D %s + IL %s kN/m2 x tributary %.2f m (%s)" % (mz["D_kNm2"], mz["L_kNm2"], trib, mz.get("L_cite")),
+                compression_flange_restrained=bm.get("compression_flange_restrained", True))
+    rec = CMB.design_header(dict(cfg, cfs_members=dict(cfg["cfs_members"], Fy_MPa=fy)), spec)
+    rec["role"] = "mezzanine beam"
+    rec["id"] = rec["id"].replace("header-", "mezzanine-beam-", 1)
+    return rec
+
+
+def gable_cpe(cfg):
+    """C07: net Cpe (windward - leeward) on the gable walls for wind along the ridge, from IS 875-3 Table 5 of THIS
+    building: the gable (width = the frame span w_m) is the short face when w_m <= length (theta 90: C - D), else the
+    long face (theta 0: A - B)."""
+    po = cfg["portal"]; site = cfg.get("site") or {}
+    He = float(po["eave_m"]); w_m = sum(float(s) for s in po["spans_m"]); l_m = float(po["length_m"])
+    w_, l_ = min(w_m, l_m), max(w_m, l_m)
+    theta = 90.0 if w_m <= l_m else 0.0
+    r = WT.resolve_cpe_walls(He / w_, l_ / w_, theta, site.get("cpe_corpus_hit"))
+    if not r.get("found"):
+        raise PortalError("gable wind: IS 875-3 Table 5 unresolved for h/w %.2f, l/w %.2f: %s" % (He / w_, l_ / w_, r.get("cite")))
+    ww, lw = (r["Cpe"]["C"], r["Cpe"]["D"]) if theta == 90.0 else (r["Cpe"]["A"], r["Cpe"]["B"])
+    return {"windward": ww, "leeward": lw, "net": ww - lw, "theta_deg": theta, "h_over_w": He / w_, "l_over_w": l_ / w_,
+            "cite": "IS 875-3 Table 5 (7.3.3.1) theta %d: windward %+.2f, leeward %+.2f (Cpi cancels on the overall force)"
+                    % (theta, ww, lw)}
+
+
 def longitudinal_bracing(cfg, wind, seis, fy):
     """Declared diagonal bracing in the side walls / roof for the longitudinal wind (gable) and EQ (elastic R 1) of the
     whole portal building, plus the mezzanine's own bracing when it is self-braced."""
@@ -709,13 +763,16 @@ def longitudinal_bracing(cfg, wind, seis, fy):
                                                             "load path is undesigned", "capacity_basis": "IS801_allowable", "allowable_increase": 1.0})
     else:
         gable = w_m * (He + Ha) / 2.0                                    # m2 one gable
-        cpe_net = 0.7 + 0.5                                             # Table 5 theta 90: C windward +0.7, D leeward -0.5 (l/w band 1-1.5, h/w <= 0.5)
+        gc = gable_cpe(cfg)                                             # C07: Table 5 for this building (was 0.7 + 0.5 fixed)
+        cpe_net = gc["net"]
         F_w = cpe_net * wind["pd_kNm2"] * gable * 1e3
         F_e = seis["Ah"] * seis["_W"]["portal_total_N"]
         Lb = math.hypot(float(po["spacing_m"]) * 1000.0, He * 1000.0)
         cos = float(po["spacing_m"]) * 1000.0 / Lb
-        out.append(_bracing_block(cfg, "longitudinal-bracing", lb, [("DL+1.0WL(gable)", F_w), ("DL+1.0EL(longitudinal)", F_e)], fy, Lb, cos,
-                                  int(lb["n_braced_bays"]), 2, lb.get("note")))
+        blk = _bracing_block(cfg, "longitudinal-bracing", lb, [("DL+1.0WL(gable)", F_w), ("DL+1.0EL(longitudinal)", F_e)], fy, Lb, cos,
+                             int(lb["n_braced_bays"]), 2, lb.get("note"))
+        blk["gable_wind"] = dict(gc, pd_kNm2=wind["pd_kNm2"], gable_area_m2=gable, F_N=F_w)
+        out.append(blk)
     mz = cfg.get("mezzanine")
     if mz and str(mz.get("lateral")) == "own_bracing":
         mb = mz.get("bracing")
@@ -845,18 +902,35 @@ def run(cfg, root):
         PD = float(mz["D_kNm2"]) * trib * 1e3; PL = float(mz["L_kNm2"]) * trib * 1e3
         Lp = float(mz["height_m"]) * 1000.0
         rows = []
-        for lab, P in (("DL", PD), ("DL+IL", PD + PL)):
-            r = M.check_compression(psec, fy, P, Lp, Lp, braced_against_twist=(psec.get("n_ply", 1) == 2))
-            rows.append(_mrow(lab, "6.6 axial (K 1.0 pinned ends)", r, {"P_N": round(P, 1)}))
+        # C07: posts of the self-braced mezzanine also carry the bracing overturning axial under EL (IS 875-5 8.1 (d)/(g),
+        # IS 801 6.1.2 increase): per braced bay F/n_bays, vertical component at the post = F_bay x height / bay
+        P_ot = {}
+        mb = mz.get("bracing") or {}
+        if str(mz.get("lateral")) == "own_bracing" and mb:
+            F_e = seis["Ah"] * seis["_W"]["mezz_total_N"]
+            for d in ("x", "y"):
+                nb = int(mb.get("n_braced_bays_%s" % d) or 0)
+                if nb:
+                    P_ot[d.upper()] = F_e / nb * Lp / (float(mb["bay_m"]) * 1000.0)
+        cases = [("DL", PD, False), ("DL+IL", PD + PL, False)]
+        for d, Pot in sorted(P_ot.items()):
+            cases += [("DL+1.0EL(mezzanine %s)" % d, PD + Pot, True), ("DL+IL+1.0EL(mezzanine %s)" % d, PD + PL + Pot, True)]
+        for lab, P, we in cases:
+            r = M.check_compression(psec, fy, P, Lp, Lp, braced_against_twist=(psec.get("n_ply", 1) == 2), wind_eq=we)
+            rows.append(_mrow(lab, "6.6 axial (K 1.0 pinned ends)" + (" + bracing overturning" if we else ""), r,
+                              {"P_N": round(P, 1), **({"P_overturning_N": round(P - (PD + (PL if "IL" in lab else 0.0)), 1)} if we else {})}))
         dcs = [r["dc"] for r in rows if isinstance(r.get("dc"), (int, float))]
         members.append({"id": "mezzanine-post-%s" % (psec.get("designator") or psec["label"]), "role": "mezzanine post", "section": psec["label"],
                         "designator": psec.get("designator") or psec["label"], "n_ply": psec.get("n_ply", 1), "Fy_MPa": fy, "length_mm": Lp,
                         "demand_level": "working", "capacity_basis": "IS801_allowable", "design_basis": B.DESIGN_BASIS,
-                        "combinations": ["DL", "DL+IL"], "checks": rows, "DC": max(dcs) if dcs else None,
+                        "combinations": [c[0] for c in cases], "checks": rows, "DC": max(dcs) if dcs else None,
                         "ok": (None if any(r.get("ok") is None for r in rows) else all(r.get("ok") for r in rows)),
                         "note": "mezzanine floor on independent cold-formed posts (pinned); its seismic weight (D + Table 10 share of IL) "
                                 "is applied to the portal at the mezzanine level (elastic, R 1.0); mezzanine joists per cfs_members.joists",
                         "limit_state": "IS 801:1975 working stress (is801_members)", "source": SRC})
+    # ---- C07: mezzanine beams (IS 801 6.1 - 6.5), between the posts / carrying the mezzanine joists ----
+    if mz:
+        members.append(mezzanine_beam(cfg, fy))
     # ---- connections ----
     conns = []
     cn = cfg.get("cfs_connections_spec") or {}
@@ -898,6 +972,15 @@ def run(cfg, root):
                 if worst is None or (bc["dc"] or 0) > (worst[1]["dc"] or 0):
                     worst = (cl, bc, t)
         cl, bc, t = worst
+        # C07: anchor tension in ANY combination needs the anchorage (embedment) capacity -- not only in the worst one
+        Tmax = max((base_check(cfg, base, R_, wind_eq[c_], with_imposed.get(c_, False))["T_total_N"]
+                    for c_, r in results.items() for R_ in r["reactions"].values()), default=0.0)
+        if Tmax > 0 and "anchorage embedment (EOR)" not in bc["checks"] and not base["anchors"].get("embedment_capacity_N"):
+            bc["checks"]["anchorage embedment (EOR)"] = {"value": Tmax / max(int(base["anchors"]["n_tension"]), 1), "limit": None,
+                                                         "dc": None, "ok": None, "found": False, "capacity_basis": "EOR_input",
+                                                         "clause": "EOR input (IS 456 not in the corpus)", "allowable_increase": 1.0,
+                                                         "cite": "declare base.anchors.embedment_capacity_N + embedment_source (EOR -- VERIFY)"}
+            bc["ok"] = None
         conns.append({"id": "column-base", "type": "base plate %sx%sx%s, %d anchors M%d" % (base["B_mm"], base["L_mm"], base["t_plate_mm"], base["anchors"]["n_total"], base["anchors"]["d_mm"]),
                       "checks": [_mrow(cl, k, v) for k, v in bc["checks"].items()], "value": bc["reactions"]["V_N"], "limit": None,
                       "dc": bc["dc"], "ok": bc["ok"], "governing_combo": cl, "reactions": bc["reactions"], "T_uplift_N": bc["T_total_N"],
