@@ -79,7 +79,10 @@ Table 2 cite (IS 801 Table 2 lists Fy 21 / 24 / 30 / 36 kgf/mm² → F = 1250 / 
 
 ## Site, occupancy and loads — RAG every job, write the cite into cfg['load_plan']
 * IS 1893 (Part 1):2016 Annex E → `site.zone`, `site.Z` (Table 3); Table 8 → importance factor `I` (derived by
-  the pipeline from `occupancy`; hospitals / clinics I = 1.2 or 1.5 per Table 8, > 200 persons 1.2);
+  the pipeline from `occupancy`: hospital buildings 1.5, food storage 1.5 (declare `food_storage`), residential /
+  commercial > 200 persons 1.2; without a person count owner ruling D8 takes area > 2,000 m² as the proxy for
+  > 200 persons (1.2, reported as the ruling); a clinic is 1.2 by ruling D8 — it is not a Table 8 row; a
+  dormitory / residence is residential unless `educational: True`);
   Table 9 → R for the resolved system (the framework asserts it); Table 10 → % imposed load in W; 7.3.6 partitions.
 * IS 875 (Part 3):2015 Annex A → `site.Vb`; Table 2 → `site.k2_table` (the printed k2 rows for the terrain
   category, mandatory — the pipeline fails closed without it); 6.3.4 → `site.cyclone_belt` (60 km east coast /
@@ -98,7 +101,11 @@ Table 2 cite (IS 801 Table 2 lists Fy 21 / 24 / 30 / 36 kgf/mm² → F = 1250 / 
 Every retrieval hit goes into `load_plan.retrieval` as `{"stem", "query", "found", "cite", "file", "quote", "purpose"}`:
 a `found: true` row names the stored hit (`file`: `rag/<slug>.json` in the job folder) and a `quote` copied verbatim from
 it (without a quote, every number in the cite must appear in the stored hit). `consistency.check` runs the vendored
-`rag_evidence_issues` on these rows — a cite string alone does not pass.
+`rag_evidence_issues` on these rows — a cite string alone does not pass. The hot-rolled lateral sub-run checks the
+same rows: `india_cfs_lateral.run_lateral(..., rag_dir=)` copies the job's `rag/` into `lateral/<name>/rag/` and maps
+`file` to the HR `hit_file`, so keep every hit under the job's `rag/`. A `found: false` row whose value you nevertheless
+use carries the EOR assumption on the row itself — `{value, source, cite, verify: True}` (the HR gate requires it) —
+and the item is listed in `cfg['eor_inputs']`.
 A `found: false` row is an honest answer; a cite that contains "EXAMPLE" or "not-for-construction" turns the
 whole job into `example_only`. Never invent a clause number, a table value or a zone.
 
@@ -107,8 +114,11 @@ whole job into `example_only`. Never invent a clause number, a table value or a 
 cfg = {
   "name": name, "jurisdiction": "india", "units": "m", "design_basis": "IS801_WSM", "brief": "...",
   "site": {"city", "zone", "Z", "soil", "Vb", "Vb_source", "terrain_category", "k1", "k3", "cyclone_belt",
-           "cyclone_belt_cite", "Kd", "k2_table": {10: .., 15: .., 20: .., 30: ..}, "wind_structure_class"},
-  "occupancy": {"use", "area_m2", "persons", "note"},               # -> I (IS 1893 Table 8)
+           "cyclone_belt_cite", "Kd", "k2_table": {10: .., 15: .., 20: .., 30: ..}, "wind_structure_class",
+           "Kc", "Ka_corpus_hit", "cpe_corpus_hit"},   # the last two: retrieved IS 875-3 Table 4 / Table 5 records
+                                                       # (used before the in-repo transcriptions); Kc default 1.0
+  "occupancy": {"use", "area_m2", "persons", "note", "food_storage", "educational", "hospital", "assembly",
+                "lifeline"},                                          # -> I (IS 1893 Table 8; flags override keywords)
   "geometry": {"plan_x_m", "plan_y_m", "heights_m": [..]},
   "loads": {"D_floor", "D_roof", "L_floor", "Lr", "clad", "partition_design_kNm2", "partition_seismic_kNm2", "snow", "cite"},
   "lateral_frame": {"system": "SCBF"|"OCBF"|"EBF"|"SMF"|"SMF+SCBF"|.., "R", "NX", "NY", "bay_x_m", "bay_y_m", "braced_bays",
@@ -146,7 +156,9 @@ Sections are IS 811 labels only (`CLR…`, `CLS…`, `CWR…`, `CWS…`, `EA…`
   Table 6 roof, Cpi from the opening ratio), so the wall columns carry the girt reactions; a declared
   `load_plan.member_wind` is kept.
 * `custom_build_module`: `"india_cfs_frame_build"` (or a job-local `.py` path) — the JSON-declared builder for plans that
-  are not a full NX × NY rectangle; it reads `lateral_frame.gold`:
+  are not a full NX × NY rectangle. `india_cfs_frame_build` is a thin wrapper that loads the SHARED HR builder
+  `steel_engine/hr_vendor/frame_build.py` (X06; the HR contract documents the same `gold` schema and the EBF
+  `info['links']` record); it reads `lateral_frame.gold`:
   `xcoords_m` / `ycoords_m` (non-uniform grid), `present` (`{"default": [[i, j]..], "0": base set, "3-5": [..]}` — the
   column nodes per level), `stepped_bases`, `omit_beams_at`, `xbays`, `ebf_bays`, `e_link_mm`, `ebf_beam_column_pinned`,
   `ebf_beam_sec` / `ebf_link_sec` / `ebf_brace_sec`, `brace_sec`, `moment_lines`, `col_sec` (`{"lateral": {"1-4": sec},
@@ -156,7 +168,13 @@ Sections are IS 811 labels only (`CLR…`, `CLS…`, `CWR…`, `CWS…`, `EA…`
   (`"fixed"` | `"pinned"` | `{"X0": "pinned", "Y2": "fixed", "1,0": "pinned", "default": "fixed"}`; conflicting lines at one
   column are refused — declare the node key), `max_beam_span_m` (beams join consecutive present nodes of a grid line up
   to this span; default the largest bay), `free_nodes` (`{"2": [[i, j]..]}` kept out of that level's rigid diaphragm),
-  `plan_area_m2` / `voids_m2` (number or `{level: m2}`, for the framed-area check), `gravity_base`, `default_strong`.
+  `plan_area_m2` / `voids_m2` (number or `{level: m2}`, for the framed-area check), `gravity_base`, `default_strong`,
+  and (X02) `roof_planes` = `[{"axis": "X" | "Y" (span direction), "eave_coords_m": [lo, hi], "ridge_coord_m",
+  "eave_z_m" (a storey level), "ridge_z_m", "lines": [j..] | "bays": [[i, j]..], "rafter_sec", "ridge_sec"}]` — a
+  true-slope pitched roof in METRES (`*_mm` keys are taken as they are), converted to the HR `cfg['roof_planes']` in mm:
+  apex nodes, rafters at the real slope, eaves free to spread, loads per plan area — and `roof_regions` =
+  `{level: [[i, j], ...]}` (roof bays of an intermediate level: roof dead / Lr / snow, no floor imposed load or
+  partitions). Without `roof_planes` the rafters are flat at the eave level (Table 6 Cpe still at the real pitch).
   Columns run between the consecutive levels at which their node exists (a high-bay column passes a missing level).
   **Framed-area check**: preflight ERROR when a level's framed plate (cells with all four corners present) is below
   0.9 × the declared plan area (`gold.plan_area_m2`, else `plan_x_m × plan_y_m − voids_m2`) — a dropped roof or floor
@@ -216,6 +234,19 @@ Sections are IS 811 labels only (`CLR…`, `CLS…`, `CWR…`, `CWS…`, `EA…`
 deflection_limit_ratio}` (IS 801 6.1–6.5; undeclared → not evaluated); posts of a self-braced mezzanine carry the bracing
 overturning axial under EL; `cfs_connections_spec.base.anchors.embedment_capacity_N` + `embedment_source` = the anchorage
 capacity per anchor (EOR input, IS 456 not in the corpus — VERIFY; anchors in tension without it are not evaluated).
+
+## Corpus and search tool
+The standards search tool posts to the corpus server at `RAG_API_URL` (e.g. `http://127.0.0.1:8765/query`; start it in
+the corpus checkout with `python3 scripts/serve_http.py --host 127.0.0.1 --port 8765`); `INDIA_CORPUS_ROOT` names the
+corpus checkout (default: a sibling `engineering_rag_india`). A miss reports `not_found_kind`: `no_specification_index` /
+`document_not_in_corpus` (corpus gaps, not evidence of absence), `not_tabulated` (the corpus answered: no table row — e.g.
+a town in neither IS 875-3 Annex A nor IS 1893 Annex E: read Fig. 1 at the site), `server_error` (`found: None`, retry —
+never report the provision as absent) or `term_absent_from_document` (the only "the standard lacks it"). A town not in
+the annexes: `site.Vb_source` 'derived_from_map' (with the site lat / long) or the ruling R5 site proxy (proxy town,
+distance, basis, VERIFY) — never "nearest city". Open item: the lateral sub-run's wind summary receives
+`site.Vb_source` only, so the HR preflight refuses 'derived_from_map' / 'site_proxy' until the lat / long and proxy
+fields are forwarded — until then state the reading in `site.Vb_source` as text (e.g. "IS 875-3 Fig. 1 at 28.54 N,
+77.39 E -- VERIFY") and in the retrieval row's cite.
 
 ## Hard rules (the gates enforce them; do not argue with a refusal)
 1. One `complete` authority: `india_cfs_gates.design_status`. It is `complete` only when the hot-rolled frame status

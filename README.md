@@ -75,7 +75,31 @@ cd /workspace/engineering_rag_india
 PYTHONPATH=scripts .venv/bin/python scripts/search.py exact_section 5.2.1 --doc IS_801_1975 --limit 2
 ```
 
-Set `RAG_API_URL` / `RAG_API_TOKEN` / optionally `RAG_ALIASES_FILE` to the India aliases file.
+Serve the corpus over HTTP for the app's search tool and point the engine at it:
+
+```bash
+cd /path/to/engineering_rag_india
+python3 scripts/serve_http.py --host 127.0.0.1 --port 8765        # POST /query, GET /healthz
+export RAG_API_URL=http://127.0.0.1:8765/query
+export INDIA_CORPUS_ROOT=/path/to/engineering_rag_india            # default: a sibling ../engineering_rag_india,
+                                                                   # else /workspace/engineering_rag_india
+```
+
+Set `RAG_API_URL` / `RAG_API_TOKEN` / optionally `RAG_ALIASES_FILE` (default `$INDIA_CORPUS_ROOT/indexes/aliases.json`).
+The tests run the vendored HR engine from `steel_engine/hr_vendor/`; set `STELTIC_HR_ROOT` to an HR checkout only for the
+vendoring check. Misses report `not_found_kind` (`no_specification_index`, `document_not_in_corpus`, `not_tabulated`,
+`server_error` — retry, never evidence of absence — or `term_absent_from_document`).
+
+## Hot-rolled lateral frame (vendored HR engine)
+
+The lateral frame runs in a subprocess (`steel_engine/hr_vendor_runner.py`) on the vendored HR India engine; the runner
+translates the CFS cfg into the HR cfg (`SX`, `SY`, `xcoords` / `ycoords`, `seis`, `custom_build`, `roof_planes`,
+`roof_regions`, plus `hr_cfg_extra` verbatim). The JSON frame builder is the shared HR `frame_build.py`
+(`india_cfs_frame_build` is a thin wrapper); re-entrant plans get the IS 1893 Table 5(ii) flexible-diaphragm run with the
+declared `lateral_frame.diaphragm_stiffness`; pitched roofs can be modelled at their true slope with
+`lateral_frame.gold.roof_planes` (metres). The job's `rag/` hits are copied into the sub-run (`run_lateral(rag_dir=)`).
+The contract lint `tests/test_fix_D05_contract_lint.py` checks that every top-level cfg key the CFS-only modules read is
+named in `contract/*.md` or this README.
 
 ## License
 
