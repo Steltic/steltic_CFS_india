@@ -99,7 +99,9 @@ def build_cfg():
                      "anchors": {"n_total": 6, "n_tension": 3, "d_mm": 24.0, "grade": "4.6", "f_mm": 250.0, "pitch_mm": 150.0, "edge_mm": 50.0,
                                  "embedment_capacity_N": 45200.0,
                                  "embedment_source": "EOR input -- M24 anchor, 500 mm embedment in the M25 pedestal: pi x 24 x 500 x 1.2 MPa "
-                                                     "bond = 45.2 kN per anchor (IS 456 not in the corpus) -- VERIFY"},
+                                                     "bond = 45.2 kN per anchor (IS 456 not in the corpus) -- VERIFY",
+                                 "embedment_cite": "IS 456:2000 26.2.1.1 design bond stress (EOR input, outside the corpus) -- "
+                                                   "VERIFY"},
                      "bearing_permissible_MPa": 6.0,
                      "bearing_cite": "EOR input -- permissible bearing on the M25 pedestal 6.0 MPa (working stress); IS 456 is not in the corpus -- VERIFY"},
         },

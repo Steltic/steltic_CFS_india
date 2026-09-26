@@ -133,7 +133,7 @@ def check(cfg) -> list:
     if cm:
         out += CMB.wind_preflight(cfg)                      # C02: member wind derivable for studs / purlins / girts
     out += G.validate_india_cfs_p0(cfg)
-    out += G.audit_warnings(cfg)                         # AUD-3 WARNs
+    out += G.audit_warnings(cfg)                         # AUD-3 / AUD-4 WARNs
     return out
 
 

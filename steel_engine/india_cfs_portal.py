@@ -655,19 +655,38 @@ def base_check(cfg, base, R_N, wind_eq, with_imposed=True):
         comb = (T_bolt / Asb / fatb) ** 2 + (V_bolt / Asb / fasb) ** 2
         checks["anchor combined"] = M._rec(comb, 1.0, "IS 800:2007 11.6.3 / 10.3.6 form", "(f/fa)^2 + (v/va)^2 <= 1 at working stress",
                                           capacity_basis="IS800_WSM", allowable_increase=1.0)
-    # C07: anchorage (embedment / bond / cone in the pedestal) -- IS 456 is not in the corpus, so the capacity per anchor is
-    # an EOR input slot: base.anchors.embedment_capacity_N + embedment_source (VERIFY); found:false when not declared
-    emb = an.get("embedment_capacity_N")
-    if emb:
-        checks["anchorage embedment (EOR)"] = M._rec(T_bolt, float(emb), "EOR input (IS 456 bond / cone, not in the corpus)",
-                                                     an.get("embedment_source") or "EOR-supplied anchorage capacity -- VERIFY",
-                                                     capacity_basis="EOR_input", allowable_increase=1.0, T_bolt_N=T_bolt)
-    elif T_bolt > 0:
+    # C07 / AUD-4: anchorage (embedment / bond / cone in the pedestal) -- IS 456 is not in the corpus, so the capacity per
+    # anchor is an EOR input: derived base.anchors.embedment = {method: 'bond', tau_bd_MPa (working-stress permissible
+    # bond stress, IS 456 B-2.1.2), bar 'plain'|'deformed', L_mm, source, cite} -> pi d L tau_bd (x1.6 deformed only), or
+    # asserted embedment_capacity_N + embedment_source + embedment_cite (both required; WARN asks for the derivation);
+    # found:false when anchors are in tension without a complete record
+    if isinstance(an.get("embedment"), dict):
+        emb = C8.anchorage_embedment_capacity(an["embedment"], d, anchor_grade=an.get("grade"))
+    elif an.get("embedment_capacity_N") is not None:
+        emb = C8.anchorage_embedment_capacity({"capacity_N": an.get("embedment_capacity_N"),
+                                               "source": an.get("embedment_source"), "cite": an.get("embedment_cite")},
+                                              d, anchor_grade=an.get("grade"))
+    else:
+        emb = None
+    if emb and emb.get("found"):
+        checks["anchorage embedment (EOR)"] = M._rec(
+            T_bolt, float(emb["capacity_N"]), "EOR input (IS 456 bond / cone, not in the corpus)",
+            ("bond (working stress): %s; %s" % (emb["derivation"], emb["cite"]) if emb["method"] == "bond"
+             else "%s; %s -- VERIFY" % (emb["source"], emb["cite"])),
+            capacity_basis="EOR_input", allowable_increase=1.0, T_bolt_N=T_bolt, embedment=emb)
+    elif T_bolt > 0 or emb is not None:
         checks["anchorage embedment (EOR)"] = {"value": T_bolt, "limit": None, "dc": None, "ok": None, "found": False,
                                                "clause": "EOR input (IS 456 not in the corpus)", "capacity_basis": "EOR_input",
-                                               "allowable_increase": 1.0,
-                                               "cite": "declare base.anchors.embedment_capacity_N + embedment_source (working-stress "
-                                                       "anchorage capacity per anchor, EOR -- VERIFY)"}
+                                               "allowable_increase": 1.0, "embedment": emb,
+                                               "cite": (emb or {}).get("reason") or
+                                                       "declare base.anchors.embedment {method: 'bond', tau_bd_MPa, bar, L_mm, "
+                                                       "source, cite} or embedment_capacity_N + embedment_source + "
+                                                       "embedment_cite (working-stress anchorage capacity per anchor, EOR -- VERIFY)"}
+    if an.get("n_total"):
+        import india_connection_design as _CD
+        checks_breakout = C8.concrete_breakout_record(_CD.breakout_delegation(cfg))
+    else:
+        checks_breakout = None
     # plate bending: cantilever strip beyond the column flange under q_max (compression side)
     a = float(base.get("a_mm", (L_ - float(base.get("col_d_mm", L_ / 2.0))) / 2.0))
     Mstrip = q_max * a ** 2 / 2.0                                  # N-mm per mm width
@@ -684,7 +703,8 @@ def base_check(cfg, base, R_N, wind_eq, with_imposed=True):
     dcs = [c["dc"] for c in checks.values() if isinstance(c.get("dc"), (int, float))]
     return {"checks": checks, "dc": max(dcs) if dcs else None, "ok": (None if any(c.get("ok") is None for c in checks.values())
                                                                        else all(c.get("ok") for c in checks.values())),
-            "reactions": {"H_N": H, "V_N": V, "M_Nmm": Mz}, "T_total_N": T_total, "plate_fy": _pfy}
+            "reactions": {"H_N": H, "V_N": V, "M_Nmm": Mz}, "T_total_N": T_total, "concrete_breakout": checks_breakout,
+            "plate_fy": _pfy}
 
 
 def _bracing_block(cfg, bid, lb, F_by_case, fy, L_diag, cos, n_bays, n_sides, note):
@@ -981,17 +1001,19 @@ def run(cfg, root):
         # C07: anchor tension in ANY combination needs the anchorage (embedment) capacity -- not only in the worst one
         Tmax = max((base_check(cfg, base, R_, wind_eq[c_], with_imposed.get(c_, False))["T_total_N"]
                     for c_, r in results.items() for R_ in r["reactions"].values()), default=0.0)
-        if Tmax > 0 and "anchorage embedment (EOR)" not in bc["checks"] and not base["anchors"].get("embedment_capacity_N"):
+        if Tmax > 0 and "anchorage embedment (EOR)" not in bc["checks"]:
             bc["checks"]["anchorage embedment (EOR)"] = {"value": Tmax / max(int(base["anchors"]["n_tension"]), 1), "limit": None,
                                                          "dc": None, "ok": None, "found": False, "capacity_basis": "EOR_input",
                                                          "clause": "EOR input (IS 456 not in the corpus)", "allowable_increase": 1.0,
-                                                         "cite": "declare base.anchors.embedment_capacity_N + embedment_source (EOR -- VERIFY)"}
+                                                         "cite": "declare base.anchors.embedment {method: 'bond', ...} or "
+                                                                 "embedment_capacity_N + embedment_source + embedment_cite (EOR -- VERIFY)"}
             bc["ok"] = None
         conns.append({"id": "column-base", "type": "base plate %sx%sx%s, %d anchors M%d" % (base["B_mm"], base["L_mm"], base["t_plate_mm"], base["anchors"]["n_total"], base["anchors"]["d_mm"]),
                       "checks": [_mrow(cl, k, v) for k, v in bc["checks"].items()], "value": bc["reactions"]["V_N"], "limit": None,
                       "dc": bc["dc"], "ok": bc["ok"], "governing_combo": cl, "reactions": bc["reactions"], "T_uplift_N": bc["T_total_N"],
                       "clause": "IS 800:2007 11.6.2 / 11.4.1 (c) working stress (11.1.4 increases); concrete bearing EOR input", "capacity_basis": "IS800_WSM",
-                      "allowable_increase": 1.0, "demand_level": "working", "plate_fy": bc.get("plate_fy")})
+                      "allowable_increase": 1.0, "demand_level": "working", "concrete_breakout": bc.get("concrete_breakout"),
+                      "plate_fy": bc.get("plate_fy")})
     else:
         conns.append({"id": "column-base", "type": "base", "value": None, "limit": None, "dc": None, "ok": None, "clause": "IS 800 11.6.2",
                       "note": "cfs_connections_spec.base not declared", "capacity_basis": "IS800_WSM", "allowable_increase": 1.0})

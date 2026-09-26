@@ -257,15 +257,18 @@ def anchorage_issues(pkg) -> list:
 
 
 def audit_warnings(cfg) -> list:
-    """AUD-3 WARNs (never blockers), with the vendored HR rule: a board / CFS diaphragm of the lateral frame declared
-    rigid with no stiffness basis and no 7.6.4 evaluation (india_diaphragm.light_diaphragm_rigid_findings)."""
+    """AUD-3 / AUD-4 WARNs (never blockers), with the vendored HR rules: a board / CFS diaphragm of the lateral frame
+    declared rigid with no stiffness basis and no 7.6.4 evaluation (india_diaphragm.light_diaphragm_rigid_findings);
+    the anchorage of the lateral-frame bases and of the portal base (asserted capacity without a derivation, concrete
+    breakout not delegated -- india_connection_design.anchorage_findings)."""
     out = []
     lf = cfg.get("lateral_frame") or {}
     try:
         import india_cfs_env  # noqa: F401  (vendored HR engine on sys.path)
         import india_diaphragm as DIA
+        import india_connection_design as CD
     except Exception as ex:                                     # pragma: no cover - vendored engine missing
-        return [("WARN", "AUD-3 rules unavailable: %s" % ex)]
+        return [("WARN", "AUD-3/4 rules unavailable: %s" % ex)]
     if lf:
         hr = {"diaphragm": lf.get("diaphragm", "rigid"), "diaphragm_7_6_4": lf.get("diaphragm_7_6_4"),
               "diaphragm_stiffness": lf.get("diaphragm_stiffness"),
@@ -274,6 +277,16 @@ def audit_warnings(cfg) -> list:
               "floor_system": lf.get("floor_system", "one-way: CFS joists (IS 801) span between the hot-rolled grid beams")}
         hr.update({k: v for k, v in (lf.get("hr_cfg_extra") or {}).items() if k in hr})
         out += DIA.light_diaphragm_rigid_findings(hr)
+        dd = (lf.get("hr_cfg_extra") or {}).get("delegated_design") or cfg.get("delegated_design")
+        out += CD.anchorage_findings({"connections": lf.get("connections") or {}, "delegated_design": dd})
+    base = (cfg.get("cfs_connections_spec") or {}).get("base")
+    if isinstance(base, dict) and base.get("anchors"):
+        an = dict(base["anchors"])
+        if an.get("embedment") is None and an.get("embedment_capacity_N") is not None:
+            an["embedment"] = {"capacity_N": an["embedment_capacity_N"], "source": an.get("embedment_source"),
+                               "cite": an.get("embedment_cite")}
+        out += [(s_, "portal base: " + m) for s_, m in CD.anchorage_findings(
+            {"connections": {"column_base": {"portal": {"anchors": an}}}, "delegated_design": cfg.get("delegated_design")})]
     return out
 
 
@@ -310,8 +323,8 @@ def design_status(cfg, pkg=None) -> dict:
         reasons += ["report grounding row MISSING: %s" % x for x in pkg["grounding_missing"]]
     if not reasons:
         status = "complete"
-    # AUD-3: non-blocking warnings -- the HR lateral run's (7.6.4 label contradiction) and the CFS-level preflight
-    # WARNs (board diaphragm declared rigid without a basis)
+    # AUD-3 / AUD-4: non-blocking warnings -- the HR lateral run's (7.6.4 label contradiction, anchorage) and the
+    # CFS-level preflight WARNs (board diaphragm declared rigid without a basis, portal anchorage)
     warns = list((((pkg.get("lateral_frame") or {}).get("status") or {}).get("warnings")) or [])
     warns += [m for s_, m in audit_warnings(cfg or {}) if m not in warns]
     return {"status": status, "reasons": reasons, "n_reasons": len(reasons), "authority": AUTHORITY, "warnings": warns}

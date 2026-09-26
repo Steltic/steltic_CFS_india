@@ -433,8 +433,9 @@ def build_hr_spec(cfg, name):
         # in-plane deck stiffness, the explicit run switch and an EOR record of an external analysis
         "diaphragm_stiffness": lf.get("diaphragm_stiffness"), "flexible_diaphragm_analysis": lf.get("flexible_diaphragm_analysis"),
         "flexible_diaphragm_eor": lf.get("flexible_diaphragm_eor"),
-        # AUD-3: deck kind for the IS 1893 7.6.4 preflight rule of the HR run
-        "diaphragm_type": lf.get("diaphragm_type"),
+        # AUD-3 / AUD-4: deck kind for the 7.6.4 preflight rule and the job's delegated-design register (anchor
+        # breakout / pedestal item) for the concrete_breakout record of the bases
+        "diaphragm_type": lf.get("diaphragm_type"), "delegated_design": cfg.get("delegated_design"),
         "hr_cfg_extra": lf.get("hr_cfg_extra") or {},       # declared HR cfg keys passed through verbatim (e.g. is18168_table2,
                                                             # grade_by_section, custom_sections, column_imposed_load_reduction)
         "notes": "%s: hot-rolled %s lateral frame (R %s) of a CFS building; CFS members gravity / wind only (D3)"

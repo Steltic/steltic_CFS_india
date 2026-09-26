@@ -202,6 +202,12 @@ Sections are IS 811 labels only (`CLR…`, `CLS…`, `CWR…`, `CWS…`, `EA…`
   `"board"` | `"metal_deck"` | `"rc_slab"` | `"composite_deck"` | `"braced_roof"`, optional; otherwise read from
   `floor_system`, default CFS joists): a board / CFS or bare metal-deck diaphragm declared rigid with no stiffness basis
   (`diaphragm_stiffness`, 7.6.4 deflections, flexible run, `flexible_diaphragm_eor`) gets a preflight WARN.
+* Anchorage (AUD-4, HR contract): lateral-frame bases take `connections.column_base[..].anchors.embedment` =
+  `{"method": "bond", "tau_bd_MPa", "bar": "plain" | "deformed", "L_mm", "source", "cite"}` (pi d L tau_bd, x1.6 only
+  for a deformed-bar rod) or the asserted `{capacity_N, source, cite}` (WARN asking for the derivation); the job's
+  `delegated_design` (top-level cfg, passed to the HR run) needs an anchor-breakout / pedestal item with criteria, or
+  the concrete_breakout record WARNs. Plate fy of every base / gusset / splice / fin plate follows IS 2062 Table 3 by
+  thickness (AUD-2, HR contract: `plate_grade`, `n_plates`).
 * Passed to the HR engine as declared (HR meaning): `K_factors` (`{"lateral_col": {"Kz", "Ky"}, "gravity_col": .., "brace": ..,
   "basis"}`, default 1.0 braced), `LLT_sag_mm` / `LLT_hog_mm` (`{"floor", "roof"}` unbraced lengths for beam LTB),
   `brace_process` (hot / cold formed hollow braces), `collector_basis`, `floor_system` (text for the report),
@@ -249,8 +255,13 @@ Sections are IS 811 labels only (`CLR…`, `CLS…`, `CWR…`, `CWS…`, `EA…`
 **All-CFS portal** (`cfg['portal']`, Ex5): gable wind uses IS 875-3 Table 5 of the building (θ 90: C − D);
 `mezzanine.beams` = `{section, n_ply, span_mm, trib_width_mm, bearing_mm, compression_flange_restrained,
 deflection_limit_ratio}` (IS 801 6.1–6.5; undeclared → not evaluated); posts of a self-braced mezzanine carry the bracing
-overturning axial under EL; `cfs_connections_spec.base.anchors.embedment_capacity_N` + `embedment_source` = the anchorage
-capacity per anchor (EOR input, IS 456 not in the corpus — VERIFY; anchors in tension without it are not evaluated).
+overturning axial under EL; `cfs_connections_spec.base.anchors.embedment_capacity_N` + `embedment_source` +
+`embedment_cite` = the asserted anchorage capacity per anchor (EOR input, IS 456 not in the corpus — VERIFY; source AND
+cite required, a WARN asks for the derivation), or the derived `anchors.embedment` = `{"method": "bond", "tau_bd_MPa"
+(working-stress permissible bond, IS 456 B-2.1.2, EOR input), "bar": "plain" | "deformed", "L_mm", "source", "cite"}`
+(pi d L tau_bd, x1.6 only for a deformed-bar rod); anchors in tension without a complete record are not evaluated. The
+base carries a `concrete_breakout` record (satisfied by a `delegated_design` item for anchor breakout / pedestal design
+with criteria; otherwise a WARN) and the plate fy follows IS 2062 Table 3 for `t_plate_mm` (`plate_grade`, AUD-2).
 
 ## Corpus and search tool
 The standards search tool posts to the corpus server at `RAG_API_URL` (e.g. `http://127.0.0.1:8765/query`; start it in

@@ -64,3 +64,22 @@ def test_anchorage_embedment_slot(run5):
     out = PO.run(cfg, JOBS)
     base = [c for c in out["connections"] if c["id"] == "column-base"][0]
     assert base["ok"] is None and any(r["check"] == "anchorage embedment (EOR)" and r["ok"] is None for r in base["checks"])
+
+
+def test_anchorage_embedment_needs_cite_and_takes_the_derived_form():
+    """AUD-4: the asserted form needs source + cite; the derived bond form is pi d L tau_bd (x1.6 deformed only)."""
+    import math
+    cfg = _cfg(); cfg["cfs_connections_spec"]["base"]["anchors"].pop("embedment_cite")
+    base = [c for c in PO.run(cfg, JOBS)["connections"] if c["id"] == "column-base"][0]
+    row = [r for r in base["checks"] if r["check"] == "anchorage embedment (EOR)"][0]
+    assert row["ok"] is None and base["ok"] is None
+    cfg = _cfg(); an = cfg["cfs_connections_spec"]["base"]["anchors"]
+    for k in ("embedment_capacity_N", "embedment_source", "embedment_cite"):
+        an.pop(k)
+    an["embedment"] = {"method": "bond", "tau_bd_MPa": 0.8, "bar": "plain", "L_mm": 900.0,
+                       "source": "EOR: M25 pedestal, plain M24 rod", "cite": "IS 456:2000 B-2.1.2 (EOR input)"}
+    base = [c for c in PO.run(cfg, JOBS)["connections"] if c["id"] == "column-base"][0]
+    row = [r for r in base["checks"] if r["check"] == "anchorage embedment (EOR)"][0]
+    assert row["limit"] == pytest.approx(math.pi * 24 * 900 * 0.8) and "pi d L tau_bd" in row["cite"]
+    assert base["concrete_breakout"]["satisfied"] is False and "foundation EOR" in base["concrete_breakout"]["note"]
+

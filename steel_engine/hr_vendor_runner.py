@@ -133,8 +133,9 @@ def build_cfg(spec):
                 cfg["seis"][key] = spec[key]
     if spec.get("diaphragm_7_6_4"):
         cfg["diaphragm_7_6_4"] = spec["diaphragm_7_6_4"]
-    if spec.get("diaphragm_type") is not None:              # AUD-3 (IS 1893 7.6.4 deck kind)
-        cfg["diaphragm_type"] = spec["diaphragm_type"]
+    for key in ("diaphragm_type", "delegated_design"):      # AUD-3 / AUD-4 (7.6.4 deck kind; anchor breakout item)
+        if spec.get(key) is not None:
+            cfg[key] = spec[key]
     for key in ("diaphragm_stiffness", "flexible_diaphragm_analysis", "flexible_diaphragm_eor"):   # X01 (Table 5(ii))
         if spec.get(key) is not None:
             cfg[key] = spec[key]
