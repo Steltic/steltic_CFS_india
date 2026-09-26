@@ -51,6 +51,8 @@ def ex5():
 
 def test_vendored_engine_is_byte_identical():
     r = subprocess.run([sys.executable, os.path.join(ROOT, "scripts", "check_vendored.py")], capture_output=True, text=True)
+    if r.stdout.startswith("SKIP"):
+        pytest.skip(r.stdout.strip())                    # C13: no HR checkout (STELTIC_HR_ROOT / sibling) to compare with
     assert r.returncode == 0, r.stdout + r.stderr
 
 
