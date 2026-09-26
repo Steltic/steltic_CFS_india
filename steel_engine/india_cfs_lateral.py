@@ -433,6 +433,8 @@ def build_hr_spec(cfg, name):
         # in-plane deck stiffness, the explicit run switch and an EOR record of an external analysis
         "diaphragm_stiffness": lf.get("diaphragm_stiffness"), "flexible_diaphragm_analysis": lf.get("flexible_diaphragm_analysis"),
         "flexible_diaphragm_eor": lf.get("flexible_diaphragm_eor"),
+        # AUD-3: deck kind for the IS 1893 7.6.4 preflight rule of the HR run
+        "diaphragm_type": lf.get("diaphragm_type"),
         "hr_cfg_extra": lf.get("hr_cfg_extra") or {},       # declared HR cfg keys passed through verbatim (e.g. is18168_table2,
                                                             # grade_by_section, custom_sections, column_imposed_load_reduction)
         "notes": "%s: hot-rolled %s lateral frame (R %s) of a CFS building; CFS members gravity / wind only (D3)"

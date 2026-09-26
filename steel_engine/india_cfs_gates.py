@@ -256,6 +256,27 @@ def anchorage_issues(pkg) -> list:
     return out
 
 
+def audit_warnings(cfg) -> list:
+    """AUD-3 WARNs (never blockers), with the vendored HR rule: a board / CFS diaphragm of the lateral frame declared
+    rigid with no stiffness basis and no 7.6.4 evaluation (india_diaphragm.light_diaphragm_rigid_findings)."""
+    out = []
+    lf = cfg.get("lateral_frame") or {}
+    try:
+        import india_cfs_env  # noqa: F401  (vendored HR engine on sys.path)
+        import india_diaphragm as DIA
+    except Exception as ex:                                     # pragma: no cover - vendored engine missing
+        return [("WARN", "AUD-3 rules unavailable: %s" % ex)]
+    if lf:
+        hr = {"diaphragm": lf.get("diaphragm", "rigid"), "diaphragm_7_6_4": lf.get("diaphragm_7_6_4"),
+              "diaphragm_stiffness": lf.get("diaphragm_stiffness"),
+              "flexible_diaphragm_analysis": lf.get("flexible_diaphragm_analysis"),
+              "flexible_diaphragm_eor": lf.get("flexible_diaphragm_eor"), "diaphragm_type": lf.get("diaphragm_type"),
+              "floor_system": lf.get("floor_system", "one-way: CFS joists (IS 801) span between the hot-rolled grid beams")}
+        hr.update({k: v for k, v in (lf.get("hr_cfg_extra") or {}).items() if k in hr})
+        out += DIA.light_diaphragm_rigid_findings(hr)
+    return out
+
+
 def design_status(cfg, pkg=None) -> dict:
     import india_cfs_basis as B
     pkg = pkg or {}
@@ -289,7 +310,11 @@ def design_status(cfg, pkg=None) -> dict:
         reasons += ["report grounding row MISSING: %s" % x for x in pkg["grounding_missing"]]
     if not reasons:
         status = "complete"
-    return {"status": status, "reasons": reasons, "n_reasons": len(reasons), "authority": AUTHORITY}
+    # AUD-3: non-blocking warnings -- the HR lateral run's (7.6.4 label contradiction) and the CFS-level preflight
+    # WARNs (board diaphragm declared rigid without a basis)
+    warns = list((((pkg.get("lateral_frame") or {}).get("status") or {}).get("warnings")) or [])
+    warns += [m for s_, m in audit_warnings(cfg or {}) if m not in warns]
+    return {"status": status, "reasons": reasons, "n_reasons": len(reasons), "authority": AUTHORITY, "warnings": warns}
 
 
 def complete_allowed(cfg, pkg=None) -> tuple:

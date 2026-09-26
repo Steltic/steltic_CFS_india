@@ -196,6 +196,12 @@ Sections are IS 811 labels only (`CLR…`, `CLS…`, `CWR…`, `CWS…`, `EA…`
   `flexible_diaphragm_analysis` (`True` runs it on a regular plan too, `False` declines it); `flexible_diaphragm_eor`
   (`{analysis_ref, results, source, cite}` of an external analysis, instead of the engine run). The diaphragm rows then
   carry `flexible_run_7_6_4` (in-plane deformation vs average storey drift of that storey).
+* 7.6.4 label (AUD-3): the lateral package's `diaphragm_7_6_4.classification` is "flexible (IS 1893 7.6.4, from the
+  analysis)" whenever the flexible run measures a ratio > 1.2 at any level, whatever `diaphragm` declares; a declared
+  label that contradicts it is a non-blocking warning (`design_status.warnings`). `diaphragm_type` (`"cfs_board"` |
+  `"board"` | `"metal_deck"` | `"rc_slab"` | `"composite_deck"` | `"braced_roof"`, optional; otherwise read from
+  `floor_system`, default CFS joists): a board / CFS or bare metal-deck diaphragm declared rigid with no stiffness basis
+  (`diaphragm_stiffness`, 7.6.4 deflections, flexible run, `flexible_diaphragm_eor`) gets a preflight WARN.
 * Passed to the HR engine as declared (HR meaning): `K_factors` (`{"lateral_col": {"Kz", "Ky"}, "gravity_col": .., "brace": ..,
   "basis"}`, default 1.0 braced), `LLT_sag_mm` / `LLT_hog_mm` (`{"floor", "roof"}` unbraced lengths for beam LTB),
   `brace_process` (hot / cold formed hollow braces), `collector_basis`, `floor_system` (text for the report),
