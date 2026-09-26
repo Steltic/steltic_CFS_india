@@ -48,9 +48,12 @@ roof_planes_mm = _FB.roof_planes_mm            # X02 (gold roof planes in metres
 
 def framed_area_issues(cfg):
     """C06 (CFS-C-05 e): ERROR when the framed floor / roof area of a level (from the model the builder draws) is below
-    0.9 x the declared plan area of that level: gold.plan_area_m2 (number or {level: m2}), else geometry plan_x x plan_y
-    minus the declared voids (gold.voids_m2 / geometry.voids_m2, number or {level: m2}).  A level the model drops
-    silently leaves its gravity load and seismic weight out of the analysis (the Ex10 high-bay roof)."""
+    0.9 x the declared plan area of that level: gold.plan_area_m2 (number or {level: m2}), else (O3, owner ruling
+    2026-09-26) geometry.floor_area_m2 -- the plan area of ONE framed level (a number = every level, or {level: m2};
+    never a total over storeys: a value above the plan_x x plan_y bounding box is refused; voids are not subtracted),
+    else geometry plan_x x plan_y minus the declared voids (gold.voids_m2 / geometry.voids_m2, number or {level: m2}).
+    A level the model drops silently leaves its gravity load and seismic weight out of the analysis (the Ex10 high-bay
+    roof)."""
     lf = cfg.get("lateral_frame") or {}
     geo = cfg.get("geometry") or {}
     H = list(geo.get("heights_m") or [])
@@ -69,6 +72,18 @@ def framed_area_issues(cfg):
     for k in range(1, len(H) + 1):
         decl = pick((g or {}).get("plan_area_m2"), k)
         src = "gold.plan_area_m2"
+        if decl is None and geo.get("floor_area_m2") is not None:
+            decl = pick(geo.get("floor_area_m2"), k)
+            src = ("geometry.floor_area_m2 (O3: plan area of this one level, not a total over storeys; voids not "
+                   "subtracted)")
+            bbox = (float(geo["plan_x_m"]) * float(geo["plan_y_m"])
+                    if geo.get("plan_x_m") is not None and geo.get("plan_y_m") is not None else None)
+            if decl is not None and bbox is not None and float(decl) > 1.001 * bbox:
+                out.append(("ERROR", "level %d: geometry.floor_area_m2 = %.1f m2 exceeds the plan bounding box plan_x x "
+                                     "plan_y = %.1f m2 -- floor_area_m2 is the plan area of ONE level (number = every "
+                                     "level, or {level: m2}), not the total over storeys (C06 / O3)"
+                            % (k, float(decl), bbox)))
+                continue
         if decl is None:
             if geo.get("plan_x_m") is None or geo.get("plan_y_m") is None:
                 continue

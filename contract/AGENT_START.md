@@ -181,8 +181,11 @@ Sections are IS 811 labels only (`CLR…`, `CLS…`, `CWR…`, `CWS…`, `EA…`
   partitions). Without `roof_planes` the rafters are flat at the eave level (Table 6 Cpe still at the real pitch).
   Columns run between the consecutive levels at which their node exists (a high-bay column passes a missing level).
   **Framed-area check**: preflight ERROR when a level's framed plate (cells with all four corners present) is below
-  0.9 × the declared plan area (`gold.plan_area_m2`, else `plan_x_m × plan_y_m − voids_m2`) — a dropped roof or floor
-  silently removes gravity load and seismic weight.
+  0.9 × the declared plan area (`gold.plan_area_m2`, else `geometry.floor_area_m2`, else `plan_x_m × plan_y_m −
+  voids_m2`) — a dropped roof or floor silently removes gravity load and seismic weight. `geometry.floor_area_m2`
+  (owner ruling O3, 2026-09-26) is the plan area of ONE framed level — a number applies to every level, `{level: m2}`
+  per level (a setback / podium needs the dict or `gold.plan_area_m2`) — never the gross floor area summed over the
+  storeys (a value above `plan_x_m × plan_y_m` is refused); voids are not subtracted from it.
 * `d_x_m` / `d_y_m` (Ta base dimension), `Ta_override` (`{"X", "Y", "formula"}`), `default_strong`.
 * Re-entrant plans (L / T / U / Z / cruciform; IS 1893 Table 5(ii), Amd 2): the HR run adds the flexible-floor-diaphragm
   3-D dynamic analysis to the rigid case automatically and envelopes the two. Declare the deck in-plane stiffness
@@ -205,6 +208,8 @@ Sections are IS 811 labels only (`CLR…`, `CLS…`, `CWR…`, `CWS…`, `EA…`
 **Geometry / wind / diaphragm** (`cfg['geometry']`, `cfg['load_plan']`)
 * `opening_ratio` (0–1): Cpi by IS 875-3 7.3.2 (≤ 5 % → ±0.2, 5–20 % → ±0.5, > 20 % → ±0.7); not declared → ±0.2 with
   a preflight WARN. `roof_pitch_deg` (Table 6 roof Cpe for purlins; low-rise member wind).
+* `floor_area_m2`: plan area of ONE framed level in m2 (number = every level, or `{level: m2}`), not a total over the
+  storeys — used by the framed-area check when `gold.plan_area_m2` is absent (owner ruling O3).
 * `wind_exposure = {level: {width_X_m, width_Y_m, height_m}}`: per-level exposed face width (the face loaded by wind
   along X / Y) and tributary height, for mixed-height buildings. A declared `load_plan.story_forces.W_X` / `W_Y` is kept
   (not overwritten) when `load_plan.wind_story_forces_cite` and `story_forces_units` (`"N"` | `"kN"`) are given.
