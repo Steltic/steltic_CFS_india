@@ -45,12 +45,21 @@ class LateralSystemError(ValueError):
     pass
 
 
-def resolve_system(zone, system=None, height_m=None):
-    """Return (system, R, cite) for a CFS building's hot-rolled frame in a zone; refuse banned combinations."""
-    zone = str(zone).upper()
-    if zone not in SYSTEM_BY_ZONE:
-        raise LateralSystemError("zone %r not in II-V" % zone)
-    sysn = (system or SYSTEM_BY_ZONE[zone][0]).upper()
+BRACED_SYSTEMS = ("OCBF", "OBF", "SCBF", "SBF", "EBF")
+MOMENT_SYSTEMS = ("SMF", "SMRF", "OMF", "OMRF")
+
+
+def system_components(system):
+    """'SMF+SCBF' / 'EBF + SMF' / 'SCBF' -> ['SMF', 'SCBF'] (upper-case, order kept, duplicates dropped)."""
+    out = []
+    for p in str(system or "").replace("&", "+").replace("/", "+").split("+"):
+        p = p.strip().upper()
+        if p and p not in out:
+            out.append(p)
+    return out
+
+
+def _check_component(zone, sysn, height_m):
     if sysn in ("OCBF", "OBF", "OMF", "OMRF") and zone in ("III", "IV", "V"):
         raise LateralSystemError("%s is not permitted in Zone %s (IS 1893 Table 9 Note 1 as amended, decision D4)" % (sysn, zone))
     if sysn in ("SCBF", "SBF") and zone == "V":
@@ -61,7 +70,50 @@ def resolve_system(zone, system=None, height_m=None):
                                  % (zone, height_m))
     if sysn not in TABLE9_R:
         raise LateralSystemError("system %r has no IS 1893 Table 9 row (D3: no foreign design basis)" % sysn)
-    return sysn, TABLE9_R[sysn], TABLE9_CITE
+
+
+def resolve_system_full(zone, system=None, height_m=None, R_x=None, R_y=None, system_x=None, system_y=None):
+    """C10: a single or MIXED system ('SMF+SCBF', 'EBF+SMF', ...).  Every component passes the zone gate; R = min over
+    the components (IS 1893 Table 9 via the least-ductile component) unless per-direction R_x / R_y are declared -- each
+    validated against the Table 9 R of that direction's system (system_x / system_y when given, else every component),
+    the same rule as the HR india_seismic_gates.resolve_system_R.  Returns {system, components, R, R_x, R_y, cite, ...}."""
+    zone = str(zone).upper()
+    if zone not in SYSTEM_BY_ZONE:
+        raise LateralSystemError("zone %r not in II-V" % zone)
+    comps = system_components(system) or [SYSTEM_BY_ZONE[zone][0]]
+    for c in comps:
+        _check_component(zone, c, height_m)
+    R = min(TABLE9_R[c] for c in comps)
+    out = {"system": "+".join(comps), "components": comps, "mixed": len(comps) > 1, "R": R, "cite": TABLE9_CITE,
+           "braced": any(c in BRACED_SYSTEMS for c in comps), "moment": any(c in MOMENT_SYSTEMS for c in comps)}
+    for d, decl, dsys in (("x", R_x, system_x), ("y", R_y, system_y)):
+        dcomps = system_components(dsys) if dsys else comps
+        for c in dcomps:
+            _check_component(zone, c, height_m)
+            if c not in comps:
+                raise LateralSystemError("system_%s component %s is not part of the declared system %s" % (d, c, out["system"]))
+        Rt = min(TABLE9_R[c] for c in dcomps)
+        out["R_%s_table9" % d] = Rt
+        if decl is not None:
+            if float(decl) > Rt + 1e-9:
+                raise LateralSystemError("R_%s = %s exceeds the IS 1893 Table 9 value %s for the %s-direction system %s"
+                                         % (d, decl, Rt, d.upper(), "+".join(dcomps)))
+            out["R_" + d] = float(decl)
+            out["R_%s_declared" % d] = True
+        else:
+            out["R_" + d] = R
+            out["R_%s_declared" % d] = False
+    if out["mixed"]:
+        out["cite"] = TABLE9_CITE + "; mixed system %s: R = min over the components (%s) unless R_x / R_y are declared" % (
+            out["system"], ", ".join("%s %s" % (c, TABLE9_R[c]) for c in comps))
+    return out
+
+
+def resolve_system(zone, system=None, height_m=None):
+    """Return (system, R, cite) for a CFS building's hot-rolled frame in a zone; refuse banned combinations.  Mixed
+    systems ('SMF+SCBF') return the joined label and R = min over the components (C10)."""
+    r = resolve_system_full(zone, system, height_m)
+    return r["system"], r["R"], r["cite"]
 
 
 def _k2(site, z_m):
@@ -147,7 +199,9 @@ def build_hr_spec(cfg, name):
     """Declarative HR-frame spec (JSON) from the CFS cfg."""
     lf = cfg["lateral_frame"]; site = cfg["site"]; geo = cfg["geometry"]; ld = cfg["loads"]
     H = list(geo["heights_m"])
-    sysn, R, cite = resolve_system(site["zone"], lf.get("system"), sum(H))
+    rs = resolve_system_full(site["zone"], lf.get("system"), sum(H), lf.get("R_x"), lf.get("R_y"),
+                             lf.get("system_x"), lf.get("system_y"))
+    sysn, R, cite = rs["system"], rs["R"], rs["cite"]
     if lf.get("R") is not None and abs(float(lf["R"]) - R) > 1e-9:
         raise LateralSystemError("lateral_frame.R = %s but IS 1893 Table 9 gives %s for %s" % (lf["R"], R, sysn))
     I_rec = IS.importance_factor(cfg.get("occupancy"))
@@ -160,8 +214,9 @@ def build_hr_spec(cfg, name):
                [["Y", 0, j] for j in range(NY)] + [["Y", NX, j] for j in range(NY)]
     elif bays == "core":
         bays = [["X", NX // 2, NY // 2], ["Y", NX // 2, NY // 2]]
-    if sysn in ("SMF", "SMRF"):
-        bays = []
+    if not rs["braced"]:
+        bays = []                                           # pure moment frame: no braced bays
+    # C10: a mixed system (SMF+SCBF, EBF+SMF) keeps its declared braced bays and its moment lines
     ws, forces = wind_story_forces(cfg)
     plan = dict(cfg.get("load_plan") or {})
     plan["jurisdiction"] = "india"
@@ -174,12 +229,15 @@ def build_hr_spec(cfg, name):
     plan["story_forces_units"] = "N"
     plan["seismic_summary"] = dict(plan.get("seismic_summary") or {}, code=IS.IS1893_EDITION if hasattr(IS, "IS1893_EDITION") else "IS 1893 (Part 1):2016",
                                    site=site.get("city"), zone=site["zone"], Z=site["Z"], I=I_rec["I"], I_cite=I_rec.get("cite"),
-                                   I_row=I_rec.get("row"), R=R, R_cite=cite, system=sysn, soil=site["soil"])
+                                   I_row=I_rec.get("row"), R=R, R_cite=cite, system=sysn, soil=site["soil"],
+                                   **({"R_x": rs["R_x"], "R_y": rs["R_y"]} if (rs["R_x_declared"] or rs["R_y_declared"]) else {}))
     plan["combinations"] = "auto"
     plan["lateral_frame_basis"] = "IS800_LSD"
     plan.pop("cfs_combinations", None)                      # the HR run sees only the IS 800 set
     spec = {
-        "name": name, "system": sysn, "R": R, "Z": site["Z"], "I": I_rec["I"], "zone": site["zone"], "soil": site["soil"],
+        "name": name, "system": sysn, "system_components": rs["components"], "R": R,
+        "R_x": rs["R_x"] if rs["R_x_declared"] else None, "R_y": rs["R_y"] if rs["R_y_declared"] else None,
+        "system_x": lf.get("system_x"), "system_y": lf.get("system_y"), "Z": site["Z"], "I": I_rec["I"], "zone": site["zone"], "soil": site["soil"],
         "NX": NX, "NY": NY, "bay_x_m": float(lf["bay_x_m"]), "bay_y_m": float(lf["bay_y_m"]), "heights_m": H,
         "D_floor": ld["D_floor"], "D_roof": ld["D_roof"], "L_floor": ld["L_floor"], "Lr": ld["Lr"], "clad": ld.get("clad", 0.0),
         "snow": ld.get("snow", 0.0), "partition_design_kNm2": ld.get("partition_design_kNm2", 0.0),

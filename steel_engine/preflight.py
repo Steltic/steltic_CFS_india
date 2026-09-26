@@ -89,13 +89,19 @@ def check(cfg) -> list:
     if lf:
         try:
             import india_cfs_lateral as L
-            L.resolve_system(site.get("zone"), lf.get("system"), sum(float(h) for h in H) if H else None)
+            L.resolve_system_full(site.get("zone"), lf.get("system"), sum(float(h) for h in H) if H else None,
+                                  lf.get("R_x"), lf.get("R_y"), lf.get("system_x"), lf.get("system_y"))
         except Exception as ex:
             say("ERROR", "lateral system: %s" % ex)
         for k in ("NX", "NY", "bay_x_m", "bay_y_m", "col", "beam"):
             if lf.get(k) is None:
                 say("ERROR", "lateral_frame.%s required" % k)
-        if str(lf.get("system", "")).upper() in ("SCBF", "OCBF", "EBF") and not lf.get("brace"):
+        try:
+            import india_cfs_lateral as L
+            braced_sys = any(c in L.BRACED_SYSTEMS for c in L.system_components(lf.get("system")))
+        except Exception:
+            braced_sys = str(lf.get("system", "")).upper() in ("SCBF", "OCBF", "EBF")
+        if braced_sys and not lf.get("brace"):
             say("ERROR", "lateral_frame.brace (IS 808 / IS 1161 label, IS 2062 E250 B0 per IS 800 12.8.2.1) required")
         if not lf.get("connections"):
             say("ERROR", "lateral_frame.connections (brace_end / beam_shear / column_base geometry for india_connection_design) required")

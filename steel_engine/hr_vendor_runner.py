@@ -122,6 +122,12 @@ def build_cfg(spec):
         "seis": {"Z": spec["Z"], "I": spec["I"], "R": spec["R"], "zone": spec["zone"], "soil": spec["soil"]},
         "load_plan": spec["load_plan"],
     }
+    # C10: mixed systems / per-direction R -- the HR engine reads cfg R_x / R_y and system_x / system_y (H06)
+    for key in ("R_x", "R_y", "system_x", "system_y"):
+        if spec.get(key) is not None:
+            cfg[key] = spec[key]
+            if key.startswith("R_"):
+                cfg["seis"][key] = spec[key]
     if spec.get("diaphragm_7_6_4"):
         cfg["diaphragm_7_6_4"] = spec["diaphragm_7_6_4"]
     if spec.get("default_strong"):
@@ -161,6 +167,7 @@ def build_cfg(spec):
     ss = plan.setdefault("seismic_summary", {})
     ss.update(r["seismic_summary"])
     ss.update(system=spec["system"], zone=spec["zone"], Z=spec["Z"], I=spec["I"], R=spec["R"], soil=spec["soil"],
+              **{k: spec[k] for k in ("R_x", "R_y") if spec.get(k) is not None},
               Ta_formula=ta_formula, Ta_x_s=Ta["X"], Ta_y_s=Ta["Y"], d_x_m=dx, d_y_m=dy)
     plan.setdefault("story_forces", {})
     for d in ("X", "Y"):

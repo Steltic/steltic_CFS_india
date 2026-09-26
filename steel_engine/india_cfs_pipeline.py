@@ -186,7 +186,10 @@ def design_and_report(name, cfg, outdir=None, do_report=True):
         cfg["load_plan"]["story_forces_units"] = "N"
         spec = json.load(open(lat["spec"]))
         pkg["lateral_frame"] = {
-            "name": lat["name"], "system": spec["system"], "R": spec["R"], "R_cite": L.TABLE9_CITE, "vendored_commit": lat.get("vendored_commit"),
+            "name": lat["name"], "system": spec["system"], "system_components": spec.get("system_components"), "R": spec["R"],
+            "R_x": spec.get("R_x"), "R_y": spec.get("R_y"),
+            "R_cite": ((spec.get("load_plan") or {}).get("seismic_summary") or {}).get("R_cite") or L.TABLE9_CITE,
+            "vendored_commit": lat.get("vendored_commit"),
             "root": lat["root"], "report_html": lat.get("report_html"), "status": lat.get("status"), "error": lat.get("error"),
             "seismic_summary": hr_plan.get("seismic_summary"), "seismic_analysis": lat.get("seismic_analysis"), "seismic_calc": lat.get("seismic_calc"),
             "members": lat.get("members"), "connections": lat.get("connections"), "drift_table": lat.get("drift_table"), "drift_max": lat.get("drift_max"),
