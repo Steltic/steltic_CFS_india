@@ -112,6 +112,9 @@ def check(cfg) -> list:
             say("ERROR", "lateral_frame.brace (IS 808 / IS 1161 label, IS 2062 E250 B0 per IS 800 12.8.2.1) required")
         if not lf.get("connections"):
             say("ERROR", "lateral_frame.connections (brace_end / beam_shear / column_base geometry for india_connection_design) required")
+    if lf and not cfg.get("portal"):
+        import india_cfs_frame_build as FB
+        out += FB.framed_area_issues(cfg)                  # C06: framed floor / roof area vs the declared plan
     cm = cfg.get("cfs_members") or {}
     if not cfg.get("portal") and not cm:
         say("ERROR", "cfg['cfs_members'] (studs / joists to IS 801) required")

@@ -62,8 +62,10 @@ def _callables(spec):
 
     def beam_sec(i, j, k, dirn):
         roof = (k == NF)
-        return (beam_groups.get(("roof" if roof else "floor") + "_" + dirn) or beam_groups.get("roof" if roof else "floor")
-                or spec["beam"])
+        v = beam_groups.get(("roof" if roof else "floor") + "_" + dirn) or beam_groups.get("roof" if roof else "floor")
+        if isinstance(v, dict):                             # C11: storey-ranged beam group {"1-2": sec, "3-8": sec}
+            v = _pick(v, k)
+        return v or spec["beam"]
 
     def col_strong(i, j, nx, ny):
         # strong axis in the plane of the frame the column belongs to (moment line first, then braced bay)
