@@ -152,14 +152,23 @@ def wind_story_forces(cfg):
     z = 0.0
     for h in H:
         z += h; hs.append(z)
-    # frame tributary area for Ka (7.2.2.1 (a)): frame spacing x storey height
+    # frame tributary area for Ka (7.2.2.1 (a)), PER DIRECTION (C02 / CFS-D-10): the frames resisting wind along X are
+    # the lines y = const, spaced bay_y apart -> A = bay_y x storey height (and bay_x for wind along Y)
     lf = cfg.get("lateral_frame") or {}
-    sp = max(float(lf.get("bay_x_m", Lx)), float(lf.get("bay_y_m", Ly)))
-    Ka_rec = WT.resolve_ka(sp * max(H), site.get("Ka_corpus_hit"))
-    if not Ka_rec.get("found"):
-        raise LateralSystemError("Ka (Table 4) unresolved: %s" % Ka_rec.get("cite"))
-    Ka = float(Ka_rec["Ka"])
-    out.update(Ka=Ka, Ka_area_m2=sp * max(H), Ka_cite=Ka_rec.get("cite"))
+    Ka_d = {}
+    for d, bay_key, Lalt in (("X", "bay_y_m", Ly), ("Y", "bay_x_m", Lx)):
+        sp = float(lf.get(bay_key) or Lalt)
+        Ka_rec = WT.resolve_ka(sp * max(H), site.get("Ka_corpus_hit"))
+        if not Ka_rec.get("found"):
+            raise LateralSystemError("Ka (Table 4) unresolved: %s" % Ka_rec.get("cite"))
+        Ka_d[d] = (float(Ka_rec["Ka"]), sp * max(H), Ka_rec.get("cite"))
+        out.update({"Ka_%s" % d: Ka_d[d][0], "Ka_area_%s_m2" % d: Ka_d[d][1]})
+    dgov = max(Ka_d, key=lambda d: Ka_d[d][0])
+    out.update(Ka=Ka_d[dgov][0], Ka_area_m2=Ka_d[dgov][1], Ka_cite=Ka_d[dgov][2],
+               Ka_note="Ka per direction: frame spacing normal to the wind x storey height (7.2.2.1); Ka / Ka_area = the larger")
+    # C05: optional per-level exposed face (mixed-height buildings): geometry.wind_exposure = {level: {width_X_m,
+    # width_Y_m, height_m}} -- width_X_m = the face width loaded by wind along X, height_m = the tributary height
+    expo = {str(k): v for k, v in dict(geo.get("wind_exposure") or {}).items()}
     forces = {"W_X": {}, "W_Y": {}}
     htot = sum(H)
     w_, l_ = min(Lx, Ly), max(Lx, Ly)          # Table 5: w = lesser, l = greater plan dimension
@@ -174,6 +183,7 @@ def wind_story_forces(cfg):
         net = A_ - B_
         out["Cpe_%s" % d] = {"windward": A_, "leeward": B_, "net": net, "cite": cpe.get("cite"), "h_over_w": htot / w_,
                              "l_over_w": l_ / w_, "theta_deg": theta, "face_width_m": B}
+        Ka = Ka_d[d][0]
         for k, h in enumerate(H, start=1):
             roof = k == len(H)
             ztop = hs[k - 1]
@@ -182,17 +192,57 @@ def wind_story_forces(cfg):
             pz = 0.6 * Vz ** 2 / 1000.0            # kN/m2
             pd = max(Kd * Ka * Kc * pz, 0.70 * pz)
             trib = H[k - 1] / 2.0 + (H[k] / 2.0 if k < len(H) else 0.0)     # half storey below + half above
-            F = net * pd * B * trib * 1000.0      # N
+            ex = expo.get(str(k)) or {}
+            Bk = float(ex.get("width_%s_m" % d) or B)
+            if ex.get("height_m") is not None:
+                trib = float(ex["height_m"])
+            F = net * pd * Bk * trib * 1000.0      # N
             forces["W_" + d][str(k)] = [F if d == "X" else 0.0, F if d == "Y" else 0.0, 0.0]
             if d == "X":
                 out["storeys"].append({"k": k, "z_m": ztop, "k2": round(k2, 4), "Vz_mps": round(Vz, 3), "pz_kNm2": round(pz, 4),
-                                       "pd_kNm2": round(pd, 4), "trib_h_m": trib})
+                                       "pd_X_kNm2": round(pd, 4), "trib_h_m": trib, "face_width_X_m": Bk})
+            else:
+                row = out["storeys"][k - 1]
+                row.update(pd_Y_kNm2=round(pd, 4), face_width_Y_m=Bk, pd_kNm2=max(row["pd_X_kNm2"], round(pd, 4)))
+    if expo:
+        out["wind_exposure"] = expo
     out["pz_kNm2"] = max(s["pz_kNm2"] for s in out["storeys"]); out["pd_kNm2"] = max(s["pd_kNm2"] for s in out["storeys"])
     out["VB_x_kN"] = sum(v[0] for v in forces["W_X"].values()) / 1e3
     out["VB_y_kN"] = sum(v[1] for v in forces["W_Y"].values()) / 1e3
     out["cite"] = ("IS 875-3 6.2 Vb (Annex A); 6.3 Vz = Vb k1 k2 k3 k4; Table 2 k2; 6.3.4 k4; 7.2 pz = 0.6 Vz^2, pd = Kd Ka Kc pz "
                    ">= 0.7 pz; 7.2.1 Kd; Table 4 Ka (frame tributary); Table 5 Cpe; 7.3.2 Cpi cancels for the overall shear")
     return out, forces
+
+
+def merge_declared_wind(plan, forces):
+    """C05: a declared load_plan.story_forces W_X / W_Y (e.g. a mixed-height building worked by hand from IS 875-3) is
+    KEPT, not overwritten by the envelope storey forces -- it needs a cite (story_forces_cite or wind_story_forces_cite)
+    and story_forces_units ('N' | 'kN').  Returns (story_forces in N, {W_X: source, W_Y: source})."""
+    plan = plan or {}
+    decl = dict(plan.get("story_forces") or {})
+    units = str(plan.get("story_forces_units") or "").lower()
+    cite = plan.get("wind_story_forces_cite") or plan.get("story_forces_cite")
+    out = dict(decl)
+    src = {}
+    prev = ((plan.get("wind_summary") or {}).get("story_forces_source") or {})
+    for ref in ("W_X", "W_Y"):
+        generated = str(prev.get(ref) or "").startswith("IS 875-3 storey forces")    # a re-run: our own earlier output
+        if decl.get(ref) and not generated:
+            if not cite:
+                raise LateralSystemError("load_plan.story_forces.%s declared without a cite (wind_story_forces_cite): a declared "
+                                         "storey wind replaces the IS 875-3 envelope forces only with its source" % ref)
+            if units not in ("n", "kn"):
+                raise LateralSystemError("load_plan.story_forces.%s declared without story_forces_units ('N' or 'kN')" % ref)
+            f = 1000.0 if units == "kn" else 1.0
+            out[ref] = {str(k): [float(x) * f for x in v] for k, v in dict(decl[ref]).items()}
+            src[ref] = "declared (%s)" % cite
+        else:
+            out[ref] = forces[ref]
+            src[ref] = "IS 875-3 storey forces (india_cfs_lateral.wind_story_forces)"
+    for ref, v in list(out.items()):                          # other declared references (EQ_*) to N as well
+        if ref not in ("W_X", "W_Y") and units == "kn" and isinstance(v, dict):
+            out[ref] = {str(k): [float(x) * 1000.0 for x in vv] for k, vv in v.items()}
+    return out, src
 
 
 def partition_seismic_default(ld):
@@ -234,7 +284,8 @@ def build_hr_spec(cfg, name):
                                    D_floor_kNm2=ld["D_floor"], D_roof_kNm2=ld["D_roof"], L_floor_kNm2=ld["L_floor"],
                                    L_roof_kNm2=ld["Lr"], clad_kNm2=ld.get("clad", 0.0),
                                    partition_kNm2=ld.get("partition_design_kNm2", 0.0), snow_kNm2=ld.get("snow", 0.0))
-    plan["story_forces"] = dict(plan.get("story_forces") or {}, **forces)
+    plan["story_forces"], ws["story_forces_source"] = merge_declared_wind(plan, forces)
+    plan["wind_summary"].update(story_forces_source=ws["story_forces_source"])
     plan["story_forces_units"] = "N"
     plan["seismic_summary"] = dict(plan.get("seismic_summary") or {}, code=IS.IS1893_EDITION if hasattr(IS, "IS1893_EDITION") else "IS 1893 (Part 1):2016",
                                    site=site.get("city"), zone=site["zone"], Z=site["Z"], I=I_rec["I"], I_cite=I_rec.get("cite"),
