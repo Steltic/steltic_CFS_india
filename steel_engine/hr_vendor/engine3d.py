@@ -521,14 +521,18 @@ def nbays(cfg,k):
     return n
 
 def floor_area_mm2(cfg,k):
-    """Framed floor area (mm^2) when unit_system is N-mm."""
-    P=grid(cfg,k); a=0.0
+    """Framed floor area (mm^2) when unit_system is N-mm (+ the plan area of a level-k roof plane that is not over
+    framed grid cells, X02)."""
+    P=grid(cfg,k); a=0.0; cells=[]
     for i in range(cfg["NX"]):
         for j in range(cfg["NY"]):
             if (i,j) in P and (i+1,j) in P and (i,j+1) in P and (i+1,j+1) in P:
                 dx=_xy_in(cfg,i+1,j)[0]-_xy_in(cfg,i,j)[0]
                 dy=_xy_in(cfg,i,j+1)[1]-_xy_in(cfg,i,j)[1]
-                a+=abs(dx*dy)
+                a+=abs(dx*dy); cells.append((i,j))
+    if cfg.get("roof_planes"):
+        import roof_geometry as _RG
+        a+=_RG.uncovered_plane_area_mm2(cfg,k,cells)
     return a
 
 def perim_mm(cfg,k):
@@ -795,9 +799,34 @@ def seismic_weight_components(cfg, k):
     th = cfg["heights"][k-1]; th = th if k != NF else th / 2.0
     comp = {"dead": d * area / 1000.0,
             "cladding": float(cfg.get("clad") or 0.0) * envelope_perim_mm(cfg, k) * th / 1000.0}
+    if cfg.get("roof_planes") and cfg.get("clad"):
+        import roof_geometry as _RG                     # X02: gable-wall triangles above the eave of a roof plane
+        comp["cladding"] += _RG.gable_cladding_N(cfg, k)
     sw = (cfg.get("_sw_by_level") or {})
     comp["self_weight"] = float(sw.get(k, sw.get(str(k), 0.0)) or 0.0) if cfg.get("self_weight", True) else 0.0
-    if not roof:
+    reg = None
+    if not roof and (cfg.get("roof_regions") or cfg.get("roof_planes")):
+        import roof_geometry as _RG
+        if _RG.roof_region_bays(cfg, k):
+            reg = _RG.region_split_area_mm2(cfg, k)
+    if reg is not None:
+        # X02 (HR-B-16): roof bays of an intermediate level -- D_roof (or the region's D), 20 % snow > 1.5 kN/m2
+        # (7.3.5), no partitions and no Table 10 imposed share (7.3.2 / 7.3.6) on them; the floor part as a floor
+        a_fl = reg["floor"]
+        roofp = reg["roof"] + [(area - a_fl - sum(a_ for a_, _o in reg["roof"]), {})]
+        comp["dead"] = (d * a_fl + sum(float(o.get("D", cfg["D_roof"])) * a_ for a_, o in roofp)) / 1000.0
+        pp, _ = partition_seismic_kNm2(cfg)
+        if cfg.get("partitions", True) and pp < 0.5:
+            raise ValueError("IS 1893 7.3.6: partition weight in W shall not be less than 0.5 kN/m2 (got %g)" % pp)
+        comp["partitions"] = float(pp) * a_fl / 1000.0
+        L = float(_Llev(cfg, k))
+        comp["imposed"] = _table10_fraction(L) * L * a_fl / 1000.0
+        sn = 0.0
+        for a_, o in roofp:
+            s_ = float(o.get("snow", cfg.get("snow") or 0.0))
+            sn += (0.20 * s_ * a_ / 1000.0) if s_ > 1.5 else 0.0
+        comp["snow"] = sn
+    elif not roof:
         pp, _ = partition_seismic_kNm2(cfg)
         if cfg.get("partitions", True) and pp < 0.5:
             raise ValueError("IS 1893 7.3.6: partition weight in W shall not be less than 0.5 kN/m2 (got %g)" % pp)
@@ -849,11 +878,23 @@ def floor_live(cfg,k):
     NF=len(cfg["heights"])
     if k==NF: return 0.0
     if _UNIT_SYSTEM == "N-mm":
-        return (float(_Llev(cfg, k)) + float(cfg.get("partition_load_kNm2") or 0.0)) * floor_area_mm2(cfg, k) / 1000.0
+        a = floor_area_mm2(cfg, k)
+        if cfg.get("roof_regions") or cfg.get("roof_planes"):          # X02: no floor imposed load on roof bays
+            import roof_geometry as _RG
+            if _RG.roof_region_bays(cfg, k):
+                a = _RG.region_split_area_mm2(cfg, k)["floor"]
+        return (float(_Llev(cfg, k)) + float(cfg.get("partition_load_kNm2") or 0.0)) * a / 1000.0
     return _Llev(cfg,k)*floor_area_ft2(cfg,k)/1000.0
 
 def floor_roofLrS(cfg,k):
     NF=len(cfg["heights"])
+    if k!=NF and _UNIT_SYSTEM == "N-mm" and (cfg.get("roof_regions") or cfg.get("roof_planes")):
+        import roof_geometry as _RG                      # X02: roof imposed / snow on the roof bays of level k
+        if _RG.roof_region_bays(cfg, k):
+            sp = _RG.region_split_area_mm2(cfg, k)
+            a_r = floor_area_mm2(cfg, k) - sp["floor"]
+            return sum(float(o.get("snow", cfg.get("snow") or 0.0) or o.get("Lr", cfg.get("Lr") or 0.0)) * a_
+                       for a_, o in sp["roof"] + [(a_r - sum(x for x, _o in sp["roof"]), {})]) / 1000.0
     if k!=NF: return 0.0
     snow=cfg.get("snow",0.0)
     if _UNIT_SYSTEM == "N-mm":
@@ -892,7 +933,8 @@ def _model_key(cfg):
            tuple(sorted((cfg.get("extra_mass_floors") or {}).items())),
            tuple(sorted((cfg.get("seis") or {}).items())),
            repr([cfg.get(k_) for k_ in ("Jm_by_level", "nodal_masses", "partition_load_kNm2",       # H04/H16/H22/H50
-                                        "partition_seismic_kNm2", "roof_levels", "crane", "envelope")]))
+                                        "partition_seismic_kNm2", "roof_levels", "crane", "envelope",
+                                        "roof_planes", "roof_regions")]))                          # X02
     return hashlib.md5(repr(sig).encode()).hexdigest()
 
 def modal(cfg, nm):
@@ -1527,31 +1569,51 @@ def india_wind_serviceability(cfg):
     import india_loads as IL
     div_st, div_H, key = _wind_limits(cfg)
     out = {}
+    # X05: IS 875-3 10.4 -- with an evaluated 10.3 across-wind record the along-wind pattern is also run with the
+    # across-wind pattern applied simultaneously (+/-); the drift is then read on both plan axes
+    try:
+        import india_combos as _IC
+        _awp = _IC.across_wind_patterns(cfg.get("load_plan") or {}, cfg)
+        _aw_sc = IL._story_force_scale(cfg.get("load_plan") or {}) if _awp.get("patterns") else 1.0
+    except Exception:
+        _awp, _aw_sc = {"patterns": {}}, 1.0
     for d in ("X", "Y"):
         F = india_story_forces(cfg, d, kind="W")
         if not F:
             continue
-        info = build(cfg, "PDelta"); NF = info["NF"]
-        ops.timeSeries("Linear", 1); ops.pattern("Plain", 1, 1)
-        _apply_nodal_gravity(cfg, info, 1.0, 1.0)
-        for k in range(1, NF + 1):
-            fx, fy, mz = F.get(k, (0.0, 0.0, 0.0))
-            ops.load(mtag(k), fx, fy, 0.0, 0.0, 0.0, mz)
-        ops.constraints("Transformation"); ops.numberer("RCM"); ops.system("UmfPack")
-        ops.test("NormDispIncr", 1e-7, 200); ops.algorithm("Newton")
-        ops.integrator("LoadControl", 1.0); ops.analysis("Static")
-        if ops.analyze(1) != 0:
-            raise RuntimeError("wind serviceability analysis (%s) did not converge" % d)
-        di = 0 if d == "X" else 1
-        disp = {(i, j, k): ops.nodeDisp(ntag(i, j, k), di + 1)
-                for k in range(0, NF + 1) for (i, j) in info["present"][k]}
-        drift = []
-        for k in range(1, NF + 1):
-            lines = [(i, j) for (i, j) in info["present"][k] if (i, j) in info["present"][k - 1]]
-            drift.append(max([abs(disp[(i, j, k)] - disp[(i, j, k - 1)]) / cfg["heights"][k - 1]
-                              for (i, j) in lines] or [0.0]))
+        Fa = {int(k): tuple(float(x) * _aw_sc for x in v)
+              for k, v in ((_awp.get("patterns") or {}).get("W_%s_across" % d) or {}).items()}
+        sets = [(0, F)]
+        if Fa:
+            for sa in (1, -1):
+                sets.append((sa, {k: tuple(a + sa * b for a, b in zip(F.get(k, (0.0, 0.0, 0.0)),
+                                                                        Fa.get(k, (0.0, 0.0, 0.0))))
+                                  for k in set(F) | set(Fa)}))
+        drift, top = None, 0.0
+        for sa, FF in sets:
+            info = build(cfg, "PDelta"); NF = info["NF"]
+            ops.timeSeries("Linear", 1); ops.pattern("Plain", 1, 1)
+            _apply_nodal_gravity(cfg, info, 1.0, 1.0)
+            for k in range(1, NF + 1):
+                fx, fy, mz = FF.get(k, (0.0, 0.0, 0.0))
+                ops.load(mtag(k), fx, fy, 0.0, 0.0, 0.0, mz)
+            ops.constraints("Transformation"); ops.numberer("RCM"); ops.system("UmfPack")
+            ops.test("NormDispIncr", 1e-7, 200); ops.algorithm("Newton")
+            ops.integrator("LoadControl", 1.0); ops.analysis("Static")
+            if ops.analyze(1) != 0:
+                raise RuntimeError("wind serviceability analysis (%s) did not converge" % d)
+            dis = [0 if d == "X" else 1] + ([1 if d == "X" else 0] if sa else [])
+            for di in dis:
+                disp = {(i, j, k): ops.nodeDisp(ntag(i, j, k), di + 1)
+                        for k in range(0, NF + 1) for (i, j) in info["present"][k]}
+                dr = []
+                for k in range(1, NF + 1):
+                    lines = [(i, j) for (i, j) in info["present"][k] if (i, j) in info["present"][k - 1]]
+                    dr.append(max([abs(disp[(i, j, k)] - disp[(i, j, k - 1)]) / cfg["heights"][k - 1]
+                                   for (i, j) in lines] or [0.0]))
+                drift = dr if drift is None else [max(a, b) for a, b in zip(drift, dr)]
+                top = max(top, max(abs(disp[(i, j, NF)]) for (i, j) in info["present"][NF]))
         H = float(sum(cfg["heights"]))
-        top = max(abs(disp[(i, j, NF)]) for (i, j) in info["present"][NF])
         rec = {"storey_drift": drift, "top_mm": top, "H_mm": H, "limit_top_mm": H / div_H,
                "ratio_top": top / (H / div_H), "basis": key,
                "cite": "%s: %s -> H/%d%s" % (IL.IS800_TABLE6_CITE, key, div_H,
@@ -1559,6 +1621,9 @@ def india_wind_serviceability(cfg):
         if div_st:
             rec["limit_storey"] = 1.0 / div_st
             rec["ratio_storey"] = max(drift) * div_st
+        if Fa:
+            rec["across_wind"] = {"pattern": "W_%s_across" % d, "signs": [1, -1], "axes": ["X", "Y"],
+                                  "cite": "IS 875 (Part 3):2015 10.3 / 10.4 (along + across applied simultaneously)"}
         out[d] = rec
     return out
 
@@ -1696,7 +1761,7 @@ def india_dynamic_wind_gate(cfg, f1_hz):
                 if have < float(want) * (1 - 0.02):
                     bad.append("W_%s story forces sum %.1f kN < 10.2 gust-factor along-wind base shear %.1f kN"
                                % (d, have, float(want)))
-    aw_ok, aw_why = across_wind_evaluated(ws.get("across_wind"))
+    aw_ok, aw_why = across_wind_evaluated(ws.get("across_wind"), cfg)
     if not aw_ok:
         bad.append("dynamic wind required (%s): the across-wind response (IS 875-3 10.3) is not evaluated -- %s "
                    "(ruling R10: wind_summary.across_wind {found: true, Mc_kNm: <number>, cite} or an EOR record "
@@ -1704,9 +1769,19 @@ def india_dynamic_wind_gate(cfg, f1_hz):
     return not bad, bad, True
 
 
-def across_wind_evaluated(aw):
+def across_wind_evaluated(aw, cfg=None):
     """H12 / ruling R10: the IS 875-3 10.3 across-wind record counts only when evaluated -- found is True with a
-    numeric Mc_kNm, or an EOR record {value (numeric), source, cite}.  Returns (ok, reason)."""
+    numeric Mc_kNm, or an EOR record {value (numeric), source, cite}.  Returns (ok, reason).
+    X05: or a Cfs record {Cfs: {value, source, cite}, k, beta, fc_hz, ph_Pa | Vb_mps + terrain_category, b_m, h_m}
+    (per along-wind direction in aw['X'] / aw['Y']) from which Mc is computed (india_wind_tables.resolve_across_wind;
+    h and b default to the model when cfg is given)."""
+    if isinstance(aw, dict) and (aw.get("Cfs") is not None or isinstance(aw.get("X"), dict)
+                                 or isinstance(aw.get("Y"), dict) or aw.get("Mc_kNm_X") is not None
+                                 or aw.get("Mc_kNm_Y") is not None):
+        import india_wind_tables as WT
+        r = WT.resolve_across_wind(aw, ((cfg or {}).get("load_plan") or {}).get("wind_summary"),
+                                   **(across_wind_model_dims(cfg) if cfg else {}))
+        return (True, None) if r["found"] else (False, r["reason"])
     def _num(v):
         try:
             return v is not None and not isinstance(v, bool) and math.isfinite(float(v))
@@ -1723,6 +1798,19 @@ def across_wind_evaluated(aw):
     if aw.get("found") is True:
         return False, "across_wind.found is true but Mc_kNm is not a number"
     return False, "across_wind is not evaluated (found %r, no numeric Mc_kNm, no EOR {value, source, cite})" % aw.get("found")
+
+
+def across_wind_model_dims(cfg):
+    """X05: model defaults for the 10.3 inputs -- h_m = total height; b_m = {'X': breadth normal to wind along X
+    (plan Y extent of the envelope), 'Y': plan X extent} (m)."""
+    out = {"h_m": float(sum(cfg["heights"])) / 1000.0}
+    try:
+        xs = [_xy_in(cfg, i, j) for (i, j) in envelope_nodes(cfg, 1)]
+        out["b_m"] = {"X": (max(c[1] for c in xs) - min(c[1] for c in xs)) / 1000.0,
+                      "Y": (max(c[0] for c in xs) - min(c[0] for c in xs)) / 1000.0}
+    except Exception:
+        pass
+    return out
 
 
 def _bays_adjacent(present_k, i, j, dirn):
@@ -1761,6 +1849,14 @@ def beam_deflection_si(cfg):
         dirn = "X" if Lx >= Ly else "Y"
         k_ = n1 // 100000
         roof = k_ >= NF or k_ in roofs
+        _cl = None
+        if cfg.get("roof_planes"):
+            import roof_geometry as _RG
+            _cl = _RG.classify(cfg, c1, c2)
+            if _cl is not None and _cl[1] != "rafter":
+                continue                                   # X02: eave struts / ridge members / ties carry no area load
+            if _cl is not None:
+                k_ = _cl[0]["k"]; roof = True
         # tributary width by the bays actually bounding the beam (edge beam: one bay -> half the bay width;
         # interior: two half bays) -- the full-bay width on every group over-read edge-beam deflections (WP6-fix)
         i_, j_ = (min(n1, n2) % 100000) // 100, min(n1, n2) % 100
@@ -1772,6 +1868,8 @@ def beam_deflection_si(cfg):
             tw = _SM.one_way_trib_mm(cfg, pk, i_, j_, dirn)          # H13: actual bays + secondary strips
             if tw is not None:
                 trib = tw
+        if _cl is not None:
+            trib = _RG.rafter_trib_mm(_cl[0], c1[_cl[0]["oax"]])      # X02: rafter strip; L = plan length
         # H11 (HR-E-08): roof imposed = max(Lr, snow) (IS 875-5 8.1 Note 1); floors: the per-level imposed load
         # (_Llev: cfg['L_by_level'] override) + partitions
         if roof:
@@ -2449,6 +2547,9 @@ def floor_beam_gaps(cfg, transf="Linear"):
         k = t // 100000; r = t % 100000
         return (r // 100, r % 100) in omit.get(k, set())
     gaps = []
+    _rp_on = bool(cfg.get("roof_planes"))
+    if _rp_on:
+        import roof_geometry as _RG
     for z, pts in byz.items():
         xs = sorted({round(p[0], 3) for p in pts}); ys = sorted({round(p[1], 3) for p in pts})
         xi = {x: i for i, x in enumerate(xs)}; yi = {y: i for i, y in enumerate(ys)}
@@ -2457,7 +2558,8 @@ def floor_beam_gaps(cfg, transf="Linear"):
             for (di, dj) in ((1, 0), (0, 1)):
                 nb = at.get((gi+di, gj+dj))
                 if nb and frozenset((t, nb[2])) not in modelled and not _chained(t, nb[2]) \
-                        and not (_omitted(t) or _omitted(nb[2])) and not (t in sup and nb[2] in sup):
+                        and not (_omitted(t) or _omitted(nb[2])) and not (t in sup and nb[2] in sup) \
+                        and not (_rp_on and _RG.plane_spans_segment(cfg, z, (x, y), (nb[0], nb[1]), under_roof=True)):   # X02
                     gaps.append((z, (x, y), (nb[0], nb[1])))
     return gaps
 

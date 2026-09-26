@@ -1,7 +1,7 @@
 # hr_vendor — the shared India engine, vendored byte-identically from work/hr
 
 Source: steltic_india (hot-rolled IS 800 engine), branch fix/2026-09-review
-Commit: **98691c479de0d8d76380e47d7fc52e2d47904c00** (steltic_india fix/2026-09-review, 2026-09-26, after the 2026-09 review fixes), copied with every file of `steel_engine/` except `tools/` and `__pycache__/`. After the steltic_india PR merges, re-run `scripts/check_vendored.py` against the merged checkout and record the merged commit here.
+Commit: **2881be41ffec3a9c7f2990f9274ceff007a43298** (steltic_india fix/2026-09-review, 2026-09-26, after the 2026-09 review fixes), copied with every file of `steel_engine/` except `tools/` and `__pycache__/`. After the steltic_india PR merges, re-run `scripts/check_vendored.py` against the merged checkout and record the merged commit here.
 
 Rules (IMPL_BRIEF conventions, spec WP1.14):
 - Every file in this folder is byte-identical to `work/hr/steel_engine/<same path>` at the commit above.
