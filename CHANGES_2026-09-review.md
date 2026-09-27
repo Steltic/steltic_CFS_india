@@ -89,3 +89,8 @@ Branch `fix/2026-09-review`, based on the delivered 1.0.2 tree. Scope rows C01â€
 - C16: re-vendor HR engine (GOLD-764 literal 7.6.4, GOLD-COLL collector accumulation)
 - H3: CFS diaphragm shear from the analysed line reactions / deck length along each line (audit round 5)
 - H3-T: IS 1893 7.8.2 accidental torsion in the rigid line reactions of the CFS diaphragm check
+- C16 + Windows: re-vendor HR consistency (AUD-1 path fix); report link uses '/' separators
+- X06 test (Windows): T1 parity rel 1e-3 -- near-mechanism frames (T1 5.9-6.9 s) differ ~1e-4 between LAPACK builds
+- Corpus: drop references to the private corpus repo; users build their own IS corpus in the Steltic hub
+- CORPUS_FIX_LLM_INSTRUCTIONS.md: the owner's instructions for the corpus fix pass (replaces the placeholder)
+- CORPUS_FIX_LLM_INSTRUCTIONS.md: final version (matches the hub's bundled corpus module: validate probes, optional scripts/*.json, Import fixed corpus tab)
