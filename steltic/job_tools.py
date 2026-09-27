@@ -793,8 +793,8 @@ class JobWorkspace:
             qfm = config.DATA.parent.parent / "grokbot"
             cands += [qfm / "indexes" / "aliases.json",
                       qfm / "engineering_rag_phase2" / "indexes" / "aliases.json"]
-            # India CFS: the India corpus aliases (INDIA_CORPUS_ROOT, else a sibling checkout, else
-            # /workspace/engineering_rag_india -- see india_collections.india_corpus_root)
+            # India CFS: the IS corpus aliases (INDIA_CORPUS_ROOT, else a sibling corpus folder, else the
+            # historical /workspace path -- see india_collections.india_corpus_root)
             from .india_collections import india_corpus_root
             _root = pathlib.Path(india_corpus_root())
             cands += [_root / "indexes" / "aliases.json", _root / "scripts" / "aliases.json"]

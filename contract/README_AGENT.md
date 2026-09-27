@@ -23,7 +23,7 @@ The US design-example recipes (`rag_v2/usa_reference/cfs_models.jsonl`) are NOT 
 2. **Retrieve** — one document per call, exact ids when known (`exact_table` 9, `exact_section` 6.1.2 …), fts only
    to navigate; file each hit into `load_plan.retrieval` with `stem / query / found / cite / file / quote / purpose`
    (`file` = the stored `rag/<slug>.json`, `quote` verbatim from it; a found:false row whose value is used carries
-   `{value, source, cite, verify: True}`). Corpus server: `RAG_API_URL`; corpus checkout: `INDIA_CORPUS_ROOT`
+   `{value, source, cite, verify: True}`). Corpus server: `RAG_API_URL`; corpus folder: `INDIA_CORPUS_ROOT`
    (AGENT_START, "Corpus and search tool").
 3. **Compose `cfg.py`** — the schema in AGENT_START.md. Choose the D3 system for the zone, a rational braced-bay
    layout (perimeter X-bracing is the default), IS 808 columns / beams / braces, IS 811 studs / joists / purlins /

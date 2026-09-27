@@ -411,7 +411,7 @@ def as_tool_calls(plan: list[dict[str, Any]]) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # IS 811 Ix OCR → QFM correction path (wave2 polish2)
 # Catalog OCR sometimes concatenates Ix|Iy or drops digits. Agents must correct
-# Ix from LIVE RAG / engineering_rag_india (QFM) — never invent numbers.
+# Ix from LIVE RAG / the IS corpus (QFM) — never invent numbers.
 # ---------------------------------------------------------------------------
 
 IX_QFM_PURPOSE = "is811_ix_qfm_correction"
@@ -420,7 +420,7 @@ IX_QFM_PURPOSE = "is811_ix_qfm_correction"
 def seed_ix_qfm_correction_plan(section: str) -> list[dict[str, Any]]:
     """Retrieval-plan hooks to re-read Ix from LIVE IS 811 RAG / QFM tables.
 
-    Execute every required step against engineering_rag_india; if OCR/catalog Ix
+    Execute every required step against the IS corpus (RAG_API_URL); if OCR/catalog Ix
     is noisy, apply a cited QFM value via ``ix_qfm_correction_status`` /
     ``apply_ix_from_qfm`` — do not invent Ix.
     """
@@ -542,7 +542,7 @@ def ix_qfm_correction_status(
     if qfm_ix_si_cm4 is None:
         out["note"] = (
             "No QFM Ix supplied yet. Run seed_ix_qfm_correction_plan against "
-            "engineering_rag_india; when a cited Ix (cm4) is retrieved, call "
+            "the IS corpus (RAG_API_URL); when a cited Ix (cm4) is retrieved, call "
             "apply_ix_from_qfm / ix_qfm_correction_status with qfm_ix_si_cm4 + cite. "
             "Do not invent Ix or patch OCR by guesswork."
         )
