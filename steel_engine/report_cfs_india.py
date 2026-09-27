@@ -114,7 +114,7 @@ def build_report_cfs_india(name, cfg, pkg, root):
     # ---- 4 lateral frame ----
     out.append("<h2>4. Hot-rolled lateral frame (vendored HR India pipeline @ %s)</h2>" % _e(lat.get("vendored_commit")))
     if lat.get("report_html"):
-        rel = os.path.relpath(lat["report_html"], root) if os.path.isabs(lat["report_html"]) else lat["report_html"]
+        rel = (os.path.relpath(lat["report_html"], root) if os.path.isabs(lat["report_html"]) else lat["report_html"]).replace(os.sep, "/")
         out.append("<p>Full frame report: <a href='%s'>%s</a> (13 chapters: members, Section 12, connections, bases, drift, irregularity).</p>" % (_e(rel), _e(rel)))
     out.append(_t(["member group", "role", "section", "n", "governing combination", "D/C"],
                   [(m["id"], m["role"], m["section"], m.get("n"), m.get("governing_combo"), _dcf(m.get("DC"))) for m in lat.get("members") or []]))
