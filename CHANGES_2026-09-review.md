@@ -27,11 +27,22 @@ Branch `fix/2026-09-review`, based on the delivered 1.0.2 tree. Scope rows C01â€
 
 ## Tests
 
-- `STELTIC_HR_ROOT=<steltic_india checkout> python3 -m pytest tests -q -p no:cacheprovider` gives 284 passed.
+- `STELTIC_HR_ROOT=<steltic_india checkout> python3 -m pytest tests -q -p no:cacheprovider` gives 308 passed.
 - `python3 scripts/check_vendored.py` reports 45 files identical.
 
-## Commits (oldest first; subjects only â€” hashes change when the branch is replayed onto GitHub)
+## Additions from the gold-standard round (2026-09-26/27)
 
+- **HR engine re-vendored** with owner rulings O1/O2, GOLD-1..7, AUD-1..4, GOLD-764 and GOLD-COLL. See the steltic_india release notes.
+- **O3:** the framed-area check falls back to `geometry.floor_area_m2`, taken as the per-level plan area.
+- **GOLD-1:** CFS consistency uses limit/value only for minimum-type (`sense >=`) rows.
+- **AUD-1..4, CFS side:** plate fy by band in the portal base, 7.6.4 label reconciliation, `lateral_frame.diaphragm_type`, portal `embedment_cite` and the bond form, and `delegated_design` passed to the HR run.
+- **GOLD-COLL:** `lateral_frame.diaphragm_by_level`.
+- **H3 (audit HIGH):** the diaphragm deck shear per line is now the analysed line reaction (rigid + flexible envelope) Ã· the deck length actually present along that line. The old equal share F/(n B) is kept only for information.
+  - New optional key: `geometry.diaphragm_line_length_m`.
+  - If no reactions are available, the check fails closed.
+- **H3-T:** IS 1893 7.8.2 accidental torsion (0.05 b) is added to the rigid line reactions.
+
+## Commits (oldest first; subjects only â€” hashes change when the branch is replayed onto GitHub)
 - C01: IS 801 bending stress N-mm -> kgf-cm is x N_TO_KGF/10 (6.7 fbx/fby, 6.4.2 fbw); re-size Ex5 portal (CFS-A-01, CFS-A-11, E6)
 - C15: refuse lipped-zed (LZ) bending with found:false until principal-axis bending is implemented
 - C04: snow combinations read loads.snow as well as top-level snow / snow_summary.applicable (CFS-D-07)
@@ -63,3 +74,18 @@ Branch `fix/2026-09-review`, based on the delivered 1.0.2 tree. Scope rows C01â€
 - RR-BUG-4: CFS lateral reasons ranked by the HR reason class; the cap keeps every class
 - RR-BUG-3: never format a None D/C in the CFS report / portal viewer; clear C07 mezzanine-beam reason
 - C16: re-vendor HR engine at 726d180 (RR-BUG-1,2,4,5,6)
+- O3: C06 framed-area check falls back to geometry.floor_area_m2 (owner ruling O3, 2026-09-26)
+- C16: re-vendor HR engine (owner rulings O1, O2)
+- GOLD-1: CFS consistency recomputes minimum-type rows as limit / value (IN_CFS_Ex13, IN_CFS_Ex7, blocking)
+- GOLD-2 (X01): document per-level lateral_frame.diaphragm_stiffness (IN_CFS_Ex9)
+- C16: re-vendor HR engine (gold-run fixes GOLD-1..7)
+- AUD-2 (CFS): all-CFS portal base plate fy from IS 2062:2025 Table 3 by thickness
+- AUD-1 (CFS): regression test -- CFS evidence rule needs the row's own stored hit
+- AUD-3 (CFS): board diaphragm declared rigid without a basis is a preflight WARN; lateral 7.6.4 warnings reach the CFS status
+- AUD-4 (CFS): portal anchorage derived / asserted with source + cite, breakout record, anchorage WARNs
+- C16: re-vendor HR engine (audit fixes AUD-1..4)
+- GOLD-764 (CFS): diaphragm rows carry the HR flexible run's 7.6.4 record on the code-literal ratio (IN_CFS_Ex9)
+- GOLD-COLL (CFS): lateral_frame.diaphragm_by_level reaches the HR run (IN_CFS_Ex9)
+- C16: re-vendor HR engine (GOLD-764 literal 7.6.4, GOLD-COLL collector accumulation)
+- H3: CFS diaphragm shear from the analysed line reactions / deck length along each line (audit round 5)
+- H3-T: IS 1893 7.8.2 accidental torsion in the rigid line reactions of the CFS diaphragm check
