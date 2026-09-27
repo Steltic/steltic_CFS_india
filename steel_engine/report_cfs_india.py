@@ -143,9 +143,15 @@ def build_report_cfs_india(name, cfg, pkg, root):
                         _ok(c.get("ok")) + (" (info)" if c.get("informational") else ""), c.get("clause")) for c in m.get("checks") or []]))
     # ---- 6 diaphragm ----
     out.append("<h2>6. Diaphragm path to the frame lines</h2>")
-    out.append(_t(["storey", "dir", "F EQ (kN)", "F W (kN)", "governing", "unit shear (kN/m)", "chord (kN)", "capacity", "result"],
-                  [(r["storey"], r["dir"], _kN(r["F_EQ_N"]), _kN(r["F_W_N"]), r["governing"], _f(r["v_unit_kN_per_m"], 2), _f(r["chord_force_kN"], 1),
-                    r.get("capacity") or "found:false (EOR product / test value)", _ok(r.get("ok")))
+    out.append("<p class='note'>H3: unit shear = analysed line reaction / deck length along that line (HR line reactions, "
+               "rigid and flexible cases, EQ and W enveloped); the governing line is shown.</p>")
+    out.append(_t(["storey", "dir", "F EQ (kN)", "F W (kN)", "governing case", "line (m)", "R (kN)", "deck length (m)",
+                   "unit shear (kN/m)", "chord (kN)", "capacity", "result"],
+                  [(r["storey"], r["dir"], _kN(r["F_EQ_N"]), _kN(r["F_W_N"]), r.get("governing_case") or r["governing"],
+                    _f(r.get("governing_line_m"), 2), _f(r.get("governing_R_kN"), 1), _f(r.get("governing_deck_length_m"), 2),
+                    _f(r["v_unit_kN_per_m"], 2), _f(r["chord_force_kN"], 1),
+                    r.get("capacity") or "found:false (EOR product / test value)",
+                    _ok(r.get("ok")) if r.get("demand_evaluated") is not False else "NOT EVALUATED")
                    for r in pkg.get("diaphragm") or [] if r.get("kind") != "collector"]))
     coll = [r for r in pkg.get("diaphragm") or [] if r.get("kind") == "collector"]
     if coll:                                                  # C03: re-entrant collectors

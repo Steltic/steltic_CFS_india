@@ -518,97 +518,547 @@ def _flexible_764(lateral, d, k):
     return None
 
 
-def diaphragm_demands(cfg, lateral):
-    """Storey diaphragm demands handed from the CFS floor / roof to the frame lines (IS 1893 7.6.3 storey forces at
-    gamma 1.0, IS 875-3 wind storey forces): unit shear into the frame lines of each direction and the chord force
-    M/depth.  Capacities of a sheathed / decked CFS diaphragm need a cited product / test value -- IS 801 has no
-    diaphragm provision (9.1.4) -- so each capacity slot is found:false until the EOR supplies one.
-    C03: one braced line is allowed (v = F/B, cantilever chord); geometry.diaphragm_lines_X / _Y and
-    diaphragm_capacity.v_allow_kN_per_m may be per storey ({storey: value}); collector rows at the declared
-    re-entrant lines (geometry.reentrant_lines_X / _Y) carry F (1 - B_short/B)."""
-    geo = cfg["geometry"]; H = list(geo["heights_m"])
-    Lx, Ly = float(geo["plan_x_m"]), float(geo["plan_y_m"])
-    lp = json.load(open(os.path.join(lateral["root"], "load_plan.json"))) if os.path.exists(os.path.join(lateral["root"], "load_plan.json")) else {}
-    sf = lp.get("story_forces") or {}
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# H3 (audit round 5): the diaphragm demand comes from the ANALYSED line reactions of the HR sub-run, divided by the deck
+# length actually present along each line -- never from an equal share F / n spread over the plan depth.
+# ---------------------------------------------------------------------------------------------------------------------
+H3_CLAUSE = ("diaphragm unit shear per frame line = analysed line reaction / deck length present along the line at the "
+             "level (IS 1893 (Part 1):2016 7.6.3 storey forces at gamma 1.0, 7.6.4 rigid / flexible diaphragm; IS 875-3 "
+             "storey wind); enveloped over the rigid-diaphragm load path of the analysed model and the flexible-diaphragm "
+             "(tributary) line shears where the Table 5(ii) run or a flexible label applies, EQ and W")
+RIGID_BASIS = ("HR package collectors.rows: rigid-diaphragm load path by equilibrium of the analysed model "
+               "(india_diaphragm, R_line = sum of the vertical-element deliveries of the line)")
+FLEX_ROWS_BASIS = "HR package collectors.rows: flexible-diaphragm tributary line shears (IS 1893 7.6.4)"
+TRIB_BASIS = {"EQ": ("flexible-diaphragm line shears (IS 1893 7.6.4): storey force with the deck area of the level, carried "
+                     "to the frame lines as simple spans between them (the X01 deck-model line reactions are not recorded "
+                     "in the HR package)"),
+              "W": ("flexible-diaphragm line shears (IS 1893 7.6.4): storey wind by tributary width over the level's "
+                    "extent (the HR rule india_diaphragm.tributary_line_shears)")}
+LINE_TOL_MM = 5.0
+
+
+def _hr_collector_rows(lateral):
+    """(rows, source, error): the HR sub-run's collectors.rows (lateral_result 'collectors', else the sub-run
+    calc_package.json).  error is set when the package records no line reactions or the HR collector analysis failed."""
+    lateral = lateral or {}
+    col, src = lateral.get("collectors"), "lateral_result.json collectors"
+    if not isinstance(col, dict) or col.get("rows") is None:
+        root = lateral.get("root")
+        pth = os.path.join(root, "design", "calc_package.json") if root else None
+        if pth and os.path.exists(pth):
+            try:
+                col, src = json.load(open(pth)).get("collectors"), "design/calc_package.json collectors"
+            except (OSError, ValueError) as ex:
+                return None, None, "the HR calc_package.json is unreadable (%s)" % ex
+    if not isinstance(col, dict) or col.get("rows") is None:
+        return None, None, "the HR lateral package records no line reactions (collectors.rows missing)"
+    if col.get("error"):
+        return None, src, "the HR collector / line-reaction analysis failed: %s" % col["error"]
+    rows = [r for r in (col.get("rows") or []) if isinstance(r, dict)]
+    errs = [r["error"] for r in rows if r.get("error")]
+    if errs:
+        return None, src, "the HR collector / line-reaction analysis failed: %s" % errs[0]
+    return rows, src, None
+
+
+def _reaction_sets(rows):
+    """{(kind, source): {(k, d): {line_mm: {R_N, q_N_per_mm, upper_bound}}}} and the HR chord maxima {(kind, k, d): N}.
+    source 'rigid' = the rigid load path (incl. the rigid half of an X01 envelope), 'flexible' = tributary rows."""
+    sets, chords = {}, {}
+    for r in rows:
+        kind, d, k = r.get("kind"), r.get("dir"), r.get("level")
+        if kind not in ("EQ", "W") or d not in ("X", "Y") or k is None:
+            continue
+        k = int(k)
+        if r.get("role") == "collector" and r.get("R_line_N") is not None and r.get("line") is not None:
+            txt = "%s %s" % (r.get("cite") or "", r.get("basis") or "")
+            src = "flexible" if (not r.get("case") and (r.get("upper_bound") or r.get("vertical_elements") is not None
+                                                        or "tributary" in txt)) else "rigid"
+            ln = sets.setdefault((kind, src), {}).setdefault((k, d), {})
+            key = float(r["line"])
+            for kk in ln:
+                if abs(kk - key) <= LINE_TOL_MM:
+                    key = kk
+                    break
+            R = float(r["R_line_N"])
+            old = ln.get(key)
+            if old is None or abs(R) > abs(old["R_N"]):
+                ln[key] = {"R_N": R, "q_N_per_mm": r.get("q_N_per_mm"), "upper_bound": bool(r.get("upper_bound"))}
+        elif r.get("role") == "chord" and r.get("N_N") is not None:
+            chords[(kind, k, d)] = max(chords.get((kind, k, d), 0.0), abs(float(r["N_N"])))
+    return sets, chords
+
+
+def _lvl_sets(v, NF):
+    """{level | 'a-b' | 'default': [[i, j], ...]} -> {k: {(i, j)}} (a missing level -> empty)."""
+    out = {k: set() for k in range(1, NF + 1)}
+    for key, pts in dict(v or {}).items():
+        a_, _, b_ = str(key).partition("-")
+        try:
+            ks = range(int(a_), int(b_ or a_) + 1)
+        except ValueError:
+            continue
+        for k in ks:
+            if k in out:
+                out[k] |= {tuple(int(x) for x in p) for p in (pts or [])}
+    return out
+
+
+def _frame_geometry(cfg, lateral):
+    """The analysed frame's plan geometry per level: grid coordinates (mm), the level's diaphragm nodes (present set of
+    the HR sub-run model -- design/cfg_snapshot.json -- less the declared free nodes and stepped (grade) bases) and the
+    deck cells (four corners in the diaphragm, less the declared void cells of diaphragm_stiffness).  'known' is False
+    when a job-local builder ran and its footprint cannot be read back."""
+    geo = cfg["geometry"]; lf = cfg.get("lateral_frame") or {}
+    NF = len(list(geo["heights_m"]))
+    g = (lf.get("gold") or {}) if lf.get("custom_build_module") else {}
+    snap = None
+    root = (lateral or {}).get("root")
+    if root and os.path.exists(os.path.join(root, "design", "cfg_snapshot.json")):
+        try:
+            snap = json.load(open(os.path.join(root, "design", "cfg_snapshot.json")))
+        except (OSError, ValueError):
+            snap = None
+    out = {"known": True, "notes": []}
+    if isinstance(snap, dict) and snap.get("NX") is not None and str(snap.get("units") or "N-mm") == "N-mm":
+        NX, NY = int(snap["NX"]), int(snap["NY"])
+        xc = [float(x) for x in (snap.get("xcoords") or [i * float(snap["SX"]) for i in range(NX + 1)])]
+        yc = [float(y) for y in (snap.get("ycoords") or [j * float(snap["SY"]) for j in range(NY + 1)])]
+        pres = snap.get("present") or {}
+        full = {(i, j) for i in range(NX + 1) for j in range(NY + 1)}
+        present = {}
+        for k in range(1, NF + 1):
+            P = pres.get(str(k), pres.get(k)) if isinstance(pres, dict) else None
+            present[k] = {tuple(p) for p in P} if P else set(full)
+        if float(snap.get("skew") or 0.0):
+            out["known"] = False
+            out["notes"].append("skewed grid: the deck length along a line is not read from the model")
+        out["source"] = "HR sub-run model (design/cfg_snapshot.json: present / xcoords / ycoords)"
+    else:
+        NX, NY = int(lf["NX"]), int(lf["NY"])
+        bxm = float(lf.get("bay_x_m") or float(geo["plan_x_m"]) / max(NX, 1))
+        bym = float(lf.get("bay_y_m") or float(geo["plan_y_m"]) / max(NY, 1))
+        xc = [float(x) * 1000.0 for x in (g.get("xcoords_m") or [i * bxm for i in range(NX + 1)])]
+        yc = [float(y) * 1000.0 for y in (g.get("ycoords_m") or [j * bym for j in range(NY + 1)])]
+        if g:
+            import india_cfs_frame_build as FBW
+            pf = FBW.make_gold({"NX": NX, "NY": NY, "heights_m": list(geo["heights_m"]), "gold": g})["present"]
+            present = {k: set(pf(k)) for k in range(1, NF + 1)}
+            out["source"] = "CFS cfg lateral_frame.gold (present per level)"
+        else:
+            present = {k: {(i, j) for i in range(NX + 1) for j in range(NY + 1)} for k in range(1, NF + 1)}
+            out["source"] = "CFS cfg regular grid NX x NY"
+            if lf.get("custom_build_module"):
+                out["known"] = False
+                out["notes"].append("job-local builder without a readable HR model snapshot: deck lengths unknown")
+    free, stepped = _lvl_sets(g.get("free_nodes"), NF), _lvl_sets(g.get("stepped_bases"), NF)
+    voids = {k: set() for k in range(1, NF + 1)}
+    if lf.get("diaphragm_stiffness"):
+        try:
+            import india_flexible_diaphragm as FD
+            st_, err = FD.diaphragm_stiffness({"diaphragm_stiffness": lf["diaphragm_stiffness"], "heights": list(geo["heights_m"])})
+            for k, v in ((st_ or {}).get("void_cells") or {}).items():
+                if int(k) in voids:
+                    voids[int(k)] |= {tuple(int(a) for a in p) for p in v}
+        except Exception as ex:                                    # pragma: no cover - vendored engine missing
+            out["notes"].append("diaphragm_stiffness.void_cells not read (%s)" % ex)
+    dia, cells = {}, {}
+    for k in range(1, NF + 1):
+        D = present[k] - free[k] - stepped[k]
+        dia[k] = D
+        cells[k] = {(i, j) for i in range(NX) for j in range(NY)
+                    if {(i, j), (i + 1, j), (i, j + 1), (i + 1, j + 1)} <= D and (i, j) not in voids[k]}
+    out.update(NX=NX, NY=NY, xc=xc, yc=yc, dia=dia, cells=cells)
+    return out
+
+
+def _line_deck(gm, k, d, pos_mm):
+    """Deck present along the line at coordinate pos_mm (normal to the force d) at level k: {grid, on_diaphragm,
+    deck_m, node_extent_m}.  A line along X (d = X) is the grid line y = pos; its deck length = the grid segments with a
+    deck cell on either side."""
+    coords = gm["yc"] if d == "X" else gm["xc"]
+    idx = [q for q, c in enumerate(coords) if abs(c - pos_mm) <= LINE_TOL_MM]
+    if not idx:
+        return {"grid": False, "on_diaphragm": None, "deck_m": None, "node_extent_m": None}
+    q = idx[0]
+    D, C = gm["dia"].get(k, set()), gm["cells"].get(k, set())
+    along = gm["xc"] if d == "X" else gm["yc"]
+    nodes = [along[p] for p in range(len(along)) if ((p, q) if d == "X" else (q, p)) in D]
+    L = 0.0
+    for p in range(len(along) - 1):
+        a_, b_ = ((p, q), (p, q - 1)) if d == "X" else ((q, p), (q - 1, p))
+        if a_ in C or b_ in C:
+            L += abs(along[p + 1] - along[p])
+    return {"grid": True, "on_diaphragm": bool(nodes), "deck_m": L / 1000.0,
+            "node_extent_m": ((max(nodes) - min(nodes)) / 1000.0) if nodes else 0.0}
+
+
+def _declared_line_length(geo, k, d, pos_m):
+    """geometry.diaphragm_line_length_m {level | 'a-b' | 'default': {'<d>@<coord m>': m | '<d>': {coord m: m}}} -> (m, key)
+    or (None, None).  The direction is always named (a bare coordinate is ambiguous at a corner)."""
+    lv = _per_storey(geo.get("diaphragm_line_length_m"), k)
+    if not isinstance(lv, dict):
+        return None, None
+    cands = list((lv.get(d) or {}).items()) if isinstance(lv.get(d), dict) else []
+    for key, val in lv.items():
+        s_ = str(key).strip().upper()
+        if s_[:2] == d + "@":
+            cands.append((s_[2:], val))
+    for key, val in cands:
+        try:
+            if abs(float(key) - pos_m) <= 0.05:
+                return float(val), "%s@%s" % (d, key)
+        except (TypeError, ValueError):
+            continue
+    return None, None
+
+
+def _diaphragm_labels(lf, NF):
+    """{k: 'rigid' | 'flexible'} from lateral_frame.diaphragm / diaphragm_by_level (the HR diaphragm_labels rule)."""
+    base = str(lf.get("diaphragm") or "rigid").lower()
+    bl = lf.get("diaphragm_by_level") if isinstance(lf.get("diaphragm_by_level"), dict) else {}
+    lab = {k: str(bl.get("default") or base).lower() for k in range(1, NF + 1)}
+    for key, v in bl.items():
+        if key == "default":
+            continue
+        a_, _, b_ = str(key).partition("-")
+        try:
+            for k in range(int(a_), int(b_ or a_) + 1):
+                if k in lab:
+                    lab[k] = str(v).lower()
+        except ValueError:
+            continue
+    return lab
+
+
+def _lateral_line_coords(cfg, gm, d, k, NF):
+    """Coordinates (mm, normal to d) of the frame lines that deliver to level k: braced bays (lateral_frame.braced_bays,
+    gold xbays / ebf_bays of storey k or k + 1) and moment lines."""
     lf = cfg.get("lateral_frame") or {}
-    NX, NY = int(lf["NX"]), int(lf["NY"])
-    bx, by = float(lf.get("bay_x_m") or Lx / max(NX, 1)), float(lf.get("bay_y_m") or Ly / max(NY, 1))
-    # braced lines per direction (a line = a grid line with at least one braced bay); "perimeter" / "core" as in build_hr_spec
+    g = (lf.get("gold") or {}) if lf.get("custom_build_module") else {}
+    NX, NY = gm["NX"], gm["NY"]
     bays = lf.get("braced_bays", "perimeter")
     if bays == "perimeter":
-        bays = [["X", i, 0] for i in range(NX)] + [["X", i, NY] for i in range(NX)] + [["Y", 0, j] for j in range(NY)] + [["Y", NX, j] for j in range(NY)]
+        bays = [["X", i, 0] for i in range(NX)] + [["X", i, NY] for i in range(NX)] + \
+               [["Y", 0, j] for j in range(NY)] + [["Y", NX, j] for j in range(NY)]
     elif bays == "core":
         bays = [["X", NX // 2, NY // 2], ["Y", NX // 2, NY // 2]]
-    lines = {"X": sorted({int(b[2]) for b in bays if b[0] == "X"}), "Y": sorted({int(b[1]) for b in bays if b[0] == "Y"})}
-    for d in ("X", "Y"):
-        for (dd, kk) in (lf.get("moment_lines") or []):
-            if dd == d:
-                lines[d] = sorted(set(lines[d]) | {int(kk)})
-    dcap = cfg.get("diaphragm_capacity") or {}
-    rows = []
-    for k in range(1, len(H) + 1):
-        # storey force along X is resisted by the frame lines that run along X (y = const, length Lx = the diaphragm
-        # depth B); with n equal lines at spacing s = Lspan / (n - 1) the rigid diaphragm hands F / n to each line:
-        # v = F / (n B); chord = w s^2 / (8 B) with w = F / Lspan (continuous-diaphragm approximation; n = 2 is the
-        # simple span F / (2 B), F Lspan / (8 B)).  n = 1: the whole F goes into the one line (v = F / B) and the
-        # diaphragm cantilevers from it: chord = w a^2 / (2 B), a = the longer overhang (a = L/2 for a central line:
-        # F L / 8).  WP6-fix: B and Lspan were swapped; C03: max(2, n) halved the shear of a single line.
-        for d, B, Lspan, bay in (("X", Lx, Ly, by), ("Y", Ly, Lx, bx)):
-            # non-rectangular plans: depth (line length) and span declared per direction
-            B = float(_per_storey(geo.get("diaphragm_depth_%s_m" % d), k) or B)
-            Lspan = float(_per_storey(geo.get("diaphragm_span_%s_m" % d), k) or Lspan)
-            ndecl = _per_storey(geo.get("diaphragm_lines_%s" % d), k)
-            nlines = int(ndecl or len(lines[d]) or 2)
-            if nlines < 1:
-                raise LateralSystemError("geometry.diaphragm_lines_%s = %s at storey %d: at least one frame line" % (d, ndecl, k))
-            Fe = abs(float((sf.get("EQ_" + d) or {}).get(str(k), [0, 0, 0])[0 if d == "X" else 1]))
-            Fw = abs(float((sf.get("W_" + d) or {}).get(str(k), [0, 0, 0])[0 if d == "X" else 1]))
-            F = max(Fe, Fw); gov = "EQ" if Fe >= Fw else "W"
-            v_unit = F / 1e3 / (nlines * B)   # kN/m along each of the n frame lines (length B = diaphragm depth)
-            w = F / Lspan                     # N/m
-            if nlines == 1:
-                pos = (lines[d][0] * bay) if (len(lines[d]) == 1 and not ndecl) else Lspan / 2.0
-                a_ = max(pos, Lspan - pos)
-                M = w * a_ ** 2 / 2.0         # N-m: cantilever each side of the single line
-                s_span = a_
-                mech = "single line: v = F/B, chord = (F/L) a^2/(2 B), a = %.2f m overhang" % a_
+    bays = list(bays) if isinstance(bays, (list, tuple)) else []
+    if g:
+        import india_cfs_frame_build as FBW
+        for key in ("xbays", "ebf_bays"):
+            for s_ in (k, k + 1):
+                if s_ <= NF:
+                    bays += list(FBW._rng_pick(g.get(key), s_) or [])
+    idx = {int(b[2]) if d == "X" else int(b[1]) for b in bays if b and b[0] == d}
+    idx |= {int(m[1]) for m in list(lf.get("moment_lines") or []) + list(g.get("moment_lines") or []) if m and m[0] == d}
+    coords = gm["yc"] if d == "X" else gm["xc"]
+    return sorted(coords[q] for q in idx if 0 <= q < len(coords))
+
+
+def _tributary(F_N, lines_mm, ext_mm):
+    """IS 1893 7.6.4 flexible diaphragm, wind: the storey force to the lines by tributary width over the level's extent
+    (uniform along the facade width; the HR rule india_diaphragm.tributary_line_shears, e = 0).  {pos: |V| N}."""
+    x0, x1 = ext_mm
+    b = x1 - x0
+    pos = sorted(lines_mm)
+    out = {}
+    if not pos or b <= 0:
+        return out
+    for i, p in enumerate(pos):
+        lo = x0 if i == 0 else 0.5 * (pos[i - 1] + p)
+        hi = x1 if i == len(pos) - 1 else 0.5 * (p + pos[i + 1])
+        out[p] = abs(F_N) * max(min(hi, x1) - max(lo, x0), 0.0) / b
+    return out
+
+
+def _tributary_by_deck(F_N, lines_mm, pieces):
+    """IS 1893 7.6.4 flexible diaphragm, seismic: the storey force distributed with the deck area (floor mass, IS 1893
+    7.4, uniform over the level's deck cells) and carried to the lines as a chain of simple spans (a deck strip between
+    two lines -> lever rule; beyond the outer lines -> the outer line).  pieces [(s_a, s_b, area)] the deck cells
+    projected normal to the force (mm).  {pos: |V| N}."""
+    pos = sorted(lines_mm)
+    A = sum(a for _, _, a in pieces)
+    out = {p: 0.0 for p in pos}
+    if not pos or A <= 0:
+        return out
+    for (sa, sb, a) in pieces:
+        cuts = sorted({sa, sb} | {p for p in pos if sa < p < sb})
+        for u, v in zip(cuts[:-1], cuts[1:]):
+            P = abs(F_N) * a / A * (v - u) / (sb - sa)
+            c = 0.5 * (u + v)
+            if c <= pos[0]:
+                out[pos[0]] += P
+            elif c >= pos[-1]:
+                out[pos[-1]] += P
             else:
-                s_span = Lspan / (nlines - 1)
-                M = w * s_span ** 2 / 8.0     # N-m: diaphragm panel of span s between adjacent lines
-                mech = "n = %d equal lines: v = F/(n B), chord = (F/L) s^2/(8 B), s = L/(n - 1)" % nlines
-            chord = M / B                     # N
-            cap = _per_storey(dcap.get("v_allow_kN_per_m"), k)
-            ccite = dcap.get("cite")
-            if isinstance(cap, dict):
-                ccite = cap.get("cite") or ccite
-                cap = cap.get("value")
-            rec_cap = {"capacity": None, "capacity_basis": "test", "allowable_increase": 1.0, "dc": None, "ok": None, "found": False}
-            if cap:
-                inc = float(dcap.get("allowable_increase", 1.0))
-                rec_cap = {"capacity": float(cap) * inc, "value": v_unit, "limit": float(cap) * inc, "capacity_basis": dcap.get("basis", "test"),
-                           "allowable_increase": inc, "dc": v_unit / (float(cap) * inc), "ok": v_unit <= float(cap) * inc, "found": True,
-                           "capacity_cite": ccite, "capacity_source": dcap.get("source")}
-            rows.append({"storey": k, "dir": d, "F_EQ_N": Fe, "F_W_N": Fw, "governing": gov, "F_N": F, "n_lines": nlines,
-                         "v_unit_kN_per_m": v_unit, "chord_force_kN": chord / 1e3, "span_m": Lspan, "panel_span_m": s_span, "depth_m": B, **rec_cap,
-                         "clause": "IS 1893 7.6.3 storey force (gamma 1.0) / IS 875-3 storey wind; rigid diaphragm on the frame lines: " + mech,
-                         "note": "diaphragm shear capacity requires a cited test / product value for the deck or sheathing "
-                                 "(IS 801 9.1.4 excludes diaphragms; no Indian table) -- EOR input"})
+                i = max(q for q in range(len(pos)) if pos[q] <= c)
+                sp = pos[i + 1] - pos[i]
+                out[pos[i]] += P * (pos[i + 1] - c) / sp
+                out[pos[i + 1]] += P * (c - pos[i]) / sp
+    return out
+
+
+def _chord_from_reactions(reac, s0, s1, B_m):
+    """Chord force (N) of the diaphragm spanning between the lines as a beam loaded by w = sum R / (s1 - s0) and
+    supported by the line reactions (the HR rigid chord rule): max |M(s)| / B.  reac [(s_mm, R_N)]."""
+    if s1 - s0 <= 0 or not B_m or not reac:
+        return 0.0
+    w = sum(R for _, R in reac) / (s1 - s0)
+    pts = sorted({s0, s1} | {s for s, _ in reac} | {s0 + (s1 - s0) * t / 200.0 for t in range(201)})
+
+    def M(s):
+        return w * (s - s0) ** 2 / 2.0 - sum(R * (s - sl) for sl, R in reac if sl < s - 1e-9)
+    return max(abs(M(s)) for s in pts if s0 - 1e-9 <= s <= s1 + 1e-9) / (B_m * 1000.0)
+
+
+def _equal_share_superseded(cfg, k, d, F):
+    """The pre-H3 value F / (n B) (equal shares over the plan depth) -- kept for comparison only, never checked."""
+    geo = cfg["geometry"]; lf = cfg.get("lateral_frame") or {}
+    NX, NY = int(lf["NX"]), int(lf["NY"])
+    B = float(_per_storey(geo.get("diaphragm_depth_%s_m" % d), k) or (geo["plan_x_m"] if d == "X" else geo["plan_y_m"]))
+    bays = lf.get("braced_bays", "perimeter")
+    if bays == "perimeter":
+        n_ = 2
+    elif bays == "core":
+        n_ = 1
+    else:
+        n_ = len({int(b[2]) if d == "X" else int(b[1]) for b in (bays or []) if b[0] == d})
+    n_ = int(_per_storey(geo.get("diaphragm_lines_%s" % d), k) or n_ or 2)
+    return {"v_kN_per_m": F / 1e3 / (max(n_, 1) * float(B)), "n_lines": n_, "depth_m": float(B),
+            "note": "H3: superseded equal-share value F / (n B) -- informative only, not checked"}
+
+
+def _capacity(dcap, k, v_unit):
+    cap = _per_storey(dcap.get("v_allow_kN_per_m"), k)
+    ccite = dcap.get("cite")
+    if isinstance(cap, dict):
+        ccite = cap.get("cite") or ccite
+        cap = cap.get("value")
+    rec = {"capacity": None, "capacity_basis": "test", "allowable_increase": 1.0, "dc": None, "ok": None, "found": False}
+    if cap:
+        inc = float(dcap.get("allowable_increase", 1.0))
+        rec = {"capacity": float(cap) * inc, "limit": float(cap) * inc, "capacity_basis": dcap.get("basis", "test"),
+               "allowable_increase": inc, "capacity_cite": ccite, "capacity_source": dcap.get("source"), "found": True}
+        if v_unit is None:
+            rec.update(value=None, dc=None, ok=None)
+        else:
+            rec.update(value=v_unit, dc=v_unit / (float(cap) * inc), ok=v_unit <= float(cap) * inc)
+    return rec
+
+
+def diaphragm_demands(cfg, lateral):
+    """Storey diaphragm demands handed from the CFS floor / roof to the frame lines (H3, audit round 5).
+
+    Per level k and direction d, each frame line's unit shear is v = |R_line| / L_deck: R_line = the analysed line
+    reaction of the HR sub-run (collectors.rows of its package: the rigid-diaphragm load path of the analysed model, and
+    the flexible-diaphragm tributary rows at flexible-labelled levels), enveloped with the IS 1893 7.6.4 tributary line
+    shears where the Table 5(ii) flexible run (X01) ran or the level is labelled flexible, for EQ and W (storey forces
+    at gamma 1.0); L_deck = the deck length actually present along the line at that level (the analysed model's deck
+    cells -- four corners in the level's diaphragm -- bordering the line), or a declared
+    geometry.diaphragm_line_length_m {level: {'<d>@<coord m>': m}} where the model is ambiguous (WARN; a declared length
+    longer than the model's deck is not used).  A line with no node in the level's diaphragm (grade / stepped-base /
+    free nodes) is not a deck line and is listed apart.  The chord force comes from the same reactions (max |M| / B).
+    Fail closed: when the line reactions cannot be found the row is not evaluated (no equal-share value is checked).
+    Capacities of a sheathed / decked CFS diaphragm need a cited product / test value -- IS 801 has no diaphragm
+    provision (9.1.4) -- so the capacity slot is found:false until the EOR supplies one; the declared allowable_increase
+    (IS 801 6.1.2 4/3 only on an IS801_allowable basis, consistency rule) is kept.  Collector rows at declared
+    re-entrant lines (geometry.reentrant_lines_X / _Y) carry max(F (1 - B_short/B), the analysed collector axial on the
+    line)."""
+    geo = cfg["geometry"]; H = list(geo["heights_m"]); NF = len(H)
+    lf = cfg.get("lateral_frame") or {}
+    lat = lateral or {}
+    lpp = os.path.join(lat.get("root") or "", "load_plan.json")
+    lp = json.load(open(lpp)) if lat.get("root") and os.path.exists(lpp) else {}
+    sf = lp.get("story_forces") or {}
+    dcap = cfg.get("diaphragm_capacity") or {}
+    rows_hr, rows_src, rows_err = _hr_collector_rows(lat)
+    sets, hr_chords = _reaction_sets(rows_hr or [])
+    gm = _frame_geometry(cfg, lat)
+    labels = _diaphragm_labels(lf, NF)
+    x01 = bool(((lat.get("seismic_analysis") or {}).get("flexible_diaphragm_run")))
+    out = []
+    for k in range(1, NF + 1):
+        for d in ("X", "Y"):
+            di = 0 if d == "X" else 1
+            Fk = {kind: abs(float((sf.get("%s_%s" % (kind, d)) or {}).get(str(k), [0, 0, 0])[di])) for kind in ("EQ", "W")}
+            gov_kind = "EQ" if Fk["EQ"] >= Fk["W"] else "W"
+            D = gm["dia"].get(k, set())
+            along = gm["xc"] if d == "X" else gm["yc"]
+            normal = gm["yc"] if d == "X" else gm["xc"]
+            s_nodes = [normal[j if d == "X" else i] for (i, j) in D]
+            a_nodes = [along[i if d == "X" else j] for (i, j) in D]
+            ext = (min(s_nodes), max(s_nodes)) if s_nodes else (0.0, 0.0)
+            B_model = (max(a_nodes) - min(a_nodes)) / 1000.0 if a_nodes else None
+            B_decl = _per_storey(geo.get("diaphragm_depth_%s_m" % d), k)
+            B = min(x for x in (B_model, float(B_decl) if B_decl else None) if x) if (B_model or B_decl) else None
+            row = {"storey": k, "dir": d, "F_EQ_N": Fk["EQ"], "F_W_N": Fk["W"], "governing": gov_kind, "F_N": Fk[gov_kind],
+                   "depth_m": B, "span_m": (ext[1] - ext[0]) / 1000.0, "label": labels.get(k), "clause": H3_CLAUSE,
+                   "source": "india_cfs_lateral.diaphragm_demands (H3); line reactions: %s; deck geometry: %s"
+                             % (rows_src or "none", gm.get("source")),
+                   "note": "diaphragm shear capacity requires a cited test / product value for the deck or sheathing "
+                           "(IS 801 9.1.4 excludes diaphragms; no Indian table) -- EOR input",
+                   "superseded_equal_share": _equal_share_superseded(cfg, k, d, Fk[gov_kind]), "warnings": []}
+            # ---- reaction sets at (k, d) ----
+            cases = []                                   # (label, kind, basis, {pos_mm: {R_N, q, upper_bound}})
+            for (kind, src), by in sorted(sets.items()):
+                if by.get((k, d)):
+                    cases.append(("%s %s" % (kind, src), kind, RIGID_BASIS if src == "rigid" else FLEX_ROWS_BASIS, by[(k, d)]))
+            trib_kinds = (["EQ"] if x01 else []) + (["EQ", "W"] if labels.get(k) == "flexible" else [])
+            reasons = []
+            if rows_err:
+                reasons.append(rows_err)
+            for kind in sorted(set(trib_kinds)):
+                if not Fk[kind]:
+                    continue
+                lines_t = [p for p in _lateral_line_coords(cfg, gm, d, k, NF)
+                           if _line_deck(gm, k, d, p).get("on_diaphragm")]
+                if not lines_t or not s_nodes:
+                    reasons.append("flexible-diaphragm %s line shears at level %d %s not evaluable: no frame line of the "
+                                   "declared braced bays / moment lines lies in the level's diaphragm" % (kind, k, d))
+                    continue
+                if kind == "EQ":
+                    C = gm["cells"].get(k, set())
+                    pieces = [(normal[j if d == "X" else i], normal[j + 1 if d == "X" else i + 1],
+                               abs(gm["xc"][i + 1] - gm["xc"][i]) * abs(gm["yc"][j + 1] - gm["yc"][j])) for (i, j) in C]
+                    tr = _tributary_by_deck(Fk[kind], lines_t, pieces)
+                else:
+                    tr = _tributary(Fk[kind], lines_t, ext)
+                cases.append(("%s flexible tributary" % kind, kind, TRIB_BASIS[kind],
+                              {p: {"R_N": V, "q_N_per_mm": None, "upper_bound": False} for p, V in tr.items()}))
+            if not rows_err:
+                for kind in ("EQ", "W"):
+                    if Fk[kind] > 0.0 and not any(c[1] == kind for c in cases):
+                        reasons.append("no analysed %s line reactions at level %d %s in the HR package (collectors.rows)"
+                                       % (kind, k, d))
+            # ---- per line ----
+            lines, outside, v_max, gov = [], [], 0.0, None
+            pos_all = []
+            for c in cases:
+                for p in c[3]:
+                    if not any(abs(p - q) <= LINE_TOL_MM for q in pos_all):
+                        pos_all.append(p)
+            for p in sorted(pos_all):
+                Rs = {}
+                ub = False
+                ext_hr, ext_tol = 0.0, 0.0
+                for (lab, kind, basis, rec) in cases:
+                    for q, rr in rec.items():
+                        if abs(q - p) <= LINE_TOL_MM:
+                            Rs[lab] = rr["R_N"]
+                            ub = ub or rr.get("upper_bound")
+                            qq = abs(float(rr.get("q_N_per_mm") or 0.0))
+                            if qq >= 1e-3:              # the HR line length R / q (q is rounded to 1e-4 N/mm)
+                                e_ = abs(rr["R_N"]) / qq / 1000.0
+                                if e_ > ext_hr:
+                                    ext_hr, ext_tol = e_, e_ * 5e-5 / qq
+                Rmax = max(abs(v) for v in Rs.values()) if Rs else 0.0
+                info = _line_deck(gm, k, d, p)
+                lrec = {"line_m": round(p / 1000.0, 3), "R_kN": {lab: round(v / 1e3, 3) for lab, v in Rs.items()},
+                      "deck_length_model_m": info["deck_m"], "line_node_extent_m": info["node_extent_m"]}
+                if info["grid"] and info["on_diaphragm"] is False:
+                    lrec["reason"] = ("no node of this line is in the level-%d diaphragm (grade / stepped-base / free nodes): "
+                                    "the reaction is delivered to those nodes, not through the deck" % k)
+                    outside.append(lrec)
+                    continue
+                L = info["deck_m"] if (gm["known"] and info["grid"] and info["deck_m"]) else None
+                decl, dkey = _declared_line_length(geo, k, d, p / 1000.0)
+                if decl is not None:
+                    if L is None:
+                        L = decl
+                        lrec["deck_length_basis"] = "declared geometry.diaphragm_line_length_m[%s]" % dkey
+                        row["warnings"].append("diaphragm level %d %s line %.3f m: deck length %.2f m DECLARED "
+                                               "(geometry.diaphragm_line_length_m), not read from the model -- VERIFY"
+                                               % (k, d, p / 1000.0, decl))
+                    elif decl < L - 1e-6:
+                        lrec["deck_length_basis"] = ("declared geometry.diaphragm_line_length_m[%s] (shorter than the "
+                                                   "model's %.2f m)" % (dkey, L))
+                        row["warnings"].append("diaphragm level %d %s line %.3f m: declared deck length %.2f m used "
+                                               "(model %.2f m) -- VERIFY" % (k, d, p / 1000.0, decl, L))
+                        L = decl
+                    else:
+                        row["warnings"].append("diaphragm level %d %s line %.3f m: declared deck length %.2f m exceeds "
+                                               "the model's deck %.2f m -- not used" % (k, d, p / 1000.0, decl, L))
+                if not L:
+                    why = ("the line is off the model grid" if not info["grid"] else
+                           "no deck cell borders the line in the model" if gm["known"] else "; ".join(gm["notes"]))
+                    lrec["reason"] = ("deck length along the line not determinable (%s): declare "
+                                    "geometry.diaphragm_line_length_m {%d: {'%s@%.3f': m}}" % (why, k, d, p / 1000.0))
+                    lines.append(lrec)
+                    reasons.append("level %d %s line %.3f m (R %.1f kN): %s" % (k, d, p / 1000.0, Rmax / 1e3, lrec["reason"]))
+                    continue
+                lrec.setdefault("deck_length_basis", "model deck cells bordering the line (%s)" % gm.get("source"))
+                lrec["deck_length_m"] = L
+                vv = {lab: abs(v) / 1e3 / L for lab, v in Rs.items()}
+                lab_g = max(vv, key=vv.get) if vv else None
+                lrec.update(v_kN_per_m=vv.get(lab_g, 0.0), governing_case=lab_g)
+                if ub or (ext_hr and info["node_extent_m"] is not None
+                          and ext_hr > 1.01 * info["node_extent_m"] + 0.1 + ext_tol):
+                    lrec["upper_bound"] = ("the analysed line extends %.2f m beyond the level's diaphragm nodes (%.2f m): "
+                                         "R includes deliveries at nodes outside the deck and is taken whole on the deck "
+                                         "length (upper bound)" % (ext_hr, info["node_extent_m"] or 0.0)) if not ub else \
+                        "HR tributary row flagged upper bound"
+                lines.append(lrec)
+                if lrec["v_kN_per_m"] > v_max:
+                    v_max, gov = lrec["v_kN_per_m"], lrec
+            # ---- chord from the same reactions ----
+            chord = 0.0
+            for (lab, kind, basis, rec) in cases:
+                reac = [(q, rr["R_N"]) for q, rr in rec.items()
+                        if _line_deck(gm, k, d, q).get("on_diaphragm") is not False]
+                chord = max(chord, _chord_from_reactions(reac, ext[0], ext[1], B))
+            for kind in ("EQ", "W"):
+                chord = max(chord, hr_chords.get((kind, k, d), 0.0))
+            evaluated = not reasons
+            if not cases and not Fk["EQ"] and not Fk["W"]:
+                evaluated, v_max = True, 0.0
+                row["note_demand"] = "no storey force at this level / direction"
+            v_unit = v_max if evaluated else None
+            row.update(v_unit_kN_per_m=v_unit, chord_force_kN=chord / 1e3, n_lines=sum(1 for x in lines if "deck_length_m" in x),
+                       lines=lines, lines_outside_deck=outside, cases=[{"case": c[0], "basis": c[2]} for c in cases],
+                       demand_evaluated=evaluated, **_capacity(dcap, k, v_unit))
+            if gov:
+                row.update(governing=gov["governing_case"].split()[0], governing_case=gov["governing_case"],
+                           governing_line_m=gov["line_m"], governing_R_kN=max(abs(x) for x in gov["R_kN"].values()),
+                           governing_deck_length_m=gov["deck_length_m"], F_N=Fk[gov["governing_case"].split()[0]])
+            if not evaluated:
+                row.update(ok=None, dc=None, found=False,
+                           note="diaphragm demand not evaluated (fail closed, H3): " + "; ".join(reasons),
+                           v_evaluated_lines_max_kN_per_m=v_max if lines else None)
             fr = _flexible_764(lateral, d, k)
             if fr:
-                rows[-1]["flexible_run_7_6_4"] = fr          # X01: in-plane deformation measured on the HR flexible run
-            # C03 / CFS-C-17: collectors (drag struts) at declared re-entrant lines
+                row["flexible_run_7_6_4"] = fr          # X01: in-plane deformation measured on the HR flexible run
+            out.append(row)
+            # ---- C03 / CFS-C-17: collectors (drag struts) at declared re-entrant lines ----
+            Fg = Fk[gov_kind]
             for rl in (geo.get("reentrant_lines_%s" % d) or []):
                 st_ = rl.get("storeys") or rl.get("storey")
                 if st_ not in (None, "all"):
                     sts = st_ if isinstance(st_, (list, tuple)) else [st_]
                     if k not in [int(x) for x in sts]:
                         continue
-                Bs = float(rl["B_short_m"]); Bf = float(rl.get("B_m") or B)
-                Fc = F * max(0.0, 1.0 - Bs / Bf)
-                crow = {"storey": k, "dir": d, "kind": "collector", "line": rl.get("line"), "F_N": F, "B_short_m": Bs, "B_m": Bf,
-                        "value": Fc / 1e3, "F_collector_kN": Fc / 1e3, "demand_level": "working",
-                        "clause": "re-entrant corner collector (drag strut): F (1 - B_short/B) of the storey force is dragged "
-                                  "across the re-entrant line into the frame line (IS 1893 7.6.3 storey force / IS 875-3 storey wind)",
+                Bs = float(rl["B_short_m"]); Bf = float(rl.get("B_m") or B or (geo["plan_x_m"] if d == "X" else geo["plan_y_m"]))
+                Ff = Fg * max(0.0, 1.0 - Bs / Bf)
+                pos_m = rl.get("coord_m")
+                if pos_m is None:
+                    import re
+                    mm_ = re.search(r"-?\d+(?:\.\d+)?", str(rl.get("line") or ""))
+                    pos_m = float(mm_.group(0)) if mm_ else None
+                Na = 0.0
+                if pos_m is not None:
+                    for r in rows_hr or []:
+                        if (r.get("role") == "collector" and r.get("dir") == d and int(r.get("level") or -1) == k
+                                and r.get("line") is not None and abs(float(r["line"]) - float(pos_m) * 1000.0) <= LINE_TOL_MM):
+                            Na = max(Na, abs(float(r.get("N_N") or 0.0)))
+                Fc = max(Ff, Na)
+                crow = {"storey": k, "dir": d, "kind": "collector", "line": rl.get("line"), "F_N": Fg, "B_short_m": Bs, "B_m": Bf,
+                        "value": Fc / 1e3, "F_collector_kN": Fc / 1e3, "F_collector_formula_kN": Ff / 1e3,
+                        "N_collector_analysed_kN": (Na / 1e3) if pos_m is not None else None, "demand_level": "working",
+                        "clause": "re-entrant corner collector (drag strut): max of F (1 - B_short/B) of the storey force and "
+                                  "the analysed collector axial on the line (HR collectors.rows, the same line reactions as the "
+                                  "diaphragm rows) (IS 1893 7.6.3 storey force / IS 875-3 storey wind)",
                         "limit": None, "dc": None, "ok": None, "found": False, "capacity_basis": rl.get("capacity_basis", "EOR_input"),
                         "allowable_increase": 1.0,
                         "note": "collector capacity: declare reentrant_lines_%s[].capacity_kN + cite (working-stress capacity of the "
@@ -617,5 +1067,5 @@ def diaphragm_demands(cfg, lateral):
                     capk = float(rl["capacity_kN"])
                     crow.update(limit=capk, capacity=capk, dc=(Fc / 1e3) / capk, ok=(Fc / 1e3) <= capk + 1e-9, found=True,
                                 capacity_cite=rl.get("cite"), note=None)
-                rows.append(crow)
-    return rows
+                out.append(crow)
+    return out

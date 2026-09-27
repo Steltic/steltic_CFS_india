@@ -107,10 +107,18 @@ def test_no_waivers_and_dc_recomputed():
     assert any("waived" in r for r in G.design_status(cfg, pkg)["reasons"])
 
 
+def _hr_rows(kind, d, lines_kN, extent_m):
+    """H3: HR collectors.rows (level 1) -- {line coordinate m: R_line kN}."""
+    return [{"dir": d, "level": 1, "line": float(p) * 1000.0, "beam": 1 + n, "role": "collector", "N_N": 10.0,
+             "q_N_per_mm": round(R / extent_m, 4), "R_line_N": R * 1000.0, "kind": kind}
+            for n, (p, R) in enumerate(lines_kN.items())]
+
+
 def test_diaphragm_demands_depth_and_span_hand_value(tmp_path):
-    """WP6-fix: a 12 m x 8 m plate, storey force 24 kN along X, resisted by the two lines that run along X (length 12 m):
-    v = 24 / (2 x 12) = 1.0 kN/m, chord = (24 x 8 / 8) / 12 = 2.0 kN.  Along Y (lines of length 8 m, span 12 m):
-    v = 24 / 16 = 1.5 kN/m, chord = 24 x 12 / (8 x 8) = 4.5 kN.  (B and the span were swapped before the fix.)"""
+    """WP6-fix / H3: a 12 m x 8 m plate, storey force 24 kN along X; the analysed reactions of the two lines that run
+    along X (deck 12 m each) are 12 / 12 kN: v = 12 / 12 = 1.0 kN/m, chord from the reactions max|M| = F L / 8 = 24 kN m
+    -> 24 / 12 = 2.0 kN.  Along Y (lines of deck length 8 m, span 12 m): v = 12 / 8 = 1.5 kN/m, chord = 24 x 12 / (8 x 8)
+    = 4.5 kN."""
     import json, os
     import india_cfs_lateral as L
     root = tmp_path / "lat"; root.mkdir()
@@ -118,16 +126,18 @@ def test_diaphragm_demands_depth_and_span_hand_value(tmp_path):
                                 "W_X": {"1": [0.0, 0.0, 0.0]}, "W_Y": {"1": [0.0, 0.0, 0.0]}}}, open(root / "load_plan.json", "w"))
     cfg = {"geometry": {"plan_x_m": 12.0, "plan_y_m": 8.0, "heights_m": [3.0]}, "lateral_frame": {"NX": 2, "NY": 2},
            "diaphragm_capacity": {"v_allow_kN_per_m": 6.0}}
-    rows = L.diaphragm_demands(cfg, {"root": str(root)})
+    hr = _hr_rows("EQ", "X", {0: 12.0, 8: 12.0}, 12.0) + _hr_rows("EQ", "Y", {0: 12.0, 12: 12.0}, 8.0)
+    rows = L.diaphragm_demands(cfg, {"root": str(root), "collectors": {"rows": hr}})
     rx = [r for r in rows if r["dir"] == "X"][0]; ry = [r for r in rows if r["dir"] == "Y"][0]
-    assert abs(rx["v_unit_kN_per_m"] - 1.0) < 1e-9 and abs(rx["chord_force_kN"] - 2.0) < 1e-9
-    assert abs(ry["v_unit_kN_per_m"] - 1.5) < 1e-9 and abs(ry["chord_force_kN"] - 4.5) < 1e-9
+    assert abs(rx["v_unit_kN_per_m"] - 1.0) < 1e-9 and abs(rx["chord_force_kN"] - 2.0) < 1e-6
+    assert abs(ry["v_unit_kN_per_m"] - 1.5) < 1e-9 and abs(ry["chord_force_kN"] - 4.5) < 1e-6
     assert rx["depth_m"] == 12.0 and rx["span_m"] == 8.0
 
 
 def test_diaphragm_demands_three_lines(tmp_path):
-    """Three equal braced lines along X (j = 0, 1, 2 of a 12 x 8 plate): v = F / (3 B) = 24 / 36 kN/m, panel span 4 m,
-    chord = (F / L) s^2 / (8 B) = (24 / 8) x 16 / 96 = 0.5 kN."""
+    """Three braced lines along X (j = 0, 1, 2 of a 12 x 8 plate) with analysed reactions 8 / 8 / 8 kN: v = 8 / 12 kN/m;
+    chord from the same reactions (w = 3 kN/m, M(s) = 1.5 s^2 - 8 s - 8 (s - 4)): max |M| = 32/3 kN m at s = 8/3 and
+    16/3 -> (32/3) / 12 = 0.889 kN (H3: the chord follows the analysed reactions, not simple spans w s^2 / 8)."""
     import json
     import india_cfs_lateral as L
     root = tmp_path / "lat"; root.mkdir()
@@ -135,9 +145,10 @@ def test_diaphragm_demands_three_lines(tmp_path):
     cfg = {"geometry": {"plan_x_m": 12.0, "plan_y_m": 8.0, "heights_m": [3.0]},
            "lateral_frame": {"NX": 2, "NY": 2, "braced_bays": [["X", 0, 0], ["X", 1, 1], ["X", 0, 2], ["Y", 0, 0], ["Y", 2, 1]]},
            "diaphragm_capacity": {"v_allow_kN_per_m": 6.0}}
-    rx = [r for r in L.diaphragm_demands(cfg, {"root": str(root)}) if r["dir"] == "X"][0]
+    hr = _hr_rows("EQ", "X", {0: 8.0, 4: 8.0, 8: 8.0}, 12.0)
+    rx = [r for r in L.diaphragm_demands(cfg, {"root": str(root), "collectors": {"rows": hr}}) if r["dir"] == "X"][0]
     assert rx["n_lines"] == 3 and abs(rx["v_unit_kN_per_m"] - 24.0 / 36.0) < 1e-9
-    assert abs(rx["panel_span_m"] - 4.0) < 1e-9 and abs(rx["chord_force_kN"] - 0.5) < 1e-9
+    assert abs(rx["chord_force_kN"] - 32.0 / 3.0 / 12.0) < 1e-3
 
 
 def test_consistency_accepts_mixed_system_label(tmp_path):

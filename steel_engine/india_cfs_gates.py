@@ -233,7 +233,9 @@ def lateral_issues(pkg) -> list:
 def diaphragm_issues(pkg) -> list:
     out = []
     for r in pkg.get("diaphragm") or []:
-        if r.get("ok") is None or r.get("found") is False:
+        if r.get("demand_evaluated") is False:           # H3: the line reactions / deck lengths were not found
+            out.append("diaphragm storey %s %s: demand not evaluated (%s)" % (r.get("storey"), r.get("dir"), r.get("note")))
+        elif r.get("ok") is None or r.get("found") is False:
             out.append("%s storey %s %s: capacity not evaluated (%s)" % ("collector" if r.get("kind") == "collector" else "diaphragm",
                                                                          r.get("storey"), r.get("dir"), r.get("note") or "found:false"))
         elif _dc(r) is not None and _dc(r) > 1.0:
@@ -327,6 +329,8 @@ def design_status(cfg, pkg=None) -> dict:
     # CFS-level preflight WARNs (board diaphragm declared rigid without a basis, portal anchorage)
     warns = list((((pkg.get("lateral_frame") or {}).get("status") or {}).get("warnings")) or [])
     warns += [m for s_, m in audit_warnings(cfg or {}) if m not in warns]
+    for r in pkg.get("diaphragm") or []:                   # H3: declared deck lengths along the lines (VERIFY)
+        warns += [m for m in (r.get("warnings") or []) if m not in warns]
     return {"status": status, "reasons": reasons, "n_reasons": len(reasons), "authority": AUTHORITY, "warnings": warns}
 
 

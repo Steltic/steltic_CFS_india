@@ -235,11 +235,22 @@ Sections are IS 811 labels only (`CLR…`, `CLS…`, `CWR…`, `CWS…`, `EA…`
 * `wind_exposure = {level: {width_X_m, width_Y_m, height_m}}`: per-level exposed face width (the face loaded by wind
   along X / Y) and tributary height, for mixed-height buildings. A declared `load_plan.story_forces.W_X` / `W_Y` is kept
   (not overwritten) when `load_plan.wind_story_forces_cite` and `story_forces_units` (`"N"` | `"kN"`) are given.
-* Diaphragm: `diaphragm_depth_X_m` / `_Y_m`, `diaphragm_span_X_m` / `_Y_m`, `diaphragm_lines_X` / `_Y` — each a number or
-  per storey `{storey: value}`; ONE braced line is allowed (v = F/B, cantilever chord (F/L) a²/(2B), a = the longer
-  overhang). `cfg['diaphragm_capacity'].v_allow_kN_per_m` is a number or `{storey: value | {value, cite}}`.
-  `reentrant_lines_X` / `_Y` = `[{"line", "B_short_m", "B_m"?, "storeys"?, "capacity_kN"?, "cite"?}]` → collector rows
-  F (1 − B_short/B); without a declared capacity they are found:false and block COMPLETE.
+* Diaphragm (H3): the unit shear of every frame line = the ANALYSED line reaction of the HR sub-run (its package
+  `collectors.rows`: rigid-diaphragm load path, and the flexible tributary rows at flexible-labelled levels) ÷ the deck
+  length actually present along that line at that level (the model's deck cells — four corners in the level's
+  diaphragm, less free nodes / stepped bases / `diaphragm_stiffness.void_cells` — bordering the line), enveloped with the
+  IS 1893 7.6.4 flexible line shears where the X01 run ran or the level is labelled flexible, EQ and W; the chord force
+  comes from the same reactions. A line with no node in the level's diaphragm (grade / stepped-base / free nodes) is
+  listed in `lines_outside_deck`, not checked. No reactions → the row is NOT evaluated (fail closed; the old F/(n B)
+  value is kept only as `superseded_equal_share`, never checked). Where the model gives no deck length (off-grid line,
+  no deck cell on the line) declare `geometry.diaphragm_line_length_m` = `{level | "a-b" | "default": {"X@<y m>": m,
+  "Y@<x m>": m}}` (or `{level: {"X": {y_m: m}}}`) — used with a WARN; a declared length longer than the model's deck is
+  not used. `diaphragm_depth_X_m` / `_Y_m` (per storey allowed) caps the chord depth; `diaphragm_span_X_m` / `_Y_m` and
+  `diaphragm_lines_X` / `_Y` feed only the superseded equal-share value. `cfg['diaphragm_capacity'].v_allow_kN_per_m` is
+  a number or `{storey: value | {value, cite}}`.
+  `reentrant_lines_X` / `_Y` = `[{"line", "coord_m"?, "B_short_m", "B_m"?, "storeys"?, "capacity_kN"?, "cite"?}]` →
+  collector rows max(F (1 − B_short/B), the analysed collector axial on that line (coordinate `coord_m`, else the number
+  in `line`)); without a declared capacity they are found:false and block COMPLETE.
 * Snow: `loads.snow` (kN/m², IS 875-4) — or top-level `snow`, or `load_plan.snow_summary.applicable = True` — adds the
   DL+SL rows (IS 875-5 8.1 Note 1).
 * Partitions in W: `loads.partition_seismic_kNm2`, default max(0.5, `partition_design_kNm2`) (IS 1893 7.3.6, ruling R1);
