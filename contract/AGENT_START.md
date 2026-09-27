@@ -240,7 +240,9 @@ Sections are IS 811 labels only (`CLR…`, `CLS…`, `CWR…`, `CWS…`, `EA…`
   length actually present along that line at that level (the model's deck cells — four corners in the level's
   diaphragm, less free nodes / stepped bases / `diaphragm_stiffness.void_cells` — bordering the line), enveloped with the
   IS 1893 7.6.4 flexible line shears where the X01 run ran or the level is labelled flexible, EQ and W; the chord force
-  comes from the same reactions. A line with no node in the level's diaphragm (grade / stepped-base / free nodes) is
+  comes from the same reactions. The rigid EQ reactions carry the IS 1893 7.8.2 accidental torsion Mt = F x 0.05 b
+  (rigid-diaphragm torsion formula, k ~ |R|, J over the parallel lines -- an upper bound; one parallel line -> the
+  perpendicular lines), added for the adverse sign (`torsion_7_8_2` in each row); the flexible half takes none. A line with no node in the level's diaphragm (grade / stepped-base / free nodes) is
   listed in `lines_outside_deck`, not checked. No reactions → the row is NOT evaluated (fail closed; the old F/(n B)
   value is kept only as `superseded_equal_share`, never checked). Where the model gives no deck length (off-grid line,
   no deck cell on the line) declare `geometry.diaphragm_line_length_m` = `{level | "a-b" | "default": {"X@<y m>": m,

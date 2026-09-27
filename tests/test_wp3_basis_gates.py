@@ -118,7 +118,9 @@ def test_diaphragm_demands_depth_and_span_hand_value(tmp_path):
     """WP6-fix / H3: a 12 m x 8 m plate, storey force 24 kN along X; the analysed reactions of the two lines that run
     along X (deck 12 m each) are 12 / 12 kN: v = 12 / 12 = 1.0 kN/m, chord from the reactions max|M| = F L / 8 = 24 kN m
     -> 24 / 12 = 2.0 kN.  Along Y (lines of deck length 8 m, span 12 m): v = 12 / 8 = 1.5 kN/m, chord = 24 x 12 / (8 x 8)
-    = 4.5 kN."""
+    = 4.5 kN.  H3 7.8.2: Mt = F x 0.05 b adds Mt / (line spacing) = 9.6 / 8 = 1.2 kN (X) and 14.4 / 12 = 1.2 kN (Y):
+    v = 13.2 / 12 = 1.1 and 13.2 / 8 = 1.65; chords from the torsion variant 13.2 / 10.8: X max |1.5 s^2 - 13.2 s| =
+    29.04 -> 2.42 kN, Y max |s^2 - 13.2 s| = 43.56 -> 5.445 kN."""
     import json, os
     import india_cfs_lateral as L
     root = tmp_path / "lat"; root.mkdir()
@@ -129,15 +131,18 @@ def test_diaphragm_demands_depth_and_span_hand_value(tmp_path):
     hr = _hr_rows("EQ", "X", {0: 12.0, 8: 12.0}, 12.0) + _hr_rows("EQ", "Y", {0: 12.0, 12: 12.0}, 8.0)
     rows = L.diaphragm_demands(cfg, {"root": str(root), "collectors": {"rows": hr}})
     rx = [r for r in rows if r["dir"] == "X"][0]; ry = [r for r in rows if r["dir"] == "Y"][0]
-    assert abs(rx["v_unit_kN_per_m"] - 1.0) < 1e-9 and abs(rx["chord_force_kN"] - 2.0) < 1e-6
-    assert abs(ry["v_unit_kN_per_m"] - 1.5) < 1e-9 and abs(ry["chord_force_kN"] - 4.5) < 1e-6
+    assert abs(rx["v_unit_kN_per_m"] - 1.1) < 1e-9 and abs(rx["chord_force_kN"] - 2.42) < 1e-6
+    assert abs(ry["v_unit_kN_per_m"] - 1.65) < 1e-9 and abs(ry["chord_force_kN"] - 5.445) < 1e-6
+    assert rx["superseded_equal_share"]["v_kN_per_m"] == 1.0
     assert rx["depth_m"] == 12.0 and rx["span_m"] == 8.0
 
 
 def test_diaphragm_demands_three_lines(tmp_path):
     """Three braced lines along X (j = 0, 1, 2 of a 12 x 8 plate) with analysed reactions 8 / 8 / 8 kN: v = 8 / 12 kN/m;
     chord from the same reactions (w = 3 kN/m, M(s) = 1.5 s^2 - 8 s - 8 (s - 4)): max |M| = 32/3 kN m at s = 8/3 and
-    16/3 -> (32/3) / 12 = 0.889 kN (H3: the chord follows the analysed reactions, not simple spans w s^2 / 8)."""
+    16/3 -> (32/3) / 12 = 0.889 kN (H3: the chord follows the analysed reactions, not simple spans w s^2 / 8).
+    7.8.2: V_t = 9.6 x 8 x 4 / 256 = 1.2 kN on the outer lines -> v = 9.2 / 12; torsion variant 9.2 / 8 / 6.8:
+    in the second span M(s) = 1.5 s^2 - 17.2 s + 32, extremum 32 - 17.2^2 / 6 = -17.307 kN m -> 1.442 kN."""
     import json
     import india_cfs_lateral as L
     root = tmp_path / "lat"; root.mkdir()
@@ -147,8 +152,8 @@ def test_diaphragm_demands_three_lines(tmp_path):
            "diaphragm_capacity": {"v_allow_kN_per_m": 6.0}}
     hr = _hr_rows("EQ", "X", {0: 8.0, 4: 8.0, 8: 8.0}, 12.0)
     rx = [r for r in L.diaphragm_demands(cfg, {"root": str(root), "collectors": {"rows": hr}}) if r["dir"] == "X"][0]
-    assert rx["n_lines"] == 3 and abs(rx["v_unit_kN_per_m"] - 24.0 / 36.0) < 1e-9
-    assert abs(rx["chord_force_kN"] - 32.0 / 3.0 / 12.0) < 1e-3
+    assert rx["n_lines"] == 3 and abs(rx["v_unit_kN_per_m"] - 9.2 / 12.0) < 1e-9
+    assert abs(rx["chord_force_kN"] - (17.2 ** 2 / 6.0 - 32.0) / 12.0) < 1e-3
 
 
 def test_consistency_accepts_mixed_system_label(tmp_path):

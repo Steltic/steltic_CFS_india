@@ -62,7 +62,9 @@ def test_per_storey_lines_and_capacity(tmp_path):
             + _hr_rows("EQ", 1, "Y", {0: 12.0, 12: 12.0}, 8.0) + _hr_rows("EQ", 2, "Y", {0: 12.0, 12: 12.0}, 8.0))
     rows_ = [r for r in L.diaphragm_demands(cfg, _root(tmp_path, nst=2, rows=rows)) if r["dir"] == "X"]
     r1, r2 = rows_
-    assert r1["n_lines"] == 3 and r1["v_unit_kN_per_m"] == pytest.approx(24.0 / 36.0) and r1["limit"] == 6.0
+    # storey 1: 8 / 8 / 8 kN + the 7.8.2 torsion on the outer lines, Mt = 24 x 0.05 x 8 = 9.6, J = 2 x 8 x 16 = 256,
+    # V_t = 9.6 x 8 x 4 / 256 = 1.2 -> 9.2 / 12; storey 2: one X line -> the torque goes to the Y lines
+    assert r1["n_lines"] == 3 and r1["v_unit_kN_per_m"] == pytest.approx(9.2 / 12.0) and r1["limit"] == 6.0
     assert r2["n_lines"] == 1 and r2["v_unit_kN_per_m"] == pytest.approx(2.0)
     assert r2["limit"] == 1.5 and r2["ok"] is False and r2["capacity_cite"].startswith("roof deck")
 

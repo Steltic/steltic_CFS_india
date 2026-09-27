@@ -801,6 +801,62 @@ def _tributary_by_deck(F_N, lines_mm, pieces):
     return out
 
 
+TORSION_BASIS = ("IS 1893 (Part 1):2016 7.8.2 accidental eccentricity: Mt = F x 0.05 b per level (b = the level's plan "
+                 "dimension normal to the force, from its diaphragm nodes), on top of the static eccentricity already in "
+                 "the analysed rigid reactions; distributed by the rigid-diaphragm torsion formula V_t = Mt k r / J, line "
+                 "stiffness k from its share of the direct reaction (k ~ |R| / common translation), r from the centre of "
+                 "rigidity of those k; J over the lines parallel to the force only (the perpendicular lines are neglected "
+                 "-- an upper bound for every parallel line); a single parallel line (J = 0) sends the torque to the "
+                 "perpendicular lines. Added to |R_line| for the adverse sign (rigid half only; the HR package records no "
+                 "per-line accidental-torsion shears)")
+
+
+def _level_torsion(k, sf, sets, gm):
+    """7.8.2 accidental torsion of level k for the rigid EQ reactions: {d: {par {pos: |V_t|}, signed {pos: V_t per +Mt},
+    perp {pos: |V_t|} (on the lines normal to d, single-line case), rec, error}} (N, mm)."""
+    rig = sets.get(("EQ", "rigid")) or {}
+    out = {}
+
+    def cr_J(lst):
+        K = sum(kk for _, kk in lst)
+        c = sum(p * kk for p, kk in lst) / K
+        return c, sum(kk * (p - c) ** 2 for p, kk in lst)
+    for d in ("X", "Y"):
+        o = "Y" if d == "X" else "X"
+        F = abs(float((sf.get("EQ_" + d) or {}).get(str(k), [0, 0, 0])[0 if d == "X" else 1]))
+        normal = gm["yc"] if d == "X" else gm["xc"]
+        s_nodes = [normal[j if d == "X" else i] for (i, j) in gm["dia"].get(k, set())]
+        b = (max(s_nodes) - min(s_nodes)) if s_nodes else 0.0
+        par = [(p, abs(r["R_N"])) for p, r in (rig.get((k, d)) or {}).items()
+               if abs(r["R_N"]) > 0 and _line_deck(gm, k, d, p).get("on_diaphragm") is not False]
+        perp = [(p, abs(r["R_N"])) for p, r in (rig.get((k, o)) or {}).items()
+                if abs(r["R_N"]) > 0 and _line_deck(gm, k, o, p).get("on_diaphragm") is not False]
+        Mt = F * 0.05 * b
+        rec = {"F_N": F, "b_m": b / 1000.0, "e_acc_m": 0.05 * b / 1000.0, "Mt_kNm": Mt / 1e6, "basis": TORSION_BASIS,
+               "clause": "IS 1893 (Part 1):2016 7.8.2"}
+        res = {"par": {}, "signed": {}, "perp": {}, "rec": rec, "error": None}
+        out[d] = res
+        if not par or Mt <= 0.0:
+            continue
+        c, J = cr_J(par)
+        if len(par) >= 2 and J > 1e-9 * sum(kk for _, kk in par) * b * b:
+            for p, kk in par:
+                res["signed"][p] = Mt * kk * (p - c) / J
+                res["par"][p] = abs(res["signed"][p])
+            rec.update(resisted_by="lines parallel to the force", centre_of_rigidity_m=c / 1000.0)
+        elif len(perp) >= 2:
+            c2, J2 = cr_J(perp)
+            if J2 > 1e-9 * sum(kk for _, kk in perp) * b * b:
+                for p, kk in perp:
+                    res["perp"][p] = Mt * kk * abs(p - c2) / J2
+                rec.update(resisted_by="lines normal to the force (one parallel line)", centre_of_rigidity_m=c2 / 1000.0)
+            else:
+                res["error"] = "level %d EQ_%s: the 7.8.2 accidental torque has no resisting line pair in the model" % (k, d)
+        else:
+            res["error"] = "level %d EQ_%s: the 7.8.2 accidental torque has no resisting line pair in the model" % (k, d)
+    return out
+
+
 def _chord_from_reactions(reac, s0, s1, B_m):
     """Chord force (N) of the diaphragm spanning between the lines as a beam loaded by w = sum R / (s1 - s0) and
     supported by the line reactions (the HR rigid chord rule): max |M(s)| / B.  reac [(s_mm, R_N)]."""
@@ -881,6 +937,7 @@ def diaphragm_demands(cfg, lateral):
     x01 = bool(((lat.get("seismic_analysis") or {}).get("flexible_diaphragm_run")))
     out = []
     for k in range(1, NF + 1):
+        tors = _level_torsion(k, sf, sets, gm)
         for d in ("X", "Y"):
             di = 0 if d == "X" else 1
             Fk = {kind: abs(float((sf.get("%s_%s" % (kind, d)) or {}).get(str(k), [0, 0, 0])[di])) for kind in ("EQ", "W")}
@@ -906,10 +963,25 @@ def diaphragm_demands(cfg, lateral):
             for (kind, src), by in sorted(sets.items()):
                 if by.get((k, d)):
                     cases.append(("%s %s" % (kind, src), kind, RIGID_BASIS if src == "rigid" else FLEX_ROWS_BASIS, by[(k, d)]))
+            # 7.8.2 accidental torsion on the rigid EQ reactions (adverse sign), and the torque of the other direction
+            # where that direction has a single line (carried by these lines)
+            tor, o_ = tors[d], ("Y" if d == "X" else "X")
+            rig_eq = (sets.get(("EQ", "rigid")) or {}).get((k, d))
+            if rig_eq and tor["par"]:
+                cases.append(("EQ rigid +7.8.2", "EQ", RIGID_BASIS + "; " + TORSION_BASIS,
+                              {p: dict(rr, R_N=abs(rr["R_N"]) + next((v for q, v in tor["par"].items()
+                                                                       if abs(q - p) <= LINE_TOL_MM), 0.0))
+                               for p, rr in rig_eq.items()}))
+            if tors[o_]["perp"]:
+                cases.append(("EQ_%s 7.8.2 torsion" % o_, "EQ", TORSION_BASIS,
+                              {p: {"R_N": v, "q_N_per_mm": None, "upper_bound": False} for p, v in tors[o_]["perp"].items()}))
+            row["torsion_7_8_2"] = dict(tor["rec"], V_t_kN={round(p / 1000.0, 3): round(v / 1e3, 3) for p, v in tor["par"].items()})
             trib_kinds = (["EQ"] if x01 else []) + (["EQ", "W"] if labels.get(k) == "flexible" else [])
             reasons = []
             if rows_err:
                 reasons.append(rows_err)
+            if rig_eq and tor["error"]:
+                reasons.append(tor["error"])
             for kind in sorted(set(trib_kinds)):
                 if not Fk[kind]:
                     continue
@@ -1006,9 +1078,17 @@ def diaphragm_demands(cfg, lateral):
             # ---- chord from the same reactions ----
             chord = 0.0
             for (lab, kind, basis, rec) in cases:
+                if "7.8.2" in lab:
+                    continue                             # torsion: the signed variants below (the adverse |R| + |V_t|
+                                                         # of every line at once is not one equilibrium state)
                 reac = [(q, rr["R_N"]) for q, rr in rec.items()
                         if _line_deck(gm, k, d, q).get("on_diaphragm") is not False]
                 chord = max(chord, _chord_from_reactions(reac, ext[0], ext[1], B))
+                if lab == "EQ rigid" and tor["signed"]:
+                    for sg in (1.0, -1.0):
+                        reac_t = [(q, R + sg * next((v for p, v in tor["signed"].items() if abs(p - q) <= LINE_TOL_MM), 0.0))
+                                  for q, R in reac]
+                        chord = max(chord, _chord_from_reactions(reac_t, ext[0], ext[1], B))
             for kind in ("EQ", "W"):
                 chord = max(chord, hr_chords.get((kind, k, d), 0.0))
             evaluated = not reasons
