@@ -42,6 +42,10 @@ Branch `fix/2026-09-review`, based on the delivered 1.0.2 tree. Scope rows C01â€
   - If no reactions are available, the check fails closed.
 - **H3-T:** IS 1893 7.8.2 accidental torsion (0.05 b) is added to the rigid line reactions.
 
+## IS corpus (not distributed)
+
+The BIS standards corpus is not published with this repo, because the standards are copyright BIS. Build your own from your licensed PDFs in the Steltic hub (first pass, Docling). Then have a frontier LLM fix it using `CORPUS_FIX_LLM_INSTRUCTIONS.md`, and import the result back into the hub. See README, "IS corpus (standards grounding)". Without a corpus the engine still runs: retrievals return found:false, and COMPLETE needs EOR records.
+
 ## Commits (oldest first; subjects only â€” hashes change when the branch is replayed onto GitHub)
 - C01: IS 801 bending stress N-mm -> kgf-cm is x N_TO_KGF/10 (6.7 fbx/fby, 6.4.2 fbw); re-size Ex5 portal (CFS-A-01, CFS-A-11, E6)
 - C15: refuse lipped-zed (LZ) bending with found:false until principal-axis bending is implemented
