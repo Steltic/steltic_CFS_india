@@ -120,5 +120,15 @@ RAG_SEARCH_SOFTCAP = int(os.environ.get("RAG_SEARCH_SOFTCAP", "20"))  # after th
 # not with us, so by default we look for it beside the workspace the RAG server was pointed at; set
 # this when the corpus lives somewhere else. Absent, the rewording rung is simply skipped.
 RAG_ALIASES_FILE   = os.environ.get("RAG_ALIASES_FILE", "")
+# L-08: default to the India corpus aliases under INDIA_CORPUS_ROOT (fallback: sibling
+# ../engineering_rag_india, then /workspace/engineering_rag_india) -- india_collections.india_corpus_root().
+if not RAG_ALIASES_FILE:
+    try:
+        from .india_collections import india_corpus_root as _icr
+    except ImportError:
+        from india_collections import india_corpus_root as _icr  # type: ignore
+    _india_aliases = pathlib.Path(_icr()) / "indexes" / "aliases.json"
+    if _india_aliases.is_file():
+        RAG_ALIASES_FILE = str(_india_aliases)
 # Spec (AISC/ASCE) RAG results are ALWAYS saved to jobs/<name>/rag/<slug>.txt and, once a design completes,
 # evicted from the saved conversation to a file pointer (agent._evict_all_rag) so optimisation runs don't bloat.

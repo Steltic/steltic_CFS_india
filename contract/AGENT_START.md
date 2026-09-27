@@ -79,7 +79,10 @@ Table 2 cite (IS 801 Table 2 lists Fy 21 / 24 / 30 / 36 kgf/mm² → F = 1250 / 
 
 ## Site, occupancy and loads — RAG every job, write the cite into cfg['load_plan']
 * IS 1893 (Part 1):2016 Annex E → `site.zone`, `site.Z` (Table 3); Table 8 → importance factor `I` (derived by
-  the pipeline from `occupancy`; hospitals / clinics I = 1.2 or 1.5 per Table 8, > 200 persons 1.2);
+  the pipeline from `occupancy`: hospital buildings 1.5, food storage 1.5 (declare `food_storage`), residential /
+  commercial > 200 persons 1.2; without a person count owner ruling D8 takes area > 2,000 m² as the proxy for
+  > 200 persons (1.2, reported as the ruling); a clinic is 1.2 by ruling D8 — it is not a Table 8 row; a
+  dormitory / residence is residential unless `educational: True`);
   Table 9 → R for the resolved system (the framework asserts it); Table 10 → % imposed load in W; 7.3.6 partitions.
 * IS 875 (Part 3):2015 Annex A → `site.Vb`; Table 2 → `site.k2_table` (the printed k2 rows for the terrain
   category, mandatory — the pipeline fails closed without it); 6.3.4 → `site.cyclone_belt` (60 km east coast /
@@ -95,7 +98,14 @@ Table 2 cite (IS 801 Table 2 lists Fy 21 / 24 / 30 / 36 kgf/mm² → F = 1250 / 
   `lateral_frame_basis = "IS800_LSD"`). Both families must be present and labelled; a mixed or partial-factor
   CFS family is refused by `india_cfs_basis.validate_load_plan`.
 
-Every retrieval hit goes into `load_plan.retrieval` as `{"stem", "query", "found", "cite", "file", "purpose"}`.
+Every retrieval hit goes into `load_plan.retrieval` as `{"stem", "query", "found", "cite", "file", "quote", "purpose"}`:
+a `found: true` row names the stored hit (`file`: `rag/<slug>.json` in the job folder) and a `quote` copied verbatim from
+it (without a quote, every number in the cite must appear in the stored hit). `consistency.check` runs the vendored
+`rag_evidence_issues` on these rows — a cite string alone does not pass. The hot-rolled lateral sub-run checks the
+same rows: `india_cfs_lateral.run_lateral(..., rag_dir=)` copies the job's `rag/` into `lateral/<name>/rag/` and maps
+`file` to the HR `hit_file`, so keep every hit under the job's `rag/`. A `found: false` row whose value you nevertheless
+use carries the EOR assumption on the row itself — `{value, source, cite, verify: True}` (the HR gate requires it) —
+and the item is listed in `cfg['eor_inputs']`.
 A `found: false` row is an honest answer; a cite that contains "EXAMPLE" or "not-for-construction" turns the
 whole job into `example_only`. Never invent a clause number, a table value or a zone.
 
@@ -103,14 +113,22 @@ whole job into `example_only`. Never invent a clause number, a table value or a 
 ```python
 cfg = {
   "name": name, "jurisdiction": "india", "units": "m", "design_basis": "IS801_WSM", "brief": "...",
-  "site": {"city", "zone", "Z", "soil", "Vb", "Vb_source", "terrain_category", "k1", "k3", "cyclone_belt",
-           "cyclone_belt_cite", "Kd", "k2_table": {10: .., 15: .., 20: .., 30: ..}, "wind_structure_class"},
-  "occupancy": {"use", "area_m2", "persons", "note"},               # -> I (IS 1893 Table 8)
+  "site": {"city", "zone", "Z", "soil", "Vb", "Vb_source", "zone_source", "lat", "long", "site_proxy",  # R5 / map record
+           "terrain_category", "k1", "k3", "cyclone_belt",
+           "cyclone_belt_cite", "Kd", "k2_table": {10: .., 15: .., 20: .., 30: ..}, "wind_structure_class",
+           "Kc", "Ka_corpus_hit", "cpe_corpus_hit"},   # the last two: retrieved IS 875-3 Table 4 / Table 5 records
+                                                       # (used before the in-repo transcriptions); Kc default 1.0
+                                                       # Ka_corpus_hit: {Ka} (checked against Table 4 at each
+                                                       # direction's / element's area -- a lower Ka is replaced by
+                                                       # Table 4, RR-BUG-6), {Ka_x, Ka_y} or {table: {area_m2: Ka}}
+  "occupancy": {"use", "area_m2", "persons", "note", "food_storage", "educational", "hospital", "assembly",
+                "lifeline"},                                          # -> I (IS 1893 Table 8; flags override keywords)
   "geometry": {"plan_x_m", "plan_y_m", "heights_m": [..]},
   "loads": {"D_floor", "D_roof", "L_floor", "Lr", "clad", "partition_design_kNm2", "partition_seismic_kNm2", "snow", "cite"},
-  "lateral_frame": {"system": "SCBF"|"OCBF"|"EBF"|"SMF", "R", "NX", "NY", "bay_x_m", "bay_y_m", "braced_bays",
+  "lateral_frame": {"system": "SCBF"|"OCBF"|"EBF"|"SMF"|"SMF+SCBF"|.., "R", "NX", "NY", "bay_x_m", "bay_y_m", "braced_bays",
                     "brace_config", "base", "col", "beam", "brace", "col_sec", "beam_sec", "steel_grade",
-                    "brace_grade", "deck_span", "diaphragm", "apply_is18168", "connections", "diaphragm_7_6_4"},
+                    "brace_grade", "deck_span", "diaphragm", "diaphragm_by_level", "apply_is18168", "connections",
+                    "diaphragm_7_6_4"},
   "cfs_members": {"Fy_MPa", "grade_cite",
                   "studs":  {"section": "CLR100X50X15X2", "spacing_mm", "height_mm", "bearing", "sheathing": {...}, "cladding_kNm2"},
                   "joists": {"section", "spacing_mm", "span_mm", "bearing_mm", "compression_flange_restrained", "deflection_limit_ratio", "deflection_cite"},
@@ -128,6 +146,160 @@ All-CFS elastic portal (Ex5 only): `"all_cfs_portal": True`, `"portal": {"spans_
 Sections are IS 811 labels only (`CLR…`, `CLS…`, `CWR…`, `CWS…`, `EA…`, `UA…`, `HS…`, `HRH…` / `HRB…` hat, `LZ…`);
 `n_ply` 1 or 2 (two channels back to back with IS 801 7.3 interconnection). Hot-rolled sections are IS 808 labels
 (`WPB…`, `NPB…`, `ISMB…`) in E250 / E350 per IS 2062.
+
+## Advanced cfg keys (optional; all backward compatible — use them when the building needs them)
+
+**Lateral system** (`cfg['lateral_frame']`)
+* `system` may be MIXED: `"SMF+SCBF"`, `"EBF+SMF"`, … — every component passes the zone gate, R = min over the
+  components (IS 1893 Table 9); the declared braced bays AND moment lines are kept; the package names the real system.
+  `R_x` / `R_y` (number, optional): per-direction R, each validated against the Table 9 R of `system_x` / `system_y`
+  (e.g. `"system_x": "SMF", "system_y": "SCBF"`; without them each direction takes every component) — passed to the
+  HR engine as cfg `R_x` / `R_y` / `system_x` / `system_y`. `R` (if given) must equal the min.
+* `base`: `"fixed"` (default) | `"pinned"` — honoured by both builders for the SFRS column bases.
+* `member_wind`: `True` forces / `False` suppresses `load_plan.member_wind` for the HR run. It is emitted automatically
+  for a single-storey (or `geometry.roof_pitch_deg`) building from `india_wind_tables.lowrise_member_wind` (Table 5 walls,
+  Table 6 roof, Cpi from the opening ratio), so the wall columns carry the girt reactions; a declared
+  `load_plan.member_wind` is kept.
+* `custom_build_module`: `"india_cfs_frame_build"` (or a job-local `.py` path) — the JSON-declared builder for plans that
+  are not a full NX × NY rectangle. `india_cfs_frame_build` is a thin wrapper that loads the SHARED HR builder
+  `steel_engine/hr_vendor/frame_build.py` (X06; the HR contract documents the same `gold` schema and the EBF
+  `info['links']` record); it reads `lateral_frame.gold`:
+  `xcoords_m` / `ycoords_m` (non-uniform grid), `present` (`{"default": [[i, j]..], "0": base set, "3-5": [..]}` — the
+  column nodes per level), `stepped_bases`, `omit_beams_at`, `xbays`, `ebf_bays`, `e_link_mm`, `ebf_beam_column_pinned`,
+  `ebf_beam_sec` / `ebf_link_sec` / `ebf_brace_sec`, `brace_sec`, `moment_lines`, `col_sec` (`{"lateral": {"1-4": sec},
+  "gravity": {..}}`), `beam_sec` (`floor_X` / `floor_Y` / `roof_X` / `roof_Y`, each a section or storey-ranged
+  `{"1-2": sec, "3-8": sec}`), `col_sec_by_line` / `beam_sec_by_line` (`{"X0": sec | {"1-4": sec}, "Y3": .., "2,0": ..}` —
+  line `Xj` = y-grid line j, `Yi` = x-grid line i, `"i,j"` = one column; e.g. stiffer end frames), `sfrs_base`
+  (`"fixed"` | `"pinned"` | `{"X0": "pinned", "Y2": "fixed", "1,0": "pinned", "default": "fixed"}`; conflicting lines at one
+  column are refused — declare the node key), `max_beam_span_m` (beams join consecutive present nodes of a grid line up
+  to this span; default the largest bay), `free_nodes` (`{"2": [[i, j]..]}` kept out of that level's rigid diaphragm),
+  `plan_area_m2` / `voids_m2` (number or `{level: m2}`, for the framed-area check), `gravity_base`, `default_strong`,
+  and (X02) `roof_planes` = `[{"axis": "X" | "Y" (span direction), "eave_coords_m": [lo, hi], "ridge_coord_m",
+  "eave_z_m" (a storey level), "ridge_z_m", "lines": [j..] | "bays": [[i, j]..], "rafter_sec", "ridge_sec"}]` — a
+  true-slope pitched roof in METRES (`*_mm` keys are taken as they are), converted to the HR `cfg['roof_planes']` in mm:
+  apex nodes, rafters at the real slope, eaves free to spread, loads per plan area — and `roof_regions` =
+  `{level: [[i, j], ...]}` (roof bays of an intermediate level: roof dead / Lr / snow, no floor imposed load or
+  partitions). Without `roof_planes` the rafters are flat at the eave level (Table 6 Cpe still at the real pitch).
+  Columns run between the consecutive levels at which their node exists (a high-bay column passes a missing level).
+  **Framed-area check**: preflight ERROR when a level's framed plate (cells with all four corners present) is below
+  0.9 × the declared plan area (`gold.plan_area_m2`, else `geometry.floor_area_m2`, else `plan_x_m × plan_y_m −
+  voids_m2`) — a dropped roof or floor silently removes gravity load and seismic weight. `geometry.floor_area_m2`
+  (owner ruling O3, 2026-09-26) is the plan area of ONE framed level — a number applies to every level, `{level: m2}`
+  per level (a setback / podium needs the dict or `gold.plan_area_m2`) — never the gross floor area summed over the
+  storeys (a value above `plan_x_m × plan_y_m` is refused); voids are not subtracted from it.
+* `d_x_m` / `d_y_m` (Ta base dimension), `Ta_override` (`{"X", "Y", "formula"}`), `default_strong`.
+* Re-entrant plans (L / T / U / Z / cruciform; IS 1893 Table 5(ii), Amd 2): the HR run adds the flexible-floor-diaphragm
+  3-D dynamic analysis to the rigid case automatically and envelopes the two. Declare the deck in-plane stiffness
+  `diaphragm_stiffness` (`{"type": "rc_slab" | "metal_deck" | "custom", "t_mm" | "G_eff_MPa" | "Gd_kN_per_m" |
+  "topping_t_mm" + "fck_MPa", "source", "cite"}` — EOR input; without it the job stays PARTIAL with the reason;
+  per level, e.g. a composite podium under CFS floors: `{"by_level": {"1-2": {record}, "3": {record}}, "default":
+  {record}}` or a list of records for levels 1..NF — every level must resolve to a record, see the HR contract);
+  `flexible_diaphragm_analysis` (`True` runs it on a regular plan too, `False` declines it); `flexible_diaphragm_eor`
+  (`{analysis_ref, results, source, cite}` of an external analysis, instead of the engine run). The diaphragm rows then
+  carry `flexible_run_7_6_4` (IS 1893 7.6.4 literal: maximum deviation from the chord / average displacement of the
+  entire diaphragm at that storey = `ratio`; `ratio_vs_storey_drift` is informative only, not the IS 1893 criterion).
+* 7.6.4 label (AUD-3): the lateral package's `diaphragm_7_6_4.classification` is "flexible (IS 1893 7.6.4, from the
+  analysis)" whenever the flexible run measures a literal ratio > 1.2 at any level, whatever `diaphragm` declares; a declared
+  label that contradicts it is a non-blocking warning (`design_status.warnings`). `diaphragm_by_level`
+  (`{"1-2": "rigid", "default": "flexible"}`, levels or ranges; unnamed levels take `diaphragm`) labels each level of
+  the HR frame, e.g. a composite podium rigid under flexible CFS floors: rigid levels keep the rigid load-path
+  collectors; flexible levels accumulate the deck shear along each braced line into the braced bays (q x tributary
+  length of the line; the whole-line-shear upper bound only where the model shows no braced / frame bay on the line),
+  and with the Table 5(ii) run the EQ combinations take the flexible-deck beam axial forces as the flexible case (HR
+  contract); each level's label is compared with that level's literal 7.6.4 ratio. `diaphragm_type` (`"cfs_board"` |
+  `"board"` | `"metal_deck"` | `"rc_slab"` | `"composite_deck"` | `"braced_roof"`, optional; otherwise read from
+  `floor_system`, default CFS joists): a board / CFS or bare metal-deck diaphragm declared rigid with no stiffness basis
+  (`diaphragm_stiffness`, 7.6.4 deflections, flexible run, `flexible_diaphragm_eor`) gets a preflight WARN.
+* Anchorage (AUD-4, HR contract): lateral-frame bases take `connections.column_base[..].anchors.embedment` =
+  `{"method": "bond", "tau_bd_MPa", "bar": "plain" | "deformed", "L_mm", "source", "cite"}` (pi d L tau_bd, x1.6 only
+  for a deformed-bar rod) or the asserted `{capacity_N, source, cite}` (WARN asking for the derivation); the job's
+  `delegated_design` (top-level cfg, passed to the HR run) needs an anchor-breakout / pedestal item with criteria, or
+  the concrete_breakout record WARNs. Plate fy of every base / gusset / splice / fin plate follows IS 2062 Table 3 by
+  thickness (AUD-2, HR contract: `plate_grade`, `n_plates`).
+* Passed to the HR engine as declared (HR meaning): `K_factors` (`{"lateral_col": {"Kz", "Ky"}, "gravity_col": .., "brace": ..,
+  "basis"}`, default 1.0 braced), `LLT_sag_mm` / `LLT_hog_mm` (`{"floor", "roof"}` unbraced lengths for beam LTB),
+  `brace_process` (hot / cold formed hollow braces), `collector_basis`, `floor_system` (text for the report),
+  `section12_inputs` (declared IS 800 Section 12 / IS 18168 detail inputs).
+* `hr_cfg_extra`: HR cfg keys passed verbatim to the vendored engine, e.g. `D_by_level` / `L_by_level` (`{level: kN/m²}`),
+  `is18168_table2`, `grade_by_section`, `custom_sections`, `column_imposed_load_reduction`, `composite_scope`
+  (`"bare_steel"`: IS 800 bare-steel + construction-stage checks, IS 11384 not in the corpus), `construction_stage`
+  (`{D_wet_kNm2, L_const_kNm2, LLT_mm}`), `building_type` (`"industrial"` selects the IS 800 Table 6 industrial rows),
+  `deflection_key_roof` (an IS 800 Table 6 row key for roof beams, e.g. `"rafter_profiled_sheeting"` = span/180),
+  `finishes_susceptible_to_cracking`, `cladding_brittle`.
+
+**Geometry / wind / diaphragm** (`cfg['geometry']`, `cfg['load_plan']`)
+* `opening_ratio` (0–1): Cpi by IS 875-3 7.3.2 (≤ 5 % → ±0.2, 5–20 % → ±0.5, > 20 % → ±0.7); not declared → ±0.2 with
+  a preflight WARN. `roof_pitch_deg` (Table 6 roof Cpe for purlins; low-rise member wind).
+* `floor_area_m2`: plan area of ONE framed level in m2 (number = every level, or `{level: m2}`), not a total over the
+  storeys — used by the framed-area check when `gold.plan_area_m2` is absent (owner ruling O3).
+* `wind_exposure = {level: {width_X_m, width_Y_m, height_m}}`: per-level exposed face width (the face loaded by wind
+  along X / Y) and tributary height, for mixed-height buildings. A declared `load_plan.story_forces.W_X` / `W_Y` is kept
+  (not overwritten) when `load_plan.wind_story_forces_cite` and `story_forces_units` (`"N"` | `"kN"`) are given.
+* Diaphragm (H3): the unit shear of every frame line = the ANALYSED line reaction of the HR sub-run (its package
+  `collectors.rows`: rigid-diaphragm load path, and the flexible tributary rows at flexible-labelled levels) ÷ the deck
+  length actually present along that line at that level (the model's deck cells — four corners in the level's
+  diaphragm, less free nodes / stepped bases / `diaphragm_stiffness.void_cells` — bordering the line), enveloped with the
+  IS 1893 7.6.4 flexible line shears where the X01 run ran or the level is labelled flexible, EQ and W; the chord force
+  comes from the same reactions. The rigid EQ reactions carry the IS 1893 7.8.2 accidental torsion Mt = F x 0.05 b
+  (rigid-diaphragm torsion formula, k ~ |R|, J over the parallel lines -- an upper bound; one parallel line -> the
+  perpendicular lines), added for the adverse sign (`torsion_7_8_2` in each row); the flexible half takes none. A line with no node in the level's diaphragm (grade / stepped-base / free nodes) is
+  listed in `lines_outside_deck`, not checked. No reactions → the row is NOT evaluated (fail closed; the old F/(n B)
+  value is kept only as `superseded_equal_share`, never checked). Where the model gives no deck length (off-grid line,
+  no deck cell on the line) declare `geometry.diaphragm_line_length_m` = `{level | "a-b" | "default": {"X@<y m>": m,
+  "Y@<x m>": m}}` (or `{level: {"X": {y_m: m}}}`) — used with a WARN; a declared length longer than the model's deck is
+  not used. `diaphragm_depth_X_m` / `_Y_m` (per storey allowed) caps the chord depth; `diaphragm_span_X_m` / `_Y_m` and
+  `diaphragm_lines_X` / `_Y` feed only the superseded equal-share value. `cfg['diaphragm_capacity'].v_allow_kN_per_m` is
+  a number or `{storey: value | {value, cite}}`.
+  `reentrant_lines_X` / `_Y` = `[{"line", "coord_m"?, "B_short_m", "B_m"?, "storeys"?, "capacity_kN"?, "cite"?}]` →
+  collector rows max(F (1 − B_short/B), the analysed collector axial on that line (coordinate `coord_m`, else the number
+  in `line`)); without a declared capacity they are found:false and block COMPLETE.
+* Snow: `loads.snow` (kN/m², IS 875-4) — or top-level `snow`, or `load_plan.snow_summary.applicable = True` — adds the
+  DL+SL rows (IS 875-5 8.1 Note 1).
+* Partitions in W: `loads.partition_seismic_kNm2`, default max(0.5, `partition_design_kNm2`) (IS 1893 7.3.6, ruling R1);
+  declared below the design allowance → preflight WARN.
+
+**CFS members** (`cfg['cfs_members']`) — every role is ONE group or a LIST of groups (each may carry `name`):
+* Member wind is derived for every stud / purlin / girt from IS 875-3 (`india_cfs_members.member_pd`): pz at the member
+  height, Table 4 Ka for the ELEMENT area (spacing × span), Table 5 / Table 6 Cpe governing over every face and both wind
+  angles, local strips (Table 5 local, Table 6 local; Kd = 1.0 there, 7.2.1 Note 2), Cpi from the opening ratio.
+  `zone`: `"all"` (default: the more severe of interior and local strips) | `"general"` | `"edge"`. Declared
+  `Cpe_windward` / `Cpe_leeward` / `Cpe_local` / `Cpi` (+ `Cpi_cite`) and declared `wind_uplift_kNm2` /
+  `wind_suction_kNm2` / `wind_pressure_kNm2` can only make the pressure more severe. Underivable wind is a preflight ERROR.
+* `studs.storeys`: default every storey (ids `stud-S<k>-…`). `joists`: per-group `D_kNm2`, `L_kNm2` (+ `L_cite`),
+  `partition_kNm2`. `purlins.point_loads`: `[{"P_kN", "a_m", "kind": "D" | "L", "cite"}]` (evaporator units).
+  `eave_struts`: `{section, n_ply, span_mm, P_N, P_cite, L_unbraced_mm}` (IS 801 6.7 with the 6.1.2 increase).
+  `headers`: `{section, n_ply, span_mm, w_dead_kN_per_m, w_live_kN_per_m, load_cite, bearing_mm, deflection_limit_ratio}`.
+* Lipped zeds (`LZ…`) are refused in bending (found:false) until principal-axis bending is implemented — use channels.
+* Floor deflection criterion: IS 800 Table 6 "other buildings, floor": span/300 (elements not susceptible to cracking) or
+  span/360 (susceptible) — span/240 is the industrial row, not a floor of an ordinary building.
+
+**All-CFS portal** (`cfg['portal']`, Ex5): gable wind uses IS 875-3 Table 5 of the building (θ 90: C − D);
+`mezzanine.beams` = `{section, n_ply, span_mm, trib_width_mm, bearing_mm, compression_flange_restrained,
+deflection_limit_ratio}` (IS 801 6.1–6.5; undeclared → not evaluated); posts of a self-braced mezzanine carry the bracing
+overturning axial under EL; `cfs_connections_spec.base.anchors.embedment_capacity_N` + `embedment_source` +
+`embedment_cite` = the asserted anchorage capacity per anchor (EOR input, IS 456 not in the corpus — VERIFY; source AND
+cite required, a WARN asks for the derivation), or the derived `anchors.embedment` = `{"method": "bond", "tau_bd_MPa"
+(working-stress permissible bond, IS 456 B-2.1.2, EOR input), "bar": "plain" | "deformed", "L_mm", "source", "cite"}`
+(pi d L tau_bd, x1.6 only for a deformed-bar rod); anchors in tension without a complete record are not evaluated. The
+base carries a `concrete_breakout` record (satisfied by a `delegated_design` item for anchor breakout / pedestal design
+with criteria; otherwise a WARN) and the plate fy follows IS 2062 Table 3 for `t_plate_mm` (`plate_grade`, AUD-2).
+
+## Corpus and search tool
+The standards search tool posts to the corpus server at `RAG_API_URL` (e.g. `http://127.0.0.1:8765/query`; start it in
+the corpus checkout with `python3 scripts/serve_http.py --host 127.0.0.1 --port 8765`); `INDIA_CORPUS_ROOT` names the
+corpus checkout (default: a sibling `engineering_rag_india`). A miss reports `not_found_kind`: `no_specification_index` /
+`document_not_in_corpus` (corpus gaps, not evidence of absence), `not_tabulated` (the corpus answered: no table row — e.g.
+a town in neither IS 875-3 Annex A nor IS 1893 Annex E: read Fig. 1 at the site), `server_error` (`found: None`, retry —
+never report the provision as absent) or `term_absent_from_document` (the only "the standard lacks it"). A town not in
+the annexes: `site.Vb_source` 'derived_from_map' (with the site lat / long) or the ruling R5 site proxy (proxy town,
+distance, basis, VERIFY) — never "nearest city". The lateral sub-run receives the whole record (DOCS-OPEN-1, closed):
+`site.Vb_source` / `site.zone_source` = 'derived_from_map' with `site.lat` / `site.long` (aliases `latitude`, `lon`,
+`longitude`), or 'site_proxy' with `proxy_town`, `distance_km`, `basis`, `verify: True` and `annex_found: False` /
+`corpus_status: 'not_tabulated'` — as top-level `site` keys, in a shared `site.site_proxy` record, or per quantity in
+`site.Vb_site_proxy` / `site.zone_site_proxy` (a nested record may give `cite` for the basis, `source` for the
+source). They are copied into the HR `wind_summary` / `seismic_summary`, so the HR preflight (one policy,
+`india_loads.resolve_site_annex_proxy`) passes a properly recorded map reading or proxy (proxy = WARN, VERIFY) and
+still refuses an incomplete one. Also state the reading in the retrieval row's cite.
 
 ## Hard rules (the gates enforce them; do not argue with a refusal)
 1. One `complete` authority: `india_cfs_gates.design_status`. It is `complete` only when the hot-rolled frame status

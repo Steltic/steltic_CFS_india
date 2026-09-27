@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "steltic-cfs-india"
-version = "1.0.2"
+version = "1.1.0"
 description = "Free, local India IS 801/811 CFS design agent: your LLM + OpenSees + stamped-style reports (loads via IS 875/1893 RAG)"
 readme = "README.md"
 license = "MIT"

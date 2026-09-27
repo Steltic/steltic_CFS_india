@@ -1,9 +1,15 @@
 IN_CFS_Ex15 — cold-storage / freezer warehouse, hot-rolled SMF portal + EBF longitudinal, snow, Srinagar (India)
 
 Location: Srinagar (IS 1893 Zone V — retrieve Z; soil — retrieve). Snow governs gravity — retrieve IS 875 Part 4
-(snow-bound region: ground snow, shape coefficients, drift at the platform / lean-to — do not invent). Wind:
+(snow-bound region: ground snow, shape coefficients, drift at the platform / lean-to — do not invent). Ground snow
+s0 by Annex A-3, s0 = 1.624 [Z - 0.5][1 + (A/2677)^2] kPa, site altitude A = 1,585 m; the snow zone number Z is an
+EOR map reading of IS 875-4 Fig. 1 — to be confirmed, VERIFY (the map is an image, not in the corpus; Z 3 gives
+s0 = 5.48 kPa, Z 4 gives 7.68 kPa): declare it in cfg['eor_inputs'] and on the found:false map row
+{value, source, cite, verify: True}. Wind:
 retrieve IS 875 Part 3 (Srinagar Vb). Prove the snow / wind / EQ governing map. Cold roof over the freezer: no
 warm-roof melt credit (state it).
+Occupancy: cold storage of food (frozen foods) -> I = 1.5 (IS 1893 Table 8 (i) 'food storage buildings (such as
+warehouses)'; occupancy food_storage: True).
 
 Geometry (metres):
 - Single-storey portal warehouse; eave ~8 m, apex ~9 m (h < 15 m); span ~21 m; length ~76 m; frame spacing declared

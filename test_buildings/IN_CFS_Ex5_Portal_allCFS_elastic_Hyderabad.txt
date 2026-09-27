@@ -2,6 +2,8 @@ IN_CFS_Ex5 — two-span ALL-CFS portal warehouse + mezzanine, elastic (R = 1.0),
 
 Location: Hyderabad (Zone II — retrieve Z; soil medium). Wind and seismic both retrieved — IS 875 Part 3
 (Vb, terrain category 2, Cpe / Cpi, inland Kd 0.9) and IS 1893 Zone / spectrum; prove which governs.
+Occupancy: warehouse for general (non-food) goods with a storage mezzanine -> I = 1.0 (IS 1893 Table 8 (iii);
+occupancy food_storage: False).
 
 Geometry (metres):
 - Two-span portal ~2 x 12 m clear x 7 m eave, apex ~8.4 m; frames at ~5-6 m; length ~30 m

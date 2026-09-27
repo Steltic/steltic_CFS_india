@@ -2,8 +2,8 @@
 """build_is811_shapes.py -- rebuild steel_engine/is811_shapes.csv from the corpus structured table (WP3.3).
 
 Source (column-aware, per IS 811 Table 1-10, already consistency-checked by the corpus build):
-    /home/claude/rv/work/corpus/documents/standards/IS_811_1987/structured/sections.csv
-(override with IS811_CORPUS_CSV).  IS 811 Table 11 is not in the corpus and is not built.
+    <INDIA_CORPUS_ROOT>/documents/standards/IS_811_1987/structured/sections.csv
+(INDIA_CORPUS_ROOT defaults to a sibling ../engineering_rag_india checkout; override the file with IS811_CORPUS_CSV).  IS 811 Table 11 is not in the corpus and is not built.
 
 Output columns are SI (mm, mm2, mm4, mm3, mm6, kg/m).  Every row is validated here a second time
 (steel_engine/tools/validate_is811.py rules: A vs thin-wall geometry, M = 0.785 A, thin-wall Ix, Iu + Iv = Ix + Iy);
@@ -26,8 +26,10 @@ ENGINE = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 from validate_is811 import validate_row  # noqa: E402
 
+_REPO = os.path.dirname(ENGINE)
+_CORPUS_ROOT = os.environ.get("INDIA_CORPUS_ROOT") or os.path.join(os.path.dirname(_REPO), "engineering_rag_india")
 CORPUS_CSV = os.environ.get("IS811_CORPUS_CSV",
-                            "/home/claude/rv/work/corpus/documents/standards/IS_811_1987/structured/sections.csv")
+                            os.path.join(_CORPUS_ROOT, "documents", "standards", "IS_811_1987", "structured", "sections.csv"))
 OUT = os.path.join(ENGINE, "is811_shapes.csv")
 QUAR = os.path.join(ENGINE, "is811_quarantine.csv")
 

@@ -1,6 +1,7 @@
 """Map agent RAG collection names → India CFS corpus document stems.
 
-Corpus root: /workspace/engineering_rag_india (stem files under documents/standards/<STEM>/).
+Corpus root: $INDIA_CORPUS_ROOT, else a sibling checkout ../engineering_rag_india, else
+/workspace/engineering_rag_india (stem files under documents/standards/<STEM>/); see india_corpus_root().
 Hosted rag_server may register collections as engineering_standards_IS*; this map is the
 canonical translation for local aliases, escalation, and docs.
 
@@ -8,6 +9,9 @@ CFS design: IS 801 / IS 811 (+ Amd1). Loads: IS 875 Parts 1–5 + IS 1893 Part 1
 Do NOT map HR-only IS 808 shape catalogs here as primary CFS design authority.
 """
 from __future__ import annotations
+
+import os
+import pathlib
 
 COLLECTION_TO_STEM: dict[str, str] = {
     # CFS design
@@ -67,7 +71,34 @@ STEM_TO_COLLECTION: dict[str, str] = {
     "IS_18168_2023": "engineering_standards_IS18168",
 }
 
-INDIA_CORPUS_ROOT = "/workspace/engineering_rag_india"
+_WORKSPACE_CORPUS = "/workspace/engineering_rag_india"
+
+
+def india_corpus_root() -> str:
+    """L-08: the one place the India corpus location is decided.
+
+    1. $INDIA_CORPUS_ROOT when set (used as given, even if it does not exist yet);
+    2. a sibling checkout ``<repo parent>/engineering_rag_india`` when it holds ``indexes/`` or
+       ``documents/standards/``;
+    3. the historical ``/workspace/engineering_rag_india``.
+    Engine modules that need the corpus (e.g. the vendored india_omega_is18168) should call this
+    rather than hard-code a path."""
+    env = (os.environ.get("INDIA_CORPUS_ROOT") or "").strip()
+    if env:
+        return env
+    repo = pathlib.Path(__file__).resolve().parent.parent
+    for cand in (repo.parent / "engineering_rag_india", pathlib.Path(_WORKSPACE_CORPUS)):
+        if (cand / "indexes").is_dir() or (cand / "documents" / "standards").is_dir():
+            return str(cand)
+    return _WORKSPACE_CORPUS
+
+
+def india_corpus_path(*parts: str) -> pathlib.Path:
+    """A path inside the India corpus root (see india_corpus_root)."""
+    return pathlib.Path(india_corpus_root(), *parts)
+
+
+INDIA_CORPUS_ROOT = india_corpus_root()
 INDIA_ALIASES_FILE = f"{INDIA_CORPUS_ROOT}/indexes/aliases.json"
 
 LOAD_COLLECTIONS = [

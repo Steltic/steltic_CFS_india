@@ -62,8 +62,10 @@ def _callables(spec):
 
     def beam_sec(i, j, k, dirn):
         roof = (k == NF)
-        return (beam_groups.get(("roof" if roof else "floor") + "_" + dirn) or beam_groups.get("roof" if roof else "floor")
-                or spec["beam"])
+        v = beam_groups.get(("roof" if roof else "floor") + "_" + dirn) or beam_groups.get("roof" if roof else "floor")
+        if isinstance(v, dict):                             # C11: storey-ranged beam group {"1-2": sec, "3-8": sec}
+            v = _pick(v, k)
+        return v or spec["beam"]
 
     def col_strong(i, j, nx, ny):
         # strong axis in the plane of the frame the column belongs to (moment line first, then braced bay)
@@ -97,7 +99,8 @@ def build_cfg(spec):
         "NX": spec["NX"], "NY": spec["NY"], "bay_x": spec["bay_x_m"], "bay_y": spec["bay_y_m"], "heights": heights,
         "D_floor": spec["D_floor"], "D_roof": spec["D_roof"], "L_floor": spec["L_floor"], "Lr": spec["Lr"],
         "clad": spec.get("clad", 0.0), "snow": spec.get("snow", 0.0),
-        "partition_load_kNm2": spec.get("partition_design_kNm2", 0.0), "partition_seismic_kNm2": spec.get("partition_seismic_kNm2", 0.5),
+        "partition_load_kNm2": spec.get("partition_design_kNm2", 0.0), "partition_seismic_kNm2": (spec["partition_seismic_kNm2"] if spec.get("partition_seismic_kNm2") is not None
+                                   else max(0.5, float(spec.get("partition_design_kNm2") or 0.0))),     # H22 / R1: IS 1893 7.3.6
         "partitions": spec.get("partitions", True),
         "E": 200000.0, "base": spec.get("base", "fixed"), "diaphragm": spec.get("diaphragm", "rigid"),
         "floor_system": spec.get("floor_system", "one-way (CFS joists between the hot-rolled beams)"),
@@ -122,10 +125,31 @@ def build_cfg(spec):
         "seis": {"Z": spec["Z"], "I": spec["I"], "R": spec["R"], "zone": spec["zone"], "soil": spec["soil"]},
         "load_plan": spec["load_plan"],
     }
+    # C10: mixed systems / per-direction R -- the HR engine reads cfg R_x / R_y and system_x / system_y (H06)
+    for key in ("R_x", "R_y", "system_x", "system_y"):
+        if spec.get(key) is not None:
+            cfg[key] = spec[key]
+            if key.startswith("R_"):
+                cfg["seis"][key] = spec[key]
     if spec.get("diaphragm_7_6_4"):
         cfg["diaphragm_7_6_4"] = spec["diaphragm_7_6_4"]
+    if spec.get("diaphragm_by_level"):                      # GOLD-COLL: per-level rigid / flexible labels
+        cfg["diaphragm_by_level"] = spec["diaphragm_by_level"]
+    for key in ("diaphragm_type", "delegated_design"):      # AUD-3 / AUD-4 (7.6.4 deck kind; anchor breakout item)
+        if spec.get(key) is not None:
+            cfg[key] = spec[key]
+    for key in ("diaphragm_stiffness", "flexible_diaphragm_analysis", "flexible_diaphragm_eor"):   # X01 (Table 5(ii))
+        if spec.get(key) is not None:
+            cfg[key] = spec[key]
     if spec.get("default_strong"):
         cfg["default_strong"] = spec["default_strong"]
+    if spec.get("roof_planes"):                             # X02: true-slope pitched roof (metre or mm keys)
+        import importlib.util as _ilu
+        _sp = _ilu.spec_from_file_location("cfs_frame_build_rp", os.path.join(HERE, "india_cfs_frame_build.py"))
+        _m = _ilu.module_from_spec(_sp); _sp.loader.exec_module(_m)
+        cfg["roof_planes"] = _m.roof_planes_mm(spec["roof_planes"])
+    if spec.get("roof_regions"):                            # X02: roof bays of intermediate levels
+        cfg["roof_regions"] = {int(k): [tuple(b) for b in v] for k, v in dict(spec["roof_regions"]).items()}
     cfg.update(spec.get("hr_cfg_extra") or {})              # declared HR cfg keys (WP6 gold packages), verbatim
     for key in ("D_by_level", "L_by_level"):                # per-level pressures (podium / mezzanine): int level keys after JSON
         if cfg.get(key):
@@ -161,6 +185,7 @@ def build_cfg(spec):
     ss = plan.setdefault("seismic_summary", {})
     ss.update(r["seismic_summary"])
     ss.update(system=spec["system"], zone=spec["zone"], Z=spec["Z"], I=spec["I"], R=spec["R"], soil=spec["soil"],
+              **{k: spec[k] for k in ("R_x", "R_y") if spec.get(k) is not None},
               Ta_formula=ta_formula, Ta_x_s=Ta["X"], Ta_y_s=Ta["Y"], d_x_m=dx, d_y_m=dy)
     plan.setdefault("story_forces", {})
     for d in ("X", "Y"):
@@ -170,6 +195,21 @@ def build_cfg(spec):
     plan["jurisdiction"] = "india"
     cfg["seis"].update(Ah=ss.get("Ah"), Ta=max(Ta.values()), Sa_g=ss.get("Sa_g"), VB_kN=ss.get("VB_kN"))
     return cfg, r
+
+
+def _governing(checks, DC=None):
+    """C12 (CFS-A-02): value / limit / check / clause of the governing (max dc) HR check, so a summary D/C is traceable and
+    never reads as a literal constant."""
+    rows = checks.values() if isinstance(checks, dict) else (checks or [])
+    rows = [r for r in rows if isinstance(r, dict) and isinstance(r.get("dc"), (int, float))]
+    if not rows:
+        return {}
+    if isinstance(DC, (int, float)):
+        g = min(rows, key=lambda r: abs(r["dc"] - DC))          # the row the stored DC comes from (HR DC may exclude e.g. slenderness)
+    else:
+        g = max(rows, key=lambda r: r["dc"])
+    return {"value": g.get("value"), "limit": g.get("limit"), "governing_check": g.get("name") or g.get("check"),
+            "governing_clause": g.get("clause")}
 
 
 def _summary(cfg, out, root):
@@ -184,11 +224,13 @@ def _summary(cfg, out, root):
         "status": pkg.get("design_status"), "seismic_calc": pkg.get("seismic_calc"), "seismic_analysis": pkg.get("seismic_analysis"),
         "Ah": ss.get("Ah"), "VB_kN": ss.get("VB_kN"), "W_kN": ss.get("W_kN"), "Ta_s": {"X": ss.get("Ta_x_s"), "Y": ss.get("Ta_y_s")},
         "Sa_g": ss.get("Sa_g"), "I": ss.get("I"), "R": ss.get("R"), "Z": ss.get("Z"), "zone": ss.get("zone"),
-        "members": [{"id": m["id"], "role": m["inputs"]["role"], "section": m["inputs"]["section"], "DC": m.get("DC"),
-                     "governing_combo": m["inputs"].get("governing_combo"), "n": m["inputs"].get("n_elements")}
+        "members": [dict({"id": m["id"], "role": m["inputs"]["role"], "section": m["inputs"]["section"], "DC": m.get("DC"),
+                          "governing_combo": m["inputs"].get("governing_combo"), "n": m["inputs"].get("n_elements")},
+                         **_governing(m.get("checks"), m.get("DC")))
                     for m in pkg.get("members", [])],
-        "connections": [{"id": c["id"], "type": c["type"], "DC": c.get("DC"),
-                         "not_evaluated": [x["name"] for x in c.get("checks", []) if x.get("ok") is None]}
+        "connections": [dict({"id": c["id"], "type": c["type"], "DC": c.get("DC"),
+                              "not_evaluated": [x["name"] for x in c.get("checks", []) if x.get("ok") is None]},
+                             **_governing(c.get("checks"), c.get("DC")))
                         for c in pkg.get("connections", [])],
         "drift_table": pkg.get("drift_table"), "drift_max": max((d["drift"] for d in pkg.get("drift_table") or []), default=None),
         "irregularity": {k: (v.get("irregular") if isinstance(v, dict) else v) for k, v in (pkg.get("irregularity") or {}).items()

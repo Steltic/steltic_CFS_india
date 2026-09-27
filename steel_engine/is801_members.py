@@ -59,6 +59,12 @@ PI2 = math.pi ** 2
 INCREASE_WL_EL = 4.0 / 3.0  # IS 801 6.1.2: 33 1/3 percent
 
 
+def nmm_to_kgfcm(M_Nmm):
+    """N-mm -> kgf-cm: 1 N-mm = 0.1 N-cm = 0.1/9.80665 kgf-cm (C01: the demand-stress side used / 1e3, which made fb
+    100 x too small; the capacity side Ma = Fb Sx x 98.0665 N-mm per kgf-cm was fixed in WP6 / E6)."""
+    return M_Nmm * N_TO_KGF / 10.0
+
+
 def _rec(value, limit, clause, cite, ok=None, **extra):
     dc = None
     if value is not None and limit not in (None, 0):
@@ -355,9 +361,20 @@ def bending_allowable(sec, Fy_MPa, L_unbraced_mm, Cb=1.0, wind_eq=False, compres
     Fy = Fy_MPa * MPA_TO_KGF
     F = 0.60 * Fy
     typ = sec["type"]
+    if typ == "LZ":
+        # C15: a lipped zed bent about x-x (web normal) is not bent about a principal axis (tan alpha != 0): the stress
+        # needs the principal-axis (u-v) resolution / lateral restraint statement that this module does not implement.
+        # Refused (found:false) rather than returning a single-axis Fb and Ma that look evaluated.
+        return {"ok": None, "found": False, "Fb_kgf_cm2": None, "Fb_MPa": None, "Fb1_kgf_cm2": None, "Fb1_MPa": None,
+                "Sxc_cm3": None, "Sx_eff_cm3": None, "Ma_Nmm": None, "Ma_kNm": None, "Cb": Cb, "ltb_clause": None,
+                "notes": [], "allowable_increase": INCREASE_WL_EL if wind_eq else 1.0, "capacity_basis": "IS801_allowable",
+                "clause": "IS 801 6.3 (zed)", "source": SRC,
+                "cite": "Fb for zeds: 6.3 with 0.18 / 0.9 pi^2 E Cb/Fy limits (point-symmetric section)",
+                "note": "LZ (lipped zed) bending not evaluated: principal-axis (u-v) bending of a point-symmetric zed is not "
+                        "implemented (C15) -- use a lipped channel, or supply an EOR / test capacity"}
     d = sec["h"] / 10.0
     Ix, Iy = sec["Ix"] / 1e4, sec["Iy"] / 1e4
-    Sxc = Ix / (d / 2.0) if typ != "LZ" else Ix / (d / 2.0)
+    Sxc = Ix / (d / 2.0)
     Iyc = Iy / 2.0
     fb1 = F
     notes = []
@@ -432,7 +449,7 @@ def web_bending_shear_643(sec, Fy_MPa, M_Nmm, V_N, wind_eq=False):
     ht = h / t
     Fbw = 36560000.0 / ht ** 2
     Ix = sec["Ix"] / 1e4
-    fbw = (M_Nmm / 1e3 * N_TO_KGF) * (h / 2.0) / Ix          # kgf-cm x cm / cm4 at the flange-web junction
+    fbw = nmm_to_kgfcm(M_Nmm) * (h / 2.0) / Ix               # kgf-cm x cm / cm4 at the flange-web junction
     sh = web_shear_64(sec, Fy_MPa, V_N, wind_eq=wind_eq)
     Fy = Fy_MPa * MPA_TO_KGF
     Fv_nolim = 1275.0 * math.sqrt(Fy) / ht if ht <= 4590.0 / math.sqrt(Fy) else 5850000.0 / ht ** 2
@@ -514,11 +531,13 @@ def combined_67(sec, Fy_MPa, P_N, Mx_Nmm, KLx_mm, KLy_mm, L_unbraced_mm, cm_case
         return dict(comp, dc=None, value=None, limit=None)
     bend = bending_allowable(sec, Fy_MPa, L_unbraced_mm, Cb=Cb, wind_eq=wind_eq,
                              compression_flange_restrained=compression_flange_restrained)
+    if bend.get("ok") is None:
+        return dict(bend, dc=None, value=None, limit=None, clause="IS 801 6.7 / " + str(bend.get("clause")))
     inc = INCREASE_WL_EL if wind_eq else 1.0
     Fy = Fy_MPa * MPA_TO_KGF
     A = sec["A"] / 100.0
     fa = P_N * N_TO_KGF / A
-    fbx = (Mx_Nmm / 1e3 * N_TO_KGF) / bend["Sx_eff_cm3"]
+    fbx = nmm_to_kgfcm(Mx_Nmm) / bend["Sx_eff_cm3"]
     Fa1 = comp["Fa1_kgf_cm2"] * inc
     Fa = comp["Fa_kgf_cm2"] * inc                        # min(Fa1, Fa2): the concentric allowable
     Q = comp["Q"]
@@ -537,7 +556,7 @@ def combined_67(sec, Fy_MPa, P_N, Mx_Nmm, KLx_mm, KLy_mm, L_unbraced_mm, cm_case
         i1 = float("inf")
     else:
         i1 = fa / Fa + Cm * fbx / (amp * Fbx)
-    fby = (My_Nmm / 1e3 * N_TO_KGF) / (sec["Zy"] / 1e3) if My_Nmm and sec.get("Zy") else 0.0
+    fby = nmm_to_kgfcm(My_Nmm) / (sec["Zy"] / 1e3) if My_Nmm and sec.get("Zy") else 0.0
     if fby:
         Fby = (Fby_MPa * MPA_TO_KGF if Fby_MPa else 0.6 * Fy) * inc
         klr_by = KLy_mm / 10.0 / (sec["ry"] / 10.0)
@@ -568,7 +587,7 @@ def combined_67(sec, Fy_MPa, P_N, Mx_Nmm, KLx_mm, KLy_mm, L_unbraced_mm, cm_case
     oks = [c.get("ok") for c in checks.values()]
     out = {"checks": checks, "dc": max(dcs) if dcs else None,
            "ok": (None if any(o is None for o in oks) else all(oks)), "clause": cl,
-           "fa_MPa": fa * KGF_CM2, "fbx_MPa": fbx * KGF_CM2, "Fa1_MPa": Fa1 * KGF_CM2, "Fa_MPa": Fa * KGF_CM2,
+           "fa_MPa": fa * KGF_CM2, "fbx_MPa": fbx * KGF_CM2, "fby_MPa": fby * KGF_CM2, "Fa1_MPa": Fa1 * KGF_CM2, "Fa_MPa": Fa * KGF_CM2,
            "Fa0_MPa": Fa0 * KGF_CM2, "Fbx_MPa": Fbx * KGF_CM2, "Fb1x_MPa": Fb1x * KGF_CM2, "Fe_prime_MPa": Fex * KGF_CM2,
            "Cm": Cm, "Cm_cite": cm_cite, "amplification": (1.0 / amp) if amp else None, "allowable_increase": inc,
            "capacity_basis": "IS801_allowable", "compression": comp, "bending": bend, "source": SRC}

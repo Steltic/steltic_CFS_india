@@ -1,0 +1,15 @@
+{
+ "found": true,
+ "query": "8.1 load combinations working stress",
+ "type": "exact_section",
+ "stem": "IS_875_Part_5_1987",
+ "hits": [
+  {
+   "found": true,
+   "doc": "IS_875_Part_5_1987",
+   "text": "ith the performance requirement of the structure. ## 8. LOAD COMBINATIONS - 8.0 General — A judicious combination of the loads ( specified in Parts 1 to 4 of this standard and earthquake ), keeping in view the probability of: - a) their acting together, and - b) their disposition in relation to other loads and severity of stresses or deformations caused by combinations of the various loads is necessary to ensure the required safcty and economy in the design of a structure. - 8.1 Load Combinations — Keeping the aspect specified in 8.0, the vari- 5. ous loads should, therefore, be combined in accordance with thestipulations in the relevant design codes. In the absence of such recommendations, the following loading combinations, whichever combination produces the most unfavourable effect in the building, foundation or structural member concerned may be adopted ( as a general guidance ). It should also be recognized in load combinations that the simultaneous occurrence of maximum values of wind, earthquake, imposed and snow loads is not likely. - a) DL - b) DL+IL - c) DL+WL - d) DL+EL - e) DL+TL - f) DL+IL+WL - g) DL+IL+EL *Code of practice for safety of buildings (general) : Materials and details of construction. <!-- pdf_page=19 printed_label=17 printed_label_qualified=17 part=standard --> - 71+71+TA (4 - j) DL+WL+TL - k) DL+EL+TL - m) DL+IL+WL+TL - n) DL+IL+EL+TL - (DL = dead load, IL imposed load, I'L = wind load, EL = earthquake load, TL temperature load ). Norx I — Whe",
+   "source": "engineering_rag_india/documents/standards/IS_875_Part_5_1987/markdown/IS_875_Part_5_1987.search.md"
+  }
+ ],
+ "note": "stored corpus hit for this retrieval row (C12 / L-13: consistency checks the quote against it)"
+}

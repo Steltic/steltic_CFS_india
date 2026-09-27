@@ -30,6 +30,7 @@ class Stub(JobWorkspace):
         self.answers = answers          # how -> number of hits it returns
         self.sent = []                  # every (query, collection, clause) that went out
         self.building = False
+        self._aliases_cache = {}        # no alias rung: the stub must not depend on a corpus on disk
 
     def log(self, tool, detail="", result=""):
         return {}

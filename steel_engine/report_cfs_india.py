@@ -36,6 +36,11 @@ def _f(v, d=3):
     return "-" if not isinstance(v, (int, float)) else ("%%.%df" % d) % v
 
 
+def _dcf(v, d=3):
+    """RR-BUG-3: a D/C for display -- 'not evaluated' when there is none."""
+    return _f(v, d) if isinstance(v, (int, float)) else "not evaluated"
+
+
 def _e(s):
     return html.escape(str(s if s is not None else "-"))
 
@@ -109,12 +114,12 @@ def build_report_cfs_india(name, cfg, pkg, root):
     # ---- 4 lateral frame ----
     out.append("<h2>4. Hot-rolled lateral frame (vendored HR India pipeline @ %s)</h2>" % _e(lat.get("vendored_commit")))
     if lat.get("report_html"):
-        rel = os.path.relpath(lat["report_html"], root) if os.path.isabs(lat["report_html"]) else lat["report_html"]
+        rel = (os.path.relpath(lat["report_html"], root) if os.path.isabs(lat["report_html"]) else lat["report_html"]).replace(os.sep, "/")
         out.append("<p>Full frame report: <a href='%s'>%s</a> (13 chapters: members, Section 12, connections, bases, drift, irregularity).</p>" % (_e(rel), _e(rel)))
     out.append(_t(["member group", "role", "section", "n", "governing combination", "D/C"],
-                  [(m["id"], m["role"], m["section"], m.get("n"), m.get("governing_combo"), _f(m.get("DC"))) for m in lat.get("members") or []]))
+                  [(m["id"], m["role"], m["section"], m.get("n"), m.get("governing_combo"), _dcf(m.get("DC"))) for m in lat.get("members") or []]))
     out.append(_t(["connection", "type", "D/C", "not evaluated"],
-                  [(c["id"], c["type"], _f(c.get("DC")), "; ".join(c.get("not_evaluated") or [])) for c in lat.get("connections") or []]))
+                  [(c["id"], c["type"], _dcf(c.get("DC")), "; ".join(c.get("not_evaluated") or [])) for c in lat.get("connections") or []]))
     dt = lat.get("drift_table") or []
     out.append(_t(["storey", "dir", "drift", "limit", "ok"], [(d["storey"], d["dir"], _f(d["drift"], 5), d["limit"], _ok(d["ok"])) for d in dt]))
     cd = lat.get("capacity_design") or {}
@@ -126,7 +131,7 @@ def build_report_cfs_india(name, cfg, pkg, root):
     out.append("<h2>5. Cold-formed members (IS 801:1975 working stress, IS 811:1987 sections)</h2>")
     for m in pkg.get("cfs_members") or []:
         out.append("<h3>%s -- %s (%s), Fy %s MPa, spacing %s mm, length %s mm, <b>D/C %s</b> (%s)</h3>"
-                   % (_e(m["id"]), _e(m["designator"]), _e(m.get("role")), m.get("Fy_MPa"), m.get("spacing_mm"), m.get("length_mm"), _f(m.get("DC")), _ok(m.get("ok"))))
+                   % (_e(m["id"]), _e(m["designator"]), _e(m.get("role")), m.get("Fy_MPa"), m.get("spacing_mm"), m.get("length_mm"), _dcf(m.get("DC")), _ok(m.get("ok"))))
         if m.get("wind"):
             out.append("<p class='note'>wind: %s</p>" % _e(m["wind"]))
         if m.get("axial"):
@@ -138,9 +143,21 @@ def build_report_cfs_india(name, cfg, pkg, root):
                         _ok(c.get("ok")) + (" (info)" if c.get("informational") else ""), c.get("clause")) for c in m.get("checks") or []]))
     # ---- 6 diaphragm ----
     out.append("<h2>6. Diaphragm path to the frame lines</h2>")
-    out.append(_t(["storey", "dir", "F EQ (kN)", "F W (kN)", "governing", "unit shear (kN/m)", "chord (kN)", "capacity", "result"],
-                  [(r["storey"], r["dir"], _kN(r["F_EQ_N"]), _kN(r["F_W_N"]), r["governing"], _f(r["v_unit_kN_per_m"], 2), _f(r["chord_force_kN"], 1),
-                    r.get("capacity") or "found:false (EOR product / test value)", _ok(r.get("ok"))) for r in pkg.get("diaphragm") or []]))
+    out.append("<p class='note'>H3: unit shear = analysed line reaction / deck length along that line (HR line reactions, "
+               "rigid and flexible cases, EQ and W enveloped); the governing line is shown.</p>")
+    out.append(_t(["storey", "dir", "F EQ (kN)", "F W (kN)", "governing case", "line (m)", "R (kN)", "deck length (m)",
+                   "unit shear (kN/m)", "chord (kN)", "capacity", "result"],
+                  [(r["storey"], r["dir"], _kN(r["F_EQ_N"]), _kN(r["F_W_N"]), r.get("governing_case") or r["governing"],
+                    _f(r.get("governing_line_m"), 2), _f(r.get("governing_R_kN"), 1), _f(r.get("governing_deck_length_m"), 2),
+                    _f(r["v_unit_kN_per_m"], 2), _f(r["chord_force_kN"], 1),
+                    r.get("capacity") or "found:false (EOR product / test value)",
+                    _ok(r.get("ok")) if r.get("demand_evaluated") is not False else "NOT EVALUATED")
+                   for r in pkg.get("diaphragm") or [] if r.get("kind") != "collector"]))
+    coll = [r for r in pkg.get("diaphragm") or [] if r.get("kind") == "collector"]
+    if coll:                                                  # C03: re-entrant collectors
+        out.append(_t(["storey", "dir", "re-entrant line", "B_short / B (m)", "collector force (kN)", "capacity (kN)", "result"],
+                      [(r["storey"], r["dir"], r.get("line"), "%s / %s" % (_f(r.get("B_short_m"), 2), _f(r.get("B_m"), 2)),
+                        _f(r.get("F_collector_kN"), 2), r.get("capacity") or "found:false (EOR input)", _ok(r.get("ok"))) for r in coll]))
     # ---- 7 connections ----
     out.append("<h2>7. Cold-formed connections and anchors (IS 801 7.2 / 7.5)</h2>")
     cn = pkg.get("cfs_connections") or []

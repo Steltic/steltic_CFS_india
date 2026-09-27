@@ -1,0 +1,15 @@
+{
+ "found": true,
+ "query": "Table 1 residential imposed load",
+ "type": "exact_section",
+ "stem": "IS_875_Part_2_1987",
+ "hits": [
+  {
+   "found": true,
+   "doc": "IS_875_Part_2_1987",
+   "text": "from the analysis of loads resulting from: - weight of the probable assembly of persons; - weight of the probable accumulation of equipment and furnishing; - weight of the probable storage materials; and - impact factor, if any. <!-- pdf_page=9 printed_label=None printed_label_qualified=None part=standard --> <!-- recovered from PDF p.9 by manual transcription 2026-09-20; verified against page image --> **TABLE 1 IMPOSED FLOOR LOADS FOR DIFFERENT OCCUPANCIES** (*Clauses* 3.1, 3.1.1 and 4.1.1) | Sl No. | Occupancy classification | Uniformly distributed load (UDL), kN/m² | Concentrated load, kN | | --- | --- | --- | --- | | i) | **RESIDENTIAL BUILDINGS** | | | | i)(a) | Dwelling houses: | | | | i)(a)(1) | All rooms and kitchens | 2.0 | 1.8 | | i)(a)(2) | Toilet and bath rooms | 2.0 | — | | i)(a)(3) | Corridors, passages, staircases including fire escapes and store rooms | 3.0 | 4.5 | | i)(a)(4) | Balconies | 3.0 | 1.5 per metre run concentrated at the outer edge | | i)(b) | Dwelling units planned and executed in accordance with IS : 8888-1979* only: | | | | i)(b)(1) | Habitable rooms, kitchens, toilet and bathrooms | 1.5 | 1.4 | | i)(b)(2) | Corridors, passages and staircases including fire escapes | 1.5 | 1.4 | | i)(b)(3) | Balconies | 3.0 | 1.5 per metre run concentrated at the outer edge | | i)(c) | Hotels, hostels, boarding houses, lodging houses, dormitories, residential clubs: | | | | i)(c)(1) | Living rooms, bed rooms an",
+   "source": "engineering_rag_india/documents/standards/IS_875_Part_2_1987/markdown/IS_875_Part_2_1987.search.md"
+  }
+ ],
+ "note": "stored corpus hit for this retrieval row (C12 / L-13: consistency checks the quote against it)"
+}

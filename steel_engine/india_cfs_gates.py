@@ -33,6 +33,8 @@ US_RE = re.compile(r"\b(AISI|S100|S240|S400|ASCE\s*7|ASCE7|AISC\s*3[456][018]|SD
                    r"Omega_?0|\bpsf\b|\bplf\b|\bkip\b|\bksi\b|Risk Category|Table 12\.\d)", re.I)
 SFIA_RE = re.compile(r"^\d{3,4}[SsTtUuFfLl]\d{2,3}-\d{2,3}$")
 DEMAND_CAP_RE = re.compile(r"cap\s*=\s*max\(.*\*\s*1\.(15|25)|DC\"?\s*[:=]\s*0\.8\b|seeded D/C", re.I)
+BLOCKING_RE = re.compile(r"analysis|7\.7\.1|RSA|ESM|irregular|Table 5|Table 6|gate|Amd|flexible|diaphragm|torsion|drift|"
+                         r"system|Table 9|18168", re.I)
 AUTHORITY = "india_cfs_gates.design_status (CFS) over india_seismic_gates.design_status (vendored HR, lateral frame)"
 
 IS800_STEMS = ("IS_800_2007", "IS800", "IS_800", "engineering_standards_IS800", "IS_18168_2023", "IS18168")
@@ -176,16 +178,66 @@ def lateral_issues(pkg) -> list:
     if lat.get("error"):
         return ["lateral frame run error: %s" % lat["error"]]
     if str(st.get("status")).lower() != "complete":
-        return ["lateral frame (HR authority) status %s: %s" % (st.get("status"), r) for r in (st.get("reasons") or [])[:60]] or \
-               ["lateral frame (HR authority) status %s" % st.get("status")]
+        rs = list(st.get("reasons") or [])
+        if not rs:
+            return ["lateral frame (HR authority) status %s" % st.get("status")]
+        # C12 (CFS-B-02): blocking reasons first (analysis method / irregularity / gates), per-element duplicates grouped,
+        # and a count of the rest instead of a silent cut at 60
+        # RR-BUG-4: ranked by the HR reason class (india_seismic_gates.reason_class: analysis / irregularity / gates /
+        # evidence / system / other before the per-element rows); the cap keeps the first row of every class; the HR
+        # full count (n_reasons) is reported
+        n_all = int(st.get("n_reasons") or len(rs))
+        try:
+            from india_seismic_gates import REASON_CLASSES as _RCL, reason_class as _rcls
+            cls_of = _rcls
+            rank = lambda r: _RCL.index(_rcls(r))
+        except Exception:                                   # older vendored HR engine
+            cls_of = lambda r: "blocking" if BLOCKING_RE.search(str(r)) and not re.search(r"@(base-|conn-)?e\d", str(r)) \
+                else "elements"
+            rank = lambda r: 0 if cls_of(r) == "blocking" else 1
+        seen, uniq = {}, []
+        for r in rs:
+            key = re.sub(r"(e|base-e|conn-)\d+|\d+(\.\d+)?", "#", str(r))
+            if key in seen:
+                seen[key] += 1
+                continue
+            seen[key] = 1
+            uniq.append((key, r))
+        uniq.sort(key=lambda kr: rank(kr[1]))              # stable: HR order kept within a class
+        cap = 60
+        sel = uniq
+        if len(uniq) > cap:
+            firsts, seen_cls = set(), set()
+            for k, r in uniq:
+                c = cls_of(r)
+                if c not in seen_cls:
+                    seen_cls.add(c)
+                    firsts.add(k)
+            room = cap - len(firsts)
+            sel = []
+            for k, r in uniq:
+                if k in firsts:
+                    sel.append((k, r))
+                elif room > 0:
+                    sel.append((k, r))
+                    room -= 1
+        out = ["lateral frame (HR authority) status %s: %s%s" % (st.get("status"), r, (" (+%d similar)" % (seen[k] - 1)) if seen[k] > 1 else "")
+               for k, r in sel]
+        if len(uniq) > len(sel):
+            out.append("lateral frame (HR authority): %d reasons in total, ... and %d more (see lateral/STATUS.md)"
+                       % (n_all, len(uniq) - len(sel)))
+        return out
     return []
 
 
 def diaphragm_issues(pkg) -> list:
     out = []
     for r in pkg.get("diaphragm") or []:
-        if r.get("ok") is None or r.get("found") is False:
-            out.append("diaphragm storey %s %s: capacity not evaluated (%s)" % (r.get("storey"), r.get("dir"), r.get("note") or "found:false"))
+        if r.get("demand_evaluated") is False:           # H3: the line reactions / deck lengths were not found
+            out.append("diaphragm storey %s %s: demand not evaluated (%s)" % (r.get("storey"), r.get("dir"), r.get("note")))
+        elif r.get("ok") is None or r.get("found") is False:
+            out.append("%s storey %s %s: capacity not evaluated (%s)" % ("collector" if r.get("kind") == "collector" else "diaphragm",
+                                                                         r.get("storey"), r.get("dir"), r.get("note") or "found:false"))
         elif _dc(r) is not None and _dc(r) > 1.0:
             out.append("diaphragm storey %s %s: D/C %.2f > 1" % (r.get("storey"), r.get("dir"), _dc(r)))
     return out
@@ -203,6 +255,40 @@ def anchorage_issues(pkg) -> list:
             out.append("connection %s: no numeric demand / capacity" % a.get("id"))
         elif dc > 1.0 + 1e-9:
             out.append("connection %s: D/C %.3f > 1" % (a.get("id"), dc))
+    return out
+
+
+def audit_warnings(cfg) -> list:
+    """AUD-3 / AUD-4 WARNs (never blockers), with the vendored HR rules: a board / CFS diaphragm of the lateral frame
+    declared rigid with no stiffness basis and no 7.6.4 evaluation (india_diaphragm.light_diaphragm_rigid_findings);
+    the anchorage of the lateral-frame bases and of the portal base (asserted capacity without a derivation, concrete
+    breakout not delegated -- india_connection_design.anchorage_findings)."""
+    out = []
+    lf = cfg.get("lateral_frame") or {}
+    try:
+        import india_cfs_env  # noqa: F401  (vendored HR engine on sys.path)
+        import india_diaphragm as DIA
+        import india_connection_design as CD
+    except Exception as ex:                                     # pragma: no cover - vendored engine missing
+        return [("WARN", "AUD-3/4 rules unavailable: %s" % ex)]
+    if lf:
+        hr = {"diaphragm": lf.get("diaphragm", "rigid"), "diaphragm_7_6_4": lf.get("diaphragm_7_6_4"),
+              "diaphragm_stiffness": lf.get("diaphragm_stiffness"),
+              "flexible_diaphragm_analysis": lf.get("flexible_diaphragm_analysis"),
+              "flexible_diaphragm_eor": lf.get("flexible_diaphragm_eor"), "diaphragm_type": lf.get("diaphragm_type"),
+              "floor_system": lf.get("floor_system", "one-way: CFS joists (IS 801) span between the hot-rolled grid beams")}
+        hr.update({k: v for k, v in (lf.get("hr_cfg_extra") or {}).items() if k in hr})
+        out += DIA.light_diaphragm_rigid_findings(hr)
+        dd = (lf.get("hr_cfg_extra") or {}).get("delegated_design") or cfg.get("delegated_design")
+        out += CD.anchorage_findings({"connections": lf.get("connections") or {}, "delegated_design": dd})
+    base = (cfg.get("cfs_connections_spec") or {}).get("base")
+    if isinstance(base, dict) and base.get("anchors"):
+        an = dict(base["anchors"])
+        if an.get("embedment") is None and an.get("embedment_capacity_N") is not None:
+            an["embedment"] = {"capacity_N": an["embedment_capacity_N"], "source": an.get("embedment_source"),
+                               "cite": an.get("embedment_cite")}
+        out += [(s_, "portal base: " + m) for s_, m in CD.anchorage_findings(
+            {"connections": {"column_base": {"portal": {"anchors": an}}}, "delegated_design": cfg.get("delegated_design")})]
     return out
 
 
@@ -239,7 +325,13 @@ def design_status(cfg, pkg=None) -> dict:
         reasons += ["report grounding row MISSING: %s" % x for x in pkg["grounding_missing"]]
     if not reasons:
         status = "complete"
-    return {"status": status, "reasons": reasons, "n_reasons": len(reasons), "authority": AUTHORITY}
+    # AUD-3 / AUD-4: non-blocking warnings -- the HR lateral run's (7.6.4 label contradiction, anchorage) and the
+    # CFS-level preflight WARNs (board diaphragm declared rigid without a basis, portal anchorage)
+    warns = list((((pkg.get("lateral_frame") or {}).get("status") or {}).get("warnings")) or [])
+    warns += [m for s_, m in audit_warnings(cfg or {}) if m not in warns]
+    for r in pkg.get("diaphragm") or []:                   # H3: declared deck lengths along the lines (VERIFY)
+        warns += [m for m in (r.get("warnings") or []) if m not in warns]
+    return {"status": status, "reasons": reasons, "n_reasons": len(reasons), "authority": AUTHORITY, "warnings": warns}
 
 
 def complete_allowed(cfg, pkg=None) -> tuple:

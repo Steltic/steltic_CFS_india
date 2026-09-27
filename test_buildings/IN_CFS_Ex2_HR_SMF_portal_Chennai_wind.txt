@@ -1,13 +1,17 @@
 IN_CFS_Ex2 — single-span hot-rolled SMF portal warehouse with CFS secondaries, Chennai wind (India)
 
 Location: Chennai (Zone III — retrieve Z; soil medium). Wind governs — Chennai is INSIDE the 60 km east-coast
-cyclone belt (IS 875 Part 3 6.3.4: k4, Kd 1.0); retrieve Vb, terrain, Cpe / Cpi. Still retrieve IS 1893 and prove
+cyclone belt (IS 875 Part 3 6.3.4: k4 = 1.15 for an industrial structure -- a warehouse, wind_structure_class =
+'industrial' -- and Kd = 1.0, 7.2.1); retrieve Vb, terrain, Cpe / Cpi. Still retrieve IS 1893 and prove
 wind vs EQ.
+Occupancy: warehouse for general (non-food) goods -> I = 1.0 (IS 1893 Table 8 (iii); occupancy food_storage: False --
+a food-storage warehouse would be Table 8 (i), 1.5).
 
 Geometry (metres):
 - Single-span portal ~18 m clear x 6 m eave, pitched roof, frames at ~6 m, length ~48 m
 - Transverse: hot-rolled IS 800 moment portal (IS 808 beam sections), pinned or fixed bases declared
-- Longitudinal: hot-rolled braced bays (rod / angle X-bracing) in the side walls and roof plane
+- Longitudinal: hot-rolled braced bays with angle / CHS / WPB X-braces designed for compression (SCBF: IS 800 12.8,
+  KL/r <= 160, IS 18168 10.2 -- tension-only rods are not SCBF braces) in the side walls and roof plane
 - CFS secondaries to IS 801 / IS 811: purlins and girts at ~1.5 m spanning between frames, eave struts,
   fly braces to the rafter inner flange at the purlin spacing declared
 

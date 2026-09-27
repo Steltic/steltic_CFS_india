@@ -1,11 +1,15 @@
 IN_CFS_Ex13 — 4-storey senior-living apartments with a roof step, hot-rolled SCBF, Lucknow (India)
 
 Location: Lucknow (Zone III — retrieve Z; soil — retrieve). Wind: retrieve IS 875 Part 3 (Lucknow Vb) and compare to EQ.
+Occupancy: senior / independent-living apartments (residential), ~3,900 m2 -> I = 1.2 by owner ruling D8 (floor area
+> 2,000 m2 as the proxy for the Table 8 (ii) '> 200 persons'; persons not stated).
 
 Geometry (metres):
 - 4 storeys; L1 @ 3.2 m, typical @ 2.9 m; notched rectangle ~52 m x 20 m with an entry recess + roof step
-- East ~12 m mass only 3 storeys (flat roof); west mass 4 storeys (truss roof) — vertical irregularity (IS 1893
-  Table 6, stated); roof-step diaphragm transfer designed
+- East ~12 m mass only 3 storeys (flat roof); west mass 4 storeys (truss roof) — screen IS 1893 Table 6: the roof
+  step is a setback with a smaller upper mass, not a Table 6 (iii) vertical geometric irregularity (that needs the
+  LFRS dimension of a storey > 125 % of the storey below); screen the entry recess by the Table 5(ii) 15 % projection
+  test; roof-step diaphragm transfer designed
 - Hot-rolled braced frames in the long walls and the party / end walls both directions; CFS floor joists to the
   grid beams; CFS exterior studs at 400 mm with window openings framed by CFS headers, non-load-bearing
 - Snow N/A for Lucknow (found:false / N/A)
