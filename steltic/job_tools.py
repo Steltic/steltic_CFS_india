@@ -172,7 +172,7 @@ class JobWorkspace:
             counts[r["tool"]] = counts.get(r["tool"], 0) + 1
         return {"total_calls": len(recs), "counts_by_tool": counts, "entries": recs}
 
-    # ---------------- the retrieval policy (steltic_grokbot/skills/Skill_querying_PACKAGED.md) -------------
+    # ---------------- the retrieval policy (contract/QUERYING_IS_CORPUS.md) ----------------------------
     # The design agents are meant to ask the standards the way that policy says: an EXACT id when the
     # provision is known (`type` + the id alone + one document), a full-text query in the standard's
     # own words only to NAVIGATE to an id, one idea per query, never a sentence. The contract now
@@ -182,6 +182,7 @@ class JobWorkspace:
     # as exact-id F2 first, then fts «flexural strength compact I-shape lateral-torsional buckling»
     # narrowed to chapter F, and the saved hits say exactly that.
     POLICY_TYPES = ("exact_section", "exact_equation", "exact_table", "id", "fts", "keyword")
+    _TABLE_ID_RE = re.compile(r"\bTable\s+\d+[A-Za-z]?(?:\s*\([a-z]\))?", re.I)
     DOC_COLLECTIONS = {              # canonical doc stem -> the collection tag the report counts by
         "IS_801_1975": "engineering_standards_IS801", "IS801": "engineering_standards_IS801",
         "IS_811_1987": "engineering_standards_IS811", "IS811": "engineering_standards_IS811",
@@ -205,7 +206,9 @@ class JobWorkspace:
         qtype = (qtype or "").strip().lower()
         exact: list = []
         nav = ""
-        ch = (chapter or "").strip().upper()[:1]
+        ch = (chapter or "").strip().upper()
+        if ch[:1].isalpha():
+            ch = ch[:1]                                 # a lettered chapter (F, E, J); IS sections stay whole ("12")
         if qtype in ("exact_section", "exact_equation", "exact_table", "id"):
             # NEW-4: the clause wins over the sentence, and a sentence carrying an id sends the id only
             exact = [(qtype, self._explicit_id(qtype, (clause or q).strip()))]
@@ -221,7 +224,7 @@ class JobWorkspace:
                 exact = [("id", i) for i in ids]
                 if clause and clause.strip().upper() not in [i.upper() for _, i in exact]:
                     exact.insert(0, ("id", clause.strip()))
-                nav = re.sub(r"\s+", " ", self._QUERY_ID_RE.sub(" ", stripped)).strip(" ,;:-")
+                nav = re.sub(r"\s+", " ", self._QUERY_ID_RE.sub(" ", self._TABLE_ID_RE.sub(" ", stripped))).strip(" ,;:-")
                 if len(nav.split()) < 2:
                     nav = ""                            # nothing left to navigate with
         steps = [f"{k} {i}" if k != "id" else f"exact-id {i}" for k, i in exact]
@@ -325,7 +328,8 @@ class JobWorkspace:
         def attempt(label: str, q: str, coll: str, cl: str = "", ch: str = "", type_: str = ""):
             """Send one rung. -> (result | None, halt). `None` with halt=False means 'skipped,
             identical to a rung already sent'; halt=True means the server died and the run stops."""
-            key = (coll, (q or "").strip().lower(), (cl or "").upper(), (ch or "").upper(), type_)
+            key = (coll, (q or "").strip().lower(), (cl or "").upper(), (ch or "").upper(),
+                   "" if type_ in ("", "fts") else type_)   # the server full-texts an untyped query too
             if key in seen:
                 return None, False
             seen.add(key)
@@ -478,7 +482,7 @@ class JobWorkspace:
                     seen_ids.add(hid)
                     exact_hits.append(h)
         # the navigation query is narrowed to the chapter of the provision that was found
-        nav_ch = plan["chapter"] or next((i[:1].upper() for i in matched_ids if i[:1].isalpha()), "")
+        nav_ch = plan["chapter"] or next((i[:1].upper() for i in matched_ids if re.match(r"^[A-Za-z]\d", i)), "")
         if nav_ch and nav_ch != plan["chapter"]:
             plan["label"] = plan["label"].replace(f"fts «{plan['nav'][:60]}»", f"fts «{plan['nav'][:60]}» chapter {nav_ch}") if plan["nav"] else plan["label"]
         # ---- then ONE navigation query in the standard's own words, narrowed to the chapter ------
@@ -489,6 +493,10 @@ class JobWorkspace:
                                     type_=qtype if qtype in ("fts", "keyword") else "fts")
             if halt:
                 return dict(RAG_HALT)
+            if not ((nav_out or {}).get("results")) and ((nav_out or {}).get("not_tabulated")
+                                                         or (nav_out or {}).get("document_not_in_corpus")
+                                                         or "is not in the corpus" in str((nav_out or {}).get("note") or "")):
+                return self._not_found(query, collection, trail)
             for h in ((nav_out or {}).get("results") or []):
                 hid = str(h.get("id") or h.get("section") or id(h)) if isinstance(h, dict) else str(h)
                 if hid not in seen_ids:
@@ -502,6 +510,7 @@ class JobWorkspace:
             out["policy"] = plan["label"]
             if exact_hits:
                 out["exact_ids"] = matched_ids
+                out["exact_match"] = True          # an exact clause / table hit is final (R02)
             if exact_hits or len(nav_hits) >= ENOUGH:
                 return finish(out, collection, f"policy {plan['label']}", sent_q=plan["nav"] or "",
                               att=base["n"])
@@ -1026,7 +1035,7 @@ class JobWorkspace:
             res = [out]
         lines = [f"# RAG query: {query}", f"# collection: {collection}  |  hits: {len(res)}"]
         if isinstance(out, dict) and out.get("policy"):
-            lines.append(f"# sent to the QFM as: {out['policy']}")
+            lines.append(f"# sent to the corpus as: {out['policy']}")
         if via:
             # Which rung of the escalation ladder answered. Without it the saved file silently claims
             # the first phrasing worked, which is the one thing this provenance must never imply.

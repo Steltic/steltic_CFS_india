@@ -34,7 +34,8 @@ def test_system_prompt_mentions_us_bases_only_to_ban_them():
 def test_contract_files_are_india_and_us_material_is_quarantined():
     cdir = os.path.join(ROOT, "contract")
     live = sorted(f for f in os.listdir(cdir) if f.endswith(".md"))
-    assert live == ["AGENT_START.md", "CFS_REFERENCE.md", "DESIGN_EG_INDEX.md", "IS801_TOC.md", "IS_COLLECTIONS.md", "README_AGENT.md"]
+    assert live == ["AGENT_START.md", "CFS_REFERENCE.md", "DESIGN_EG_INDEX.md", "IS801_TOC.md", "IS_COLLECTIONS.md",
+                    "QUERYING_IS_CORPUS.md", "README_AGENT.md"]
     assert os.path.exists(os.path.join(cdir, "usa_reference", "AISI_TOC.md"))
     ref = open(os.path.join(cdir, "CFS_REFERENCE.md"), encoding="utf-8").read()
     assert "tests/test_wp3_ex1_ex5.py" in ref and "elastic_R1" in ref

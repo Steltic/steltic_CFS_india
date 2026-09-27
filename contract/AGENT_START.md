@@ -285,6 +285,16 @@ base carries a `concrete_breakout` record (satisfied by a `delegated_design` ite
 with criteria; otherwise a WARN) and the plate fy follows IS 2062 Table 3 for `t_plate_mm` (`plate_grade`, AUD-2).
 
 ## Corpus and search tool
+**How to query it:** the RETRIEVAL POLICY and **HOW TO QUERY THE IS CORPUS** (`contract/QUERYING_IS_CORPUS.md`)
+follow this contract in the prompt. In short:
+* one document per call (`doc`);
+* the exact id when you know the provision (`type="exact_section"` / `"exact_table"`, with `query` = the id alone:
+  `6.6.1.1`, `Table 6`, `CLR100X50X15X2`);
+* `type="fts"` only to navigate, in the standard's printed words;
+* a town's zone or wind speed: `fts` with the town name, in IS 1893 or IS 875-3.
+
+That file also lists the id formats, the traps and what each "not found" means.
+
 The standards search tool posts to the IS corpus server at `RAG_API_URL` (e.g. `http://127.0.0.1:8765/query`; the
 Steltic hub's IS corpus module serves it); `INDIA_CORPUS_ROOT` names the corpus folder. The corpus is the user's own,
 built in the hub from their licensed BIS PDFs. A miss reports `not_found_kind`: `no_specification_index` /

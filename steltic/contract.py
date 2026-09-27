@@ -83,9 +83,10 @@ The tool applies this policy to whatever you send and records the form it sent; 
    its applicability and its exceptions.
 5. Waves: (1) navigation + the core provisions -> (2) definitions, limits and the cross-references the
    results name -> (3) digit-by-digit verification of every factor that entered the calculation.
-6. Id formats: IS clauses are dotted numbers (5.2.1.1, 6.6.1.2, 7.5.3, 8.1); tables are bare numbers ("Table 2" -> "2");
-   IS 1893 Annex E / IS 875-3 Annex A are fetched by fts on the city name. Commentary does not exist in these codes;
-   a Note under a table is part of the table.
+6. Id formats: IS clauses are dotted numbers (5.2.1.1, 6.6.1.2, 7.5.3, 8.1); tables "Table 2" or "2" (keep a printed
+   sub-letter: "Table 9(c)"); an IS 811 section by its engine label (CLR100X50X15X2). IS 1893 Annex E / IS 875-3 Annex A
+   are fetched by fts on the town name alone, in THAT document. Commentary does not exist in these codes; a Note under
+   a table is part of the table. The full list, with the traps, is HOW TO QUERY THE IS CORPUS below.
 7. Never invent an id. found:false is an honest answer: narrow a query that was too broad, or ask for
    the parent section; do not fill the gap from memory. Every number in the calculation comes from a
    verbatim excerpt returned this session -- cite document, edition, section, table id and printed page.
@@ -104,6 +105,8 @@ def _read(name: str) -> str:
 def system_contract() -> str:
     return (_read("AGENT_START.md")
             + "\n\n" + RETRIEVAL_POLICY
+            + "\n\n===== HOW TO QUERY THE IS CORPUS (the full rules, id formats and traps) =====\n"
+            + _read("QUERYING_IS_CORPUS.md")
             + "\n\n===== WORKFLOW GUIDE (README_AGENT) =====\n" + _read("README_AGENT.md")
             + "\n\n===== IS 801 / IS 811 CLAUSE MAP (use for clause-anchored RAG queries) =====\n"
             + _read("IS801_TOC.md") + "\n\n" + _read("IS_COLLECTIONS.md")
