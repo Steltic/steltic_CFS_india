@@ -285,9 +285,9 @@ base carries a `concrete_breakout` record (satisfied by a `delegated_design` ite
 with criteria; otherwise a WARN) and the plate fy follows IS 2062 Table 3 for `t_plate_mm` (`plate_grade`, AUD-2).
 
 ## Corpus and search tool
-The standards search tool posts to the corpus server at `RAG_API_URL` (e.g. `http://127.0.0.1:8765/query`; start it in
-the corpus checkout with `python3 scripts/serve_http.py --host 127.0.0.1 --port 8765`); `INDIA_CORPUS_ROOT` names the
-corpus checkout (default: a sibling `engineering_rag_india`). A miss reports `not_found_kind`: `no_specification_index` /
+The standards search tool posts to the IS corpus server at `RAG_API_URL` (e.g. `http://127.0.0.1:8765/query`; the
+Steltic hub's IS corpus module serves it); `INDIA_CORPUS_ROOT` names the corpus folder. The corpus is the user's own,
+built in the hub from their licensed BIS PDFs. A miss reports `not_found_kind`: `no_specification_index` /
 `document_not_in_corpus` (corpus gaps, not evidence of absence), `not_tabulated` (the corpus answered: no table row — e.g.
 a town in neither IS 875-3 Annex A nor IS 1893 Annex E: read Fig. 1 at the site), `server_error` (`found: None`, retry —
 never report the provision as absent) or `term_absent_from_document` (the only "the standard lacks it"). A town not in

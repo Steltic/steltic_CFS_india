@@ -42,6 +42,10 @@ Branch `fix/2026-09-review`, based on the delivered 1.0.2 tree. Scope rows C01â€
   - If no reactions are available, the check fails closed.
 - **H3-T:** IS 1893 7.8.2 accidental torsion (0.05 b) is added to the rigid line reactions.
 
+## IS corpus (not distributed)
+
+The BIS standards corpus is not published with this repo, because the standards are copyright BIS. Build your own from your licensed PDFs in the Steltic hub (first pass, Docling). Then have a frontier LLM fix it using `CORPUS_FIX_LLM_INSTRUCTIONS.md`, and import the result back into the hub. See README, "IS corpus (standards grounding)". Without a corpus the engine still runs: retrievals return found:false, and COMPLETE needs EOR records.
+
 ## Commits (oldest first; subjects only â€” hashes change when the branch is replayed onto GitHub)
 - C01: IS 801 bending stress N-mm -> kgf-cm is x N_TO_KGF/10 (6.7 fbx/fby, 6.4.2 fbw); re-size Ex5 portal (CFS-A-01, CFS-A-11, E6)
 - C15: refuse lipped-zed (LZ) bending with found:false until principal-axis bending is implemented
@@ -89,3 +93,8 @@ Branch `fix/2026-09-review`, based on the delivered 1.0.2 tree. Scope rows C01â€
 - C16: re-vendor HR engine (GOLD-764 literal 7.6.4, GOLD-COLL collector accumulation)
 - H3: CFS diaphragm shear from the analysed line reactions / deck length along each line (audit round 5)
 - H3-T: IS 1893 7.8.2 accidental torsion in the rigid line reactions of the CFS diaphragm check
+- C16 + Windows: re-vendor HR consistency (AUD-1 path fix); report link uses '/' separators
+- X06 test (Windows): T1 parity rel 1e-3 -- near-mechanism frames (T1 5.9-6.9 s) differ ~1e-4 between LAPACK builds
+- Corpus: the IS corpus is the user's own; users build it in the Steltic hub
+- CORPUS_FIX_LLM_INSTRUCTIONS.md: the owner's instructions for the corpus fix pass (replaces the placeholder)
+- CORPUS_FIX_LLM_INSTRUCTIONS.md: final version (matches the hub's bundled corpus module: validate probes, optional scripts/*.json, Import fixed corpus tab)
