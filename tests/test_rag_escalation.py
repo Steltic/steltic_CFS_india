@@ -179,3 +179,36 @@ def test_is800_is_gated_by_purpose():
     assert not out.get("refused") and ws.wire[0]["collection"] == "engineering_standards_IS800"
     out = ws.search_engineering_standards("6", "", type="exact_table", doc="IS_800_2007", purpose="serviceability_limits_table6")
     assert not out.get("refused")
+
+
+# --- 2026-09-27: the policy on IS ids ------------------------------------------------------------------
+
+def test_a_printed_table_id_is_not_a_chapter_and_leaves_the_navigation_words():
+    config.RAG_API_URL = "http://stub"
+    ws = Exact(lambda q, c, cl, n: 5)
+    out = ws.search_engineering_standards("Table 9 response reduction factor", "engineering_standards_IS1893")
+    assert ws.wire[0]["clause"] == "Table 9" and ws.wire[0]["query"] == ""
+    assert ws.wire[1]["query"] == "response reduction factor" and ws.wire[1]["chapter"] == "", ws.wire
+    assert out.get("exact_match") is True
+
+
+def test_an_is_section_number_narrows_navigation_whole():
+    config.RAG_API_URL = "http://stub"
+    ws = Exact(lambda q, c, cl, n: 5)
+    ws.search_engineering_standards("web crippling single unreinforced web", COLL, type="fts", chapter="6")
+    ws2 = Exact(lambda q, c, cl, n: 5)
+    ws2.search_engineering_standards("storey drift limitation", "engineering_standards_IS1893", type="fts", chapter="7")
+    assert ws.wire[0]["chapter"] == "6" and ws2.wire[0]["chapter"] == "7"
+    ws3 = Exact(lambda q, c, cl, n: 5)
+    ws3.search_engineering_standards("bracing members", "engineering_standards_IS800", type="fts", chapter="12",
+                                     purpose="lateral_frame_is800")
+    assert ws3.wire[0]["chapter"] == "12", ws3.wire
+
+
+def test_the_same_words_are_not_sent_twice():
+    """The navigation step (type fts) and the legacy as-asked rung are the same question to the server."""
+    config.RAG_API_URL = "http://stub"
+    ws = _ws(lambda q, c, cl, n: 0)
+    ws.search_engineering_standards("snow load on roofs", "engineering_standards_IS875_P4")
+    qs = [w for w in ws.sent if w[0] == "snow load on roofs" and not w[2]]
+    assert len([w for w in ws.sent if w == ("snow load on roofs", "engineering_standards_IS875_P4", "")]) == 1, ws.sent

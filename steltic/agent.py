@@ -67,7 +67,7 @@ TOOL_SPECS = [
     _spec("new_activity_log", "Start a fresh activity log for a design run (call ONCE first).",
           {"building": {"type": "string", "description": "building name -> jobs/<name>/"}}, []),
     _spec("search_engineering_standards",
-          "Retrieve a provision from the India standards corpus (Query file manager) UNDER THE RETRIEVAL POLICY: "
+          "Retrieve a provision from the India standards corpus UNDER THE RETRIEVAL POLICY (contract/QUERYING_IS_CORPUS.md): "
           "one document per call, an EXACT id when you know the provision (type=exact_section|exact_table and "
           "query=the id ALONE, e.g. 6.6.1.1, 5.2.1.1, 8.1, table 9), and a full-text query (type=fts) only "
           "to NAVIGATE to an id -- in the standard's own printed words, one idea, no sentences. "
