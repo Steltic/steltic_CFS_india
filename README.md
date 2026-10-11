@@ -1,8 +1,22 @@
 # Steltic India CFS
 
-A free, open-source **India (IS/BIS) cold-formed steel design agent** that runs locally.
-Paste a design brief and watch the agent build an OpenSees model + a stamped-style HTML report +
-an interactive 3D viewer — **bringing your own LLM** (API base-url + key, held in memory only).
+[![License: MIT](https://img.shields.io/badge/License-MIT-orange.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/Steltic/steltic_CFS_india?color=orange)](https://github.com/Steltic/steltic_CFS_india/releases)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](pyproject.toml)
+
+![Steltic India CFS](docs/img/social_cfs.png)
+
+Cold-formed members (studs, tracks, joists, purlins, girts) to IS 801 and IS 811 with the lateral system designed as an IS 800 Section 12 braced or moment frame; IS 875 and IS 1893 loads.
+
+- **Start with the Hub:** most people install this module through
+  [Steltic Hub India](https://github.com/Steltic/steltic_hub_india), which sets everything up.
+- **See the output first:** 15 worked Indian designs with reports and 3D models at
+  [stelticai.com/india.html](https://stelticai.com/india.html).
+- **Setup video:** [YouTube](https://www.youtube.com/watch?v=lcKjj9wLcno).
+
+> Steltic assists with structural design but does not replace a licensed professional engineer. All output
+> must be independently verified.
+
 
 This repository is the **India CFS variant** of [Steltic/steltic_cfs](https://github.com/Steltic/steltic_cfs)
 (USA AISI/ASCE). Do **not** confuse the two. Design authority: **IS 801:1975** + **IS 811:1987**

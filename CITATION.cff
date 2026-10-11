@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Steltic India CFS: AI cold-formed steel design to IS 801 and IS 811"
+authors:
+  - name: "Steltic"
+version: "1.1.0"
+date-released: "2026-10-11"
+license: MIT
+repository-code: "https://github.com/Steltic/steltic_CFS_india"
+url: "https://stelticai.com/india.html"
+keywords: [structural engineering, steel design, IS 800, IS 1893, Indian Standards, OpenSees, AI agent]
