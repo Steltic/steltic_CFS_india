@@ -1,4 +1,4 @@
-"""india_cfs_portal.py -- the ALL-CFS portal frame path (owner ruling for CFS Ex5, Hyderabad Zone II; spec WP3.4).
+"""india_cfs_portal.py -- the ALL-CFS portal frame path (owner ruling for IN_CFS_Ex3, Hyderabad Zone II; spec WP3.4).
 
 N-mm throughout (E = 203 400 MPa = 2 074 000 kgf/cm2, IS 801 6.3; properties from is811_sections in mm; loads in
 N/mm from IS 875 kN/m2 pressures).  FAIL-CLOSED: no load_plan combinations -> raise; no IS 875-3 pressures

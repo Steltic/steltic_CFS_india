@@ -29,8 +29,8 @@ def test_build_hr_spec_keys_are_documented():
 
 
 def test_no_floor_span_240():
-    for p in ("contract/CFS_REFERENCE.md", "contract/DESIGN_EG_INDEX.md", "tests/fixtures/IN_CFS_Ex1/build_and_run.py",
-              "tests/fixtures/IN_CFS_Ex5/build_and_run.py"):
+    for p in ("contract/CFS_REFERENCE.md", "contract/DESIGN_EG_INDEX.md", "tests/fixtures/IN_CFS_Ex7/build_and_run.py",
+              "tests/fixtures/IN_CFS_Ex3/build_and_run.py"):
         for line in open(os.path.join(ROOT, p), encoding="utf-8"):
             if re.search(r"(span|L)/240", line, re.I) and re.search(r"floor", line, re.I):
                 raise AssertionError("%s: %s" % (p, line.strip()))

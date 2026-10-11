@@ -1,18 +1,18 @@
 {
   "_label": "EXAMPLE / not-for-construction",
   "_purpose": "CI / COMPLETE-gate exercise for IN_CFS_Ex13 — manufacturer vn + EOR-documented R. Do NOT treat values as project law or IS 801/1893 table lookups.",
-  "_building": "IN_CFS_Ex13_TypeII_perforated_4levels_Lucknow",
+  "_building": "IN_CFS_Ex13_SteelSheet_6levels_Zplan_Surat",
   "_disclaimer": "EXAMPLE only. Real jobs require LIVE RAG for IS 875/1893 load_plan and project-specific manufacturer/test vn + EOR R cite. Never auto-fill R from IS 800.",
-  "system": "wsp_perforated_typeII",
+  "system": "steel_sheet_shearwall",
   "jurisdiction": "india",
   "units": "N-mm",
   "R": 2.5,
   "R_source": "eor_documented",
-  "R_cite": "EXAMPLE EOR memo: CFS WSP Type II perforated SFRS absent from IS 1893 Part 1 Table 9 (found:false); project adopts R=2.5 with EOR concurrence — NOT an IS 800 OMRF proxy.",
+  "R_cite": "EXAMPLE EOR memo: CFS steel-sheet SFRS absent from IS 1893 Part 1 Table 9 (found:false); project adopts R=2.5 with EOR concurrence — NOT an IS 800 OMRF proxy.",
   "R_cfs_table9_found": false,
-  "wall_vn_plf_asd": 420.0,
+  "wall_vn_plf_asd": 680.0,
   "wall_vn_source": "manufacturer",
-  "wall_vn_cite": "EXAMPLE Acme CFS WSP Table B perforated — 12 mm OSB, adjusted Ca for ~60% full-height sheathing (not-for-construction; show adjustment calc)",
+  "wall_vn_cite": "EXAMPLE Acme CFS Steel Sheet Table C — 0.46 mm sheet, #8@75 mm o.c. perimeter (not-for-construction; substitute real manufacturer/test data)",
   "wall_vn_found": true,
   "seis": {
     "R": 2.5,
@@ -27,7 +27,7 @@
   "notes": {
     "amd1": "IS_811_1987_Amd1_2011 property deltas found:false when empty — does not alone block COMPLETE",
     "s400_omega0": "found:false / N/A — does not alone block COMPLETE",
-    "table9": "CFS WSP Type II perforated / light-gauge R row found:false in LIVE RAG",
-    "typeII": "Hold-downs at wall-line ends only; distributed track anchorage — EXAMPLE practice note under IS 801"
+    "table9": "CFS steel-sheet / light-gauge R row found:false in LIVE RAG",
+    "plan": "Z-plan throat collectors — EXAMPLE only"
   }
 }

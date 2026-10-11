@@ -52,7 +52,7 @@ def framed_area_issues(cfg):
     2026-09-26) geometry.floor_area_m2 -- the plan area of ONE framed level (a number = every level, or {level: m2};
     never a total over storeys: a value above the plan_x x plan_y bounding box is refused; voids are not subtracted),
     else geometry plan_x x plan_y minus the declared voids (gold.voids_m2 / geometry.voids_m2, number or {level: m2}).
-    A level the model drops silently leaves its gravity load and seismic weight out of the analysis (the Ex10 high-bay
+    A level the model drops silently leaves its gravity load and seismic weight out of the analysis (the IN_CFS_Ex4 high-bay
     roof)."""
     lf = cfg.get("lateral_frame") or {}
     geo = cfg.get("geometry") or {}

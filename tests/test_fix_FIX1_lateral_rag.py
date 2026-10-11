@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.join(ROOT, "steel_engine"))
 import india_cfs_env  # noqa: E402,F401
 import india_cfs_lateral as L  # noqa: E402
 
-FIX = os.path.join(ROOT, "tests", "fixtures", "IN_CFS_Ex1")
+FIX = os.path.join(ROOT, "tests", "fixtures", "IN_CFS_Ex7")
 
 
 def _hr_consistency():

@@ -110,8 +110,8 @@ def system_contract() -> str:
             + "\n\n===== WORKFLOW GUIDE (README_AGENT) =====\n" + _read("README_AGENT.md")
             + "\n\n===== IS 801 / IS 811 CLAUSE MAP (use for clause-anchored RAG queries) =====\n"
             + _read("IS801_TOC.md") + "\n\n" + _read("IS_COLLECTIONS.md")
-            + "\n\n===== WORKED-METHOD REFERENCE: IN_CFS_Ex1 (Delhi SCBF + IS 801 studs / joists) and "
-              "IN_CFS_Ex5 (Hyderabad all-CFS elastic portal) -- engine-reproducible, asserted by pytest =====\n"
+            + "\n\n===== WORKED-METHOD REFERENCE: IN_CFS_Ex7 (Delhi SCBF + IS 801 studs / joists) and "
+              "IN_CFS_Ex3 (Hyderabad all-CFS elastic portal) -- engine-reproducible, asserted by pytest =====\n"
             + _read("CFS_REFERENCE.md")
             + "\n\n===== CHECK -> CLAUSE -> ENGINE INDEX =====\n"
             + _read("DESIGN_EG_INDEX.md"))

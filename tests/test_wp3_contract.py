@@ -25,7 +25,7 @@ def test_system_prompt_mentions_us_bases_only_to_ban_them():
     bad = [p[:200] for p in _paragraphs(sp) if US.search(p) and not BAN.search(p)]
     assert not bad, bad
     for s in ("IS 801:1975", "IS 811:1987", "IS 875", "IS 1893", "IS 800:2007", "IS 18168", "lateral_frame_is800",
-              "elastic_R1", "calc_package_cfs.json", "IN_CFS_Ex1", "IN_CFS_Ex5", "design_status"):
+              "elastic_R1", "calc_package_cfs.json", "IN_CFS_Ex7", "IN_CFS_Ex3", "design_status"):
         assert s in sp, s
     assert "cfs_design_examples" not in contract.DRIVER_PREAMBLE
     assert "[missing" not in sp

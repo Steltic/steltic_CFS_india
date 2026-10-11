@@ -16,7 +16,7 @@ programme rulings D3 and D5 and by lead ruling L7 — you do not choose a differ
   no sheathed shear walls, strap-braced walls, gypsum walls, perforated (Type II) walls or CFS special
   bolted moment frames in this programme — those are foreign systems with no IS basis and the framework
   refuses a cfg that declares one.
-* **The one all-CFS lateral case** (the Hyderabad two-span portal, brief Ex5) is designed ELASTICALLY:
+* **The one all-CFS lateral case** (the Hyderabad two-span portal, brief IN_CFS_Ex3) is designed ELASTICALLY:
   R = 1.0 stated in the report, IS 800 Section 12 not applicable, wind governs. `cfg['all_cfs_portal'] = True`,
   `cfg['portal']['seismic_basis'] = 'elastic_R1'`. Any other all-CFS lateral system is refused.
 
@@ -109,7 +109,7 @@ and the item is listed in `cfg['eor_inputs']`.
 A `found: false` row is an honest answer; a cite that contains "EXAMPLE" or "not-for-construction" turns the
 whole job into `example_only`. Never invent a clause number, a table value or a zone.
 
-## The cfg schema (metres / kN/m²) — see `tests/fixtures/IN_CFS_Ex1/build_and_run.py` and `.../IN_CFS_Ex5/...`
+## The cfg schema (metres / kN/m²) — see `tests/fixtures/IN_CFS_Ex7/build_and_run.py` and `.../IN_CFS_Ex3/...`
 ```python
 cfg = {
   "name": name, "jurisdiction": "india", "units": "m", "design_basis": "IS801_WSM", "brief": "...",
@@ -139,7 +139,7 @@ cfg = {
                 "combinations": "auto", "cfs_combinations": "auto", "retrieval": [...]},
 }
 ```
-All-CFS elastic portal (Ex5 only): `"all_cfs_portal": True`, `"portal": {"spans_m", "eave_m", "apex_m", "spacing_m",
+All-CFS elastic portal (IN_CFS_Ex3 only): `"all_cfs_portal": True`, `"portal": {"spans_m", "eave_m", "apex_m", "spacing_m",
 "n_frames", "length_m", "girt_spacing_m", "purlin_spacing_m", "base", "opening_ratio", "seismic_basis": "elastic_R1",
 "knee_brace"}`, optional `"mezzanine"`, `"cfs_members"` with `columns` / `rafters` / `knee_braces` / `purlins` / `girts` /
 `joists` / `mezzanine_posts`, `"connections"` (IS 801 7.5 bolt groups at knee / apex, base plates), `"longitudinal_bracing"`.
@@ -273,7 +273,7 @@ Sections are IS 811 labels only (`CLR…`, `CLS…`, `CWR…`, `CWS…`, `EA…`
 * Floor deflection criterion: IS 800 Table 6 "other buildings, floor": span/300 (elements not susceptible to cracking) or
   span/360 (susceptible) — span/240 is the industrial row, not a floor of an ordinary building.
 
-**All-CFS portal** (`cfg['portal']`, Ex5): gable wind uses IS 875-3 Table 5 of the building (θ 90: C − D);
+**All-CFS portal** (`cfg['portal']`, IN_CFS_Ex3): gable wind uses IS 875-3 Table 5 of the building (θ 90: C − D);
 `mezzanine.beams` = `{section, n_ply, span_mm, trib_width_mm, bearing_mm, compression_flange_restrained,
 deflection_limit_ratio}` (IS 801 6.1–6.5; undeclared → not evaluated); posts of a self-braced mezzanine carry the bracing
 overturning axial under EL; `cfs_connections_spec.base.anchors.embedment_capacity_N` + `embedment_source` +

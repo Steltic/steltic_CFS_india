@@ -1,4 +1,4 @@
-"""GOLD-COLL (IN_CFS_Ex9, lead decision 2): lateral_frame.diaphragm_by_level (per-level rigid / flexible labels, e.g.
+"""GOLD-COLL (IN_CFS_Ex14, lead decision 2): lateral_frame.diaphragm_by_level (per-level rigid / flexible labels, e.g.
 a composite podium rigid under flexible CFS floors) reaches the HR run, whose flexible levels accumulate the deck shear
 along each braced line into the braced bays (IS 1893 (Part 1):2016 7.6.4 tributary distribution)."""
 import os
@@ -11,7 +11,7 @@ import india_cfs_lateral as L   # noqa: E402
 
 
 def _cfg():
-    fix = os.path.join(ROOT, "tests", "fixtures", "IN_CFS_Ex1")
+    fix = os.path.join(ROOT, "tests", "fixtures", "IN_CFS_Ex7")
     sys.path.insert(0, fix); sys.modules.pop("build_and_run", None)
     import build_and_run as Bx
     sys.path.remove(fix)

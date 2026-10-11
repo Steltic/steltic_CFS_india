@@ -1,11 +1,11 @@
 # India CFS worked reference — two engine-reproducible buildings (asserted by pytest)
 
 Both buildings are run end-to-end by `tests/test_wp3_ex1_ex5.py` from the fixtures
-`tests/fixtures/IN_CFS_Ex1/build_and_run.py` and `tests/fixtures/IN_CFS_Ex5/build_and_run.py`; the numbers below are
+`tests/fixtures/IN_CFS_Ex7/build_and_run.py` and `tests/fixtures/IN_CFS_Ex3/build_and_run.py`; the numbers below are
 the ones the tests assert (tolerances in the test file). They are the worked METHOD to mirror — never copy a number
 into another building.
 
-## A. IN_CFS_Ex1 — 4-storey residential, New Delhi: hot-rolled SCBF + IS 801 studs / joists
+## A. IN_CFS_Ex7 — 4-storey residential, New Delhi: hot-rolled SCBF + IS 801 studs / joists
 
 **Problem.** 12 m × 8 m plan, 4 × 3.0 m storeys, residential (48 persons). New Delhi: IS 1893 Annex E Zone IV,
 Z = 0.24, soil Type II; IS 875-3 Annex A Vb = 47 m/s, terrain category 3, inland (Kd 0.9, k4 1.0). Loads: floor
@@ -50,7 +50,7 @@ used"), IL 2.0 (IS 875-2 Table 1), roof D 1.0, Lr 0.75, cladding 0.5 kN/m².
    consistency empty; report has no US strings and prints IS 801:1975, IS 811:1987, IS 875 (Part 3):2015,
    IS 1893 (Part 1):2016, IS 800:2007, IS 18168:2023 and "Ah =".
 
-## B. IN_CFS_Ex5 — two-span ALL-CFS portal warehouse + mezzanine, Hyderabad: elastic (R = 1.0)
+## B. IN_CFS_Ex3 — two-span ALL-CFS portal warehouse + mezzanine, Hyderabad: elastic (R = 1.0)
 
 **Problem.** 2 × 12 m spans, eave 7.0 m, apex 8.4 m (13.1°), frames at 5.0 m, 7 frames (30 m), plan 24 × 30 m;
 general storage (I = 1.0). Hyderabad: Zone II, Z = 0.10, soil II; Vb 44 m/s, terrain 2, inland (Kd 0.9); no design
