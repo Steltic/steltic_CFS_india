@@ -5,6 +5,8 @@ Commit: **69701f6070706e5d2adc6fefaea16b42c9f4e221** [steltic_india main] (stelt
 
 **2026-10 re-sync:** the vendored files were rewritten together with `steltic_india` branch `fix/2026-10-peb-briefs` (the 2026-10 renumbering of the example briefs: brief ids in comments, docstrings and one message string; no logic change). Merged steltic_india commit: **(record after the steltic_india PR merges)**.
 
+**2026-10 PEB re-sync:** rewritten together with `steltic_india` branch `fix/2026-10-peb-tapered` (the PEB release: welded and web-tapered portal frames). Ten files changed (design_pipeline, engine3d, india_combos, india_connections, india_is800, india_is800_s12, report_india, roof_geometry, sections, static_model) and four are new (peb_build, peb_checks, peb_outputs, peb_report). The CFS gold runs are unchanged (gold pack REGRESSION_2026-10.md). Merged steltic_india commit: **(record after the steltic_india PR merges)**.
+
 Rules (IMPL_BRIEF conventions, spec WP1.14):
 - Every file in this folder is byte-identical to `work/hr/steel_engine/<same path>` at the commit above.
   `python3 scripts/check_vendored.py` compares sha256 per file and fails on any difference.
