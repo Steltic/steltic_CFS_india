@@ -1,6 +1,6 @@
 """India CFS P1 C5 — richer IS 811 grounding via seeded retrieval-plan templates.
 
-Problem (IN_CFS_Ex1): agents stopped at one vague FTS hit each to IS_811 and Amd1.
+Problem (IN_CFS_Ex7): agents stopped at one vague FTS hit each to IS_811 and Amd1.
 This helper expands a chosen CLR (or any IS 811 label / Type) into a multi-query plan
 of exact_table / exact_section calls so agents do not stop at 1 query.
 

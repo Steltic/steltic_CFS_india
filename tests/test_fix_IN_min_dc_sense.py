@@ -1,4 +1,4 @@
-"""IN-MIN-SENSE (gold issues IN_CFS_Ex13 / IN_CFS_Ex7, blocking): the CFS consistency recomputes a minimum-type row
+"""IN-MIN-SENSE (gold issues IN_CFS_Ex9 / IN_CFS_Ex13, blocking): the CFS consistency recomputes a minimum-type row
 (HR check record with sense '>=' / '>', value >= limit, e.g. IS 1893 7.7.5.2 "at least 90 percent" modal mass of the
 Table 5(ii) flexible run) as limit / value; every row without a sense stays a maximum-type row (|value| / limit)."""
 import os

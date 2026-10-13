@@ -1,6 +1,6 @@
 """O3 (owner ruling 2026-09-26): the C06 framed-area check falls back to geometry.floor_area_m2 before the plan_x x
 plan_y bounding box.  floor_area_m2 is the plan area of ONE framed level (number = every level, or {level: m2}; the
-CFS gold cfgs declare it per floor, e.g. IN_CFS_Ex6 A_FLOOR = 1558 m2 'per floor'); a value above the bounding box
+CFS gold cfgs declare it per floor, e.g. IN_CFS_Ex11 A_FLOOR = 1558 m2 'per floor'); a value above the bounding box
 (a total over storeys) is refused; voids are not subtracted from it."""
 from __future__ import annotations
 import os

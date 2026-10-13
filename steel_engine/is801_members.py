@@ -281,7 +281,8 @@ def compression_allowable(sec, Fy_MPa, KLx_mm, KLy_mm, KLt_mm=None, braced_again
     r_min = (sec.get("r_min") or min(sec["rx"], sec["ry"])) / 10.0
     klr_x, klr_y = KLx_mm / 10.0 / rx, KLy_mm / 10.0 / ry
     klr = max(klr_x, klr_y)
-    if sec.get("nonsymmetric"):
+    if sec.get("nonsymmetric") or sec.get("type") == "LZ":
+        # PEB (2026-10): a lipped zed buckles about its minor PRINCIPAL axis (r_min = r_v < r_y)
         klr = max(klr, max(KLx_mm, KLy_mm) / 10.0 / r_min)
     fa1, cl1 = fa1_kgf(Fy, Q, klr, form_b=form_b, t_mm=sec["t"])
     rec = {"Q": Q, "Qs": q["Qs"], "Qa": q["Qa"], "KLr_x": klr_x, "KLr_y": klr_y, "KLr": klr,
@@ -354,14 +355,21 @@ def fb_ltb_kgf(Fy_kgf, L_cm, d_cm, Iyc_cm4, Sxc_cm3, Cb=1.0, zed=False):
     return k2 * pe * d_cm * Iyc_cm4 / (L_cm ** 2 * Sxc_cm3), "6.3(%s) elastic: %.1f pi^2 E Cb d Iyc/(L^2 Sxc)" % ("b" if zed else "a", k2)
 
 
-def bending_allowable(sec, Fy_MPa, L_unbraced_mm, Cb=1.0, wind_eq=False, compression_flange_restrained=False):
+def bending_allowable(sec, Fy_MPa, L_unbraced_mm, Cb=1.0, wind_eq=False, compression_flange_restrained=False,
+                      zed_basis=None):
     """Allowable bending stress Fb (MPa) about x-x and moment Ma (N-mm) for an IS 811 channel / zed / hat:
     min(F = 0.6 Fy (6.1), 6.2 Fc of unstiffened compression elements, 6.3 LTB) on the effective section modulus
-    (5.2.1.1 widths at the resulting stress).  Iyc = Iy/2 for sections symmetric about x (6.3 definition)."""
+    (5.2.1.1 widths at the resulting stress).  Iyc = Iy/2 for sections symmetric about x (6.3 definition).
+    PEB (2026-10): a lipped zed (LZ) is evaluated only with a declared zed_basis -- the statement that the zed bends
+    about its geometric x-x axis because the sheeting through-fastened to one flange restrains it laterally (the
+    flange in compression restrained by the sheeting, compression_flange_restrained=True), or that the free flange is
+    held at the declared unbraced length (anti-sag rods / flange braces) for the IS 801 6.3(b) zed buckling stress
+    (0.18 / 0.9 pi^2 E Cb / Fy limits, Iyc = Iy/2 of the point-symmetric section about the axis parallel to the web).
+    Without it the zed is refused (C15)."""
     Fy = Fy_MPa * MPA_TO_KGF
     F = 0.60 * Fy
     typ = sec["type"]
-    if typ == "LZ":
+    if typ == "LZ" and not zed_basis:
         # C15: a lipped zed bent about x-x (web normal) is not bent about a principal axis (tan alpha != 0): the stress
         # needs the principal-axis (u-v) resolution / lateral restraint statement that this module does not implement.
         # Refused (found:false) rather than returning a single-axis Fb and Ma that look evaluated.
@@ -414,6 +422,8 @@ def bending_allowable(sec, Fy_MPa, L_unbraced_mm, Cb=1.0, wind_eq=False, compres
             Ix_e = Ix - dA * yf ** 2 - (A - dA) * ybar ** 2
             Sx_eff = Ix_e / (d / 2.0 - ybar)
     inc = INCREASE_WL_EL if wind_eq else 1.0
+    if typ == "LZ":
+        notes.append("lipped zed: geometric x-x bending (%s)" % zed_basis)
     return {"Fb_kgf_cm2": Fb, "Fb_MPa": Fb * KGF_CM2, "Fb1_kgf_cm2": fb1, "Fb1_MPa": fb1 * KGF_CM2,
             "Sxc_cm3": Sxc, "Sx_eff_cm3": Sx_eff, "Iyc_cm4": Iyc, "Cb": Cb, "ltb_clause": ltb_cl, "notes": notes,
             "lip_5221": lip, "allowable_increase": inc, "Fb_design_MPa": Fb * KGF_CM2 * inc,
@@ -520,7 +530,7 @@ def fe_prime_kgf(KLr):
 
 def combined_67(sec, Fy_MPa, P_N, Mx_Nmm, KLx_mm, KLy_mm, L_unbraced_mm, cm_case="braced", M1_over_M2=None,
                 braced_against_twist=False, wind_eq=False, KLt_mm=None, Cb=1.0, e_side=None,
-                compression_flange_restrained=False, My_Nmm=0.0, Fby_MPa=None):
+                compression_flange_restrained=False, My_Nmm=0.0, Fby_MPa=None, zed_basis=None):
     """IS 801 6.7 interaction for an IS 811 member (bending about x, the axis of symmetry for channels).
     6.7.1 for doubly-symmetric / braced-against-twist members; 6.7.2 (a) for singly-symmetric members loaded in the
     plane of symmetry; 6.7.2 (b) (positive eccentricity, sigma_TF) is NOT evaluated: ok=None with the reason when
@@ -530,7 +540,7 @@ def combined_67(sec, Fy_MPa, P_N, Mx_Nmm, KLx_mm, KLy_mm, L_unbraced_mm, cm_case
     if comp.get("ok") is None:
         return dict(comp, dc=None, value=None, limit=None)
     bend = bending_allowable(sec, Fy_MPa, L_unbraced_mm, Cb=Cb, wind_eq=wind_eq,
-                             compression_flange_restrained=compression_flange_restrained)
+                             compression_flange_restrained=compression_flange_restrained, zed_basis=zed_basis)
     if bend.get("ok") is None:
         return dict(bend, dc=None, value=None, limit=None, clause="IS 801 6.7 / " + str(bend.get("clause")))
     inc = INCREASE_WL_EL if wind_eq else 1.0

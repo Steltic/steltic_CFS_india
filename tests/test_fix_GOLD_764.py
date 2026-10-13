@@ -1,4 +1,4 @@
-"""GOLD-764 (IN_CFS_Ex9, lead decision 1): the CFS diaphragm rows carry the HR flexible run's IS 1893 (Part 1):2016
+"""GOLD-764 (IN_CFS_Ex14, lead decision 1): the CFS diaphragm rows carry the HR flexible run's IS 1893 (Part 1):2016
 7.6.4 record on the code-literal ratio -- deviation from the chord / average displacement of the entire diaphragm
 (limit 1.2); the deviation / average storey drift is informative only (not the IS 1893 criterion)."""
 import os

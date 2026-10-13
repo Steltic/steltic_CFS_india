@@ -25,7 +25,7 @@ def test_runner_default():
 
 
 def _cfg():
-    fix = os.path.join(ROOT, "tests", "fixtures", "IN_CFS_Ex1")
+    fix = os.path.join(ROOT, "tests", "fixtures", "IN_CFS_Ex7")
     sys.path.insert(0, fix); sys.modules.pop("build_and_run", None)
     import build_and_run as Bx
     sys.path.remove(fix)

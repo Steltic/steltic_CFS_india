@@ -469,6 +469,105 @@ def _point_load_effects(pls, span, kind):
     return (max([abs(m) for m in Ms] or [0.0]), max(Ra, Rb))
 
 
+# ---------------------------------------------------------------------------------------------------------------
+# PEB (2026-10): lapped (continuous) purlins and girts
+# ---------------------------------------------------------------------------------------------------------------
+def continuous_unit_effects(n_spans, L, lap, nseg=24):
+    """Linear elastic continuous beam on n_spans equal spans L (pinned supports), uniform load w = 1 N/mm, the lap
+    zones (lap mm each side of every interior support) at 2 EI (two nested sections), elsewhere EI = 1 (results
+    scale with w; deflection with 1/EI).  Returns the moment / shear envelope at the governing positions:
+    {M_span_end, M_span_int (sagging +), M_support (hogging -, max over the interior supports), M_lap (moment at the
+    lap end, single section, with its sign), x_inflection (from the support), V_support (max), V_lap, R_int, R_end,
+    defl_end (x 1/EI), positions}."""
+    import numpy as _np
+    xs = set()
+    for sp in range(n_spans):
+        for k in range(nseg + 1):
+            xs.add(round(sp * L + L * k / nseg, 6))
+    for sp in range(1, n_spans):
+        for dx in (-lap, lap):
+            xs.add(round(sp * L + dx, 6))
+    xs = sorted(xs)
+    n = len(xs)
+
+    def EI_at(xm):
+        for sp in range(1, n_spans):
+            if abs(xm - sp * L) < lap - 1e-9:
+                return 2.0
+        return 1.0
+    K = _np.zeros((2 * n, 2 * n))
+    F = _np.zeros(2 * n)
+    els = []
+    for e in range(n - 1):
+        a, b = xs[e], xs[e + 1]
+        le = b - a
+        EI = EI_at(0.5 * (a + b))
+        k = EI / le ** 3 * _np.array([[12, 6 * le, -12, 6 * le], [6 * le, 4 * le ** 2, -6 * le, 2 * le ** 2],
+                                      [-12, -6 * le, 12, -6 * le], [6 * le, 2 * le ** 2, -6 * le, 4 * le ** 2]])
+        q = -1.0                                                                  # w = 1 N/mm downward (v up +)
+        fe = _np.array([q * le / 2.0, q * le ** 2 / 12.0, q * le / 2.0, -q * le ** 2 / 12.0])
+        idx = [2 * e, 2 * e + 1, 2 * e + 2, 2 * e + 3]
+        for i in range(4):
+            F[idx[i]] += fe[i]
+            for j in range(4):
+                K[idx[i], idx[j]] += k[i, j]
+        els.append((a, b, le, EI, idx, k, fe))
+    sup = [i for i, x in enumerate(xs) if any(abs(x - sp * L) < 1e-6 for sp in range(n_spans + 1))]
+    free = [d for d in range(2 * n) if not (d % 2 == 0 and d // 2 in sup)]
+    u = _np.zeros(2 * n)
+    u[free] = _np.linalg.solve(K[_np.ix_(free, free)], F[free])
+    # element end forces f = k u - fe (left end: f[0] shear up +, f[1] moment ccw +); sagging + :
+    # M(x) = -f[1] + f[0] x + q x^2 / 2, V(x) = f[0] + q x  (q = -1)
+    pts = []
+    for (a, b, le, EI, idx, k, fe) in els:
+        f = k.dot(u[idx]) - fe
+        V0, M0 = f[0], -f[1]
+        for t in (0.0, 0.25, 0.5, 0.75, 1.0):
+            x = t * le
+            pts.append((a + x, M0 + V0 * x - x * x / 2.0, V0 - x))
+    pts.sort()
+    out = {"n_spans": n_spans, "L_mm": L, "lap_mm": lap}
+    end_span = [p for p in pts if p[0] <= L + 1e-6]
+    int_span = [p for p in pts if L - 1e-6 <= p[0] <= 2 * L + 1e-6] if n_spans > 2 else end_span
+    out["M_span_end"] = max(p[1] for p in end_span)
+    out["M_span_int"] = max(p[1] for p in int_span) if n_spans > 1 else out["M_span_end"]
+    if n_spans > 1:
+        supm = []
+        for sp in range(1, n_spans):
+            near = [p for p in pts if abs(p[0] - sp * L) < 1e-6]
+            supm.append(min(p[1] for p in near))
+        out["M_support"] = min(supm)
+        lapm, xinf = [], []
+        for sp in range(1, n_spans):
+            for sgn in (-1, 1):
+                xl = sp * L + sgn * lap
+                near = min(pts, key=lambda p: abs(p[0] - xl))
+                lapm.append(near[1])
+                side = sorted([p for p in pts if (p[0] - sp * L) * sgn > 0 and abs(p[0] - sp * L) <= L / 2.0],
+                              key=lambda p: abs(p[0] - sp * L))
+                for p in side:
+                    if p[1] >= 0:
+                        xinf.append(abs(p[0] - sp * L))
+                        break
+        out["M_lap"] = min(lapm)
+        out["M_lap_max"] = max(lapm)
+        out["x_inflection_min_mm"] = min(xinf) if xinf else None
+        out["x_inflection_max_mm"] = max(xinf) if xinf else None
+        out["V_lap"] = max(abs(p[2]) for p in pts if any(abs(abs(p[0] - sp * L) - lap) < 1e-3 for sp in range(1, n_spans)))
+    else:
+        out.update(M_support=0.0, M_lap=0.0, M_lap_max=0.0, x_inflection_min_mm=None, x_inflection_max_mm=None, V_lap=0.0)
+    out["V_support"] = max(abs(p[2]) for p in pts)
+    R = []
+    for i in sup:
+        R.append(sum((k.dot(u[idx]) - fe)[0 if idx[0] == 2 * i else 2] for (a, b, le, EI, idx, k, fe) in els
+                     if idx[0] == 2 * i or idx[2] == 2 * i))
+    out["R_end"] = abs(R[0])
+    out["R_int"] = max(abs(r) for r in R[1:-1]) if len(R) > 2 else abs(R[0])
+    out["defl_max_per_EI"] = float(-min(u[0::2]))
+    # plain floats (numpy scalars would make the ok flags numpy booleans: 'np.False_ is not False')
+    return {k: (float(v) if isinstance(v, (_np.floating, _np.integer)) else v) for k, v in out.items()}
+
+
 def design_purlins(cfg, role="purlin", spec=None, tag=None):
     """Roof purlins (or wall girts with role='girt'): gravity (D + Lr / snow on the projection, declared point loads)
     and member-level wind (C02: element Ka, Table 6 / Table 5 governing Cpe, local strips, Cpi from openings;
@@ -500,6 +599,9 @@ def design_purlins(cfg, role="purlin", spec=None, tag=None):
     Lu_bot = _num(pu.get("L_unbraced_mm"), span)             # bottom flange between sag rods
     rows = []
     combos = [c for c in B.cfs_combinations(cfg.get("load_plan"), cfg) if c["fE"] == 0]
+    if str(pu.get("continuity") or "").lower() == "lapped":
+        return _design_lapped(cfg, role, pu, sec, fy, cite, span, s, wD, wL, wS, wW_up, wW_dn, mw, p_up, p_dn,
+                              Lu_top, Lu_bot, combos, tag)
     for c in combos:
         w_grav = c["fD"] * wD + c["fL"] * wL + c.get("fS", 0.0) * wS
         # wind sign: +fW with the suction pattern gives uplift, -fW the pressure pattern
@@ -532,6 +634,88 @@ def design_purlins(cfg, role="purlin", spec=None, tag=None):
     return _member_record(role, pu, sec, fy, combos, rows, extra, tag=tag)
 
 
+def _design_lapped(cfg, role, pu, sec, fy, cite, span, s, wD, wL, wS, wW_up, wW_dn, mw, p_up, p_dn, Lu_top, Lu_bot,
+                   combos, tag):
+    """PEB (2026-10): lapped (continuous) zed purlins / girts over n_spans equal spans with nested laps of lap_mm each
+    side of every interior support (continuous_unit_effects; laps at 2 EI).  Checked per working-stress combination
+    (IS 875-5 8.1 / IS 801 6.1.2): span (single section), lap end (single, moment + shear and 6.4.3 web bending +
+    shear), interior support (two nested sections: 2 x the single capacity), web crippling at the interior support
+    (two webs) and the end support; the flange in compression decides the restraint -- the flange fastened to the
+    sheeting is restrained (zed_basis), the free flange buckles over the sag-rod spacing (span, uplift) or over the
+    distance from the support to the point of contraflexure (hogging zones; spec 'L_unbraced_hog_mm' overrides)."""
+    n = int(pu.get("n_spans") or 5)
+    lap = float(pu.get("lap_mm") or 0.0)
+    ce = continuous_unit_effects(n, span, lap)
+    zb = pu.get("zed_basis") if sec.get("type") == "LZ" else (pu.get("zed_basis") or "channel")
+    L_hog = _num(pu.get("L_unbraced_hog_mm"), ce.get("x_inflection_max_mm") or span / 4.0)
+    rows = []
+    L2 = span ** 2
+    for c in combos:
+        w_grav = c["fD"] * wD + c["fL"] * wL + c.get("fS", 0.0) * wS
+        w = w_grav
+        if c["fW"] > 0:
+            w = w_grav + wW_up
+        elif c["fW"] < 0:
+            w = w_grav + wW_dn
+        we = bool(c["wind_eq"])
+        down = w >= 0
+        # continuous_unit_effects is for w = 1 N/mm on the actual spans: scale by w
+        Ms = max(ce["M_span_end"], ce["M_span_int"]) * w             # span (sagging for w > 0)
+        Ml = ce["M_lap"] * w                                          # lap end (hogging for w > 0)
+        Mu = ce["M_support"] * w                                      # support (hogging for w > 0)
+        Vs = ce["V_support"] * abs(w)
+        Vl = ce["V_lap"] * abs(w)
+        Ri = ce["R_int"] * abs(w)
+        Re = ce["R_end"] * abs(w)
+        # span: top flange in compression when w > 0 (restrained by the sheeting), else the free bottom flange
+        b1 = M.bending_allowable(sec, fy, Lu_top if down else Lu_bot, Cb=1.0, wind_eq=we,
+                                 compression_flange_restrained=(down and Lu_top == 0.0), zed_basis=zb)
+        rows.append(_row(c["label"], "6.1/6.2/6.3 bending, span (single, %s)" % ("gravity" if down else "uplift"),
+                         M._rec(abs(Ms), b1["Ma_Nmm"], b1["clause"], b1["cite"], allowable_increase=b1["allowable_increase"]),
+                         {"M_Nmm": round(Ms, 1), "w_N_per_mm": round(w, 4), "ltb": b1["ltb_clause"]}))
+        # lap end and support: hogging for w > 0 -> free flange in compression over the hogging length
+        b2 = M.bending_allowable(sec, fy, L_hog if down else Lu_top, Cb=1.0, wind_eq=we,
+                                 compression_flange_restrained=(not down and Lu_top == 0.0), zed_basis=zb)
+        rows.append(_row(c["label"], "6.1/6.2/6.3 bending, lap end (single)",
+                         M._rec(abs(Ml), b2["Ma_Nmm"], b2["clause"], b2["cite"], allowable_increase=b2["allowable_increase"]),
+                         {"M_Nmm": round(Ml, 1), "ltb": b2["ltb_clause"], "L_unbraced_mm": L_hog if down else 0.0}))
+        rows.append(_row(c["label"], "6.1/6.2/6.3 bending, interior support (2 nested sections)",
+                         M._rec(abs(Mu), 2.0 * b2["Ma_Nmm"], b2["clause"], b2["cite"] + "; lapped: 2 x single",
+                                allowable_increase=b2["allowable_increase"]),
+                         {"M_Nmm": round(Mu, 1)}))
+        rows.append(_row(c["label"], "6.4.1 web shear, lap end (single)", M.web_shear_64(sec, fy, Vl, wind_eq=we),
+                         {"V_N": round(Vl, 1)}))
+        sh2 = M.web_shear_64(sec, fy, Vs / 2.0, wind_eq=we)
+        rows.append(_row(c["label"], "6.4.1 web shear, interior support (2 webs, half each)", sh2, {"V_N": round(Vs, 1)}))
+        rows.append(_row(c["label"], "6.4.3 web bending + shear, lap end",
+                         M.web_bending_shear_643(sec, fy, abs(Ml), Vl, wind_eq=we)["combined"]))
+        rows.append(_row(c["label"], "6.5 web crippling, interior support (2 webs, half each)",
+                         M.web_crippling_65(sec, fy, Ri / 2.0, _num(pu.get("bearing_mm"), 100.0), end=False,
+                                            back_to_back=False, wind_eq=we), {"R_N": round(Ri, 1)}))
+        rows.append(_row(c["label"], "6.5 web crippling, end support",
+                         M.web_crippling_65(sec, fy, Re, _num(pu.get("bearing_mm"), 100.0), end=True,
+                                            back_to_back=False, wind_eq=we), {"R_N": round(Re, 1)}))
+    I = sec["Ix"]
+    wsv = max(wL + wS, abs(wW_up), wW_dn)
+    defl = ce["defl_max_per_EI"] * wsv / (E_MPA * I)
+    rows.append(_defl_row("service (max of IL, WL)", "deflection, lapped continuous (laps 2 EI)", defl, span, pu,
+                          "IS 800:2007 Table 6 purlins / girts span/150 (elastic cladding) when declared"))
+    extra = {"span_mm": span, "continuity": {"type": "lapped", "n_spans": n, "lap_mm": lap,
+                                             "coefficients_wL2": {k: round(ce[k] / L2, 4) for k in
+                                                                  ("M_span_end", "M_span_int", "M_support", "M_lap")},
+                                             "x_inflection_mm": [ce.get("x_inflection_min_mm"), ce.get("x_inflection_max_mm")],
+                                             "L_unbraced_hog_mm": L_hog,
+                                             "basis": "continuous beam, equal spans, laps 2 EI (india_cfs_members."
+                                                      "continuous_unit_effects)"},
+             "zed_basis": pu.get("zed_basis"),
+             "loads_N_per_mm": {"dead": wD, "live": wL, "snow": wS, "wind_up": wW_up, "wind_down": wW_dn},
+             "wind": {"member_pd": mw, "p_uplift_kNm2": p_up, "p_down_kNm2": p_dn, "cite": mw["cite"]},
+             "zone": pu.get("zone", "all"), "grade_cite": cite,
+             "clauses": ["IS 801 5.2.1.1", "6.1", "6.1.2", "6.2", "6.3(b) zeds", "6.4.1", "6.4.3", "6.5"],
+             "mass_kg_per_m": sec.get("mass_kg_m"), "lap_mass_factor": 1.0 + 2.0 * lap * (n - 1) / (n * span)}
+    return _member_record(role, pu, sec, fy, combos, rows, extra, tag=tag)
+
+
 def design_eave_strut(cfg, spec, tag=None):
     """C14: eave strut -- the longitudinal strut at the eave carrying the declared axial force (gable wind / EQ into the
     bracing, P_N + P_cite) with its own-weight bending; IS 801 6.6 / 6.7 with the 6.1.2 increase (W / EL force)."""
@@ -546,7 +730,9 @@ def design_eave_strut(cfg, spec, tag=None):
     Mx = wsw * L ** 2 / 8.0
     Lu = _num(spec.get("L_unbraced_mm"), L)
     r = M.combined_67(sec, fy, P, Mx, L, Lu, Lu, cm_case="transverse_unrestrained",
-                      braced_against_twist=(sec.get("n_ply", 1) == 2) or bool(spec.get("braced_against_twist")), wind_eq=True)
+                      braced_against_twist=(sec.get("n_ply", 1) == 2) or bool(spec.get("braced_against_twist")), wind_eq=True,
+                      compression_flange_restrained=bool(spec.get("compression_flange_restrained")),
+                      zed_basis=spec.get("zed_basis"))
     rows = []
     lab = "DL+1.0WL/EL (strut)"
     if "checks" not in r:

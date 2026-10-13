@@ -85,9 +85,9 @@ def check(cfg) -> list:
         if cfg.get("all_cfs_portal"):
             if po.get("seismic_basis") != "elastic_R1":
                 say("ERROR", "all-CFS portal: portal.seismic_basis must be 'elastic_R1' (R = 1.0, no ductility claimed; "
-                             "IS 800 Section 12 not applicable) -- owner ruling for CFS Ex5")
+                             "IS 800 Section 12 not applicable) -- owner ruling for IN_CFS_Ex3")
             if str(site.get("zone")).upper() != "II":
-                say("ERROR", "all-CFS elastic portal is ruled for Zone II (Hyderabad Ex5) only; Zones III-V portals are "
+                say("ERROR", "all-CFS elastic portal is ruled for Zone II (Hyderabad IN_CFS_Ex3) only; Zones III-V portals are "
                              "hot-rolled IS 800 SMF (D3)")
         elif not lf:
             say("ERROR", "portal in Zone %s needs cfg['lateral_frame'] (hot-rolled IS 800 SMF portal, D3) unless all_cfs_portal" % site.get("zone"))

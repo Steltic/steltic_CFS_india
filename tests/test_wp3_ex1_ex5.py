@@ -1,4 +1,4 @@
-"""WP3 -- end-to-end: IN_CFS_Ex1 (Delhi, hot-rolled SCBF + IS 801 studs / joists) and IN_CFS_Ex5 (Hyderabad, all-CFS
+"""WP3 -- end-to-end: IN_CFS_Ex7 (Delhi, hot-rolled SCBF + IS 801 studs / joists) and IN_CFS_Ex3 (Hyderabad, all-CFS
 elastic portal) through india_cfs_pipeline.design_and_report.  The fixtures are the CFS_REFERENCE worked buildings;
 the numbers asserted here are the contract's worked-method reference (contract/CFS_REFERENCE.md)."""
 import json
@@ -41,12 +41,12 @@ def _run(ex):
 
 @pytest.fixture(scope="module")
 def ex1():
-    return _run("Ex1")
+    return _run("Ex7")
 
 
 @pytest.fixture(scope="module")
 def ex5():
-    return _run("Ex5")
+    return _run("Ex3")
 
 
 def test_vendored_engine_is_byte_identical():
@@ -149,7 +149,7 @@ def test_ex5_all_cfs_portal(ex5):
 def test_ex5_fails_closed_without_pressures_or_combinations(ex5):
     import copy
     import india_cfs_portal as PO
-    fix = os.path.join(ROOT, "tests", "fixtures", "IN_CFS_Ex5")
+    fix = os.path.join(ROOT, "tests", "fixtures", "IN_CFS_Ex3")
     sys.path.insert(0, fix); sys.modules.pop("build_and_run", None)
     import build_and_run as Bx
     sys.path.remove(fix)
@@ -166,7 +166,7 @@ def test_ex5_portal_rerun_in_place_regenerates_its_viewer(ex5):
     """WP6-fix: a second design_and_report into the same outdir (the gold-standard packages are re-run in place) must not
     trip over the existing viewer_3d.html -- the portal path has no HR lateral root, so its SVG viewer is rebuilt."""
     import copy
-    fix = os.path.join(ROOT, "tests", "fixtures", "IN_CFS_Ex5")
+    fix = os.path.join(ROOT, "tests", "fixtures", "IN_CFS_Ex3")
     sys.path.insert(0, fix); sys.modules.pop("build_and_run", None)
     import build_and_run as Bx
     sys.path.remove(fix)

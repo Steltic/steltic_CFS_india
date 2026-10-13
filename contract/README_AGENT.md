@@ -58,7 +58,7 @@ The US design-example recipes (`rag_v2/usa_reference/cfs_models.jsonl`) are NOT 
 * `design_status` = `complete`.
 
 ## 5. Caveats — state these in any output
-* CFS members are gravity / wind members; the lateral system is the hot-rolled frame (or, Ex5, an elastic R = 1.0 portal).
+* CFS members are gravity / wind members; the lateral system is the hot-rolled frame (or, IN_CFS_Ex3, an elastic R = 1.0 portal).
 * Kw, sheathing attachment capacity, diaphragm allowable shear, anchor embedment, pedestal bearing are EOR / test inputs (VERIFY).
 * IS 811 Amendment 1 may be unindexed (found:false); catalogue rows failing the thin-wall validator are quarantined
   (`steel_engine/is811_quarantine.csv`) and cannot be used.

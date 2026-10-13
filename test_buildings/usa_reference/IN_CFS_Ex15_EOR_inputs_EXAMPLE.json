@@ -1,18 +1,19 @@
 {
   "_label": "EXAMPLE / not-for-construction",
-  "_purpose": "CI / COMPLETE-gate exercise for IN_CFS_Ex15 — EOR-documented R. Do NOT treat values as project law or IS 1893 Table 9.",
-  "_building": "IN_CFS_Ex15_ColdStorage_portal_Srinagar",
-  "_disclaimer": "EXAMPLE only. Real jobs require LIVE RAG for IS 875/1893 load_plan and project-specific EOR R cite. Never auto-fill R from IS 800. Wall vn N/A for portal/SBMF.",
-  "system": "portal",
-  "structure_kind": "portal",
+  "_purpose": "CI / COMPLETE-gate exercise for IN_CFS_Ex15 — manufacturer vn + EOR-documented R. Do NOT treat values as project law or IS 801/1893 table lookups.",
+  "_building": "IN_CFS_Ex15_SteelSheet_8levels_crossplan_Kolkata",
+  "_disclaimer": "EXAMPLE only. Real jobs require LIVE RAG for IS 875/1893 load_plan and project-specific manufacturer/test vn + EOR R cite. Never auto-fill R from IS 800.",
+  "system": "steel_sheet_shearwall",
   "jurisdiction": "india",
   "units": "N-mm",
   "R": 2.5,
   "R_source": "eor_documented",
-  "R_cite": "EXAMPLE EOR memo: CFS portal cold-storage SFRS absent from IS 1893 Part 1 Table 9 (found:false); project adopts R=2.5 with EOR concurrence — NOT an IS 800 OMRF proxy.",
+  "R_cite": "EXAMPLE EOR memo: CFS steel-sheet SFRS absent from IS 1893 Part 1 Table 9 (found:false); project adopts R=2.5 with EOR concurrence — NOT an IS 800 OMRF proxy.",
   "R_cfs_table9_found": false,
-  "wall_vn_found": false,
-  "wall_vn_note": "N/A — portal/SBMF frame (not WSP/steel-sheet/gypsum shearwall). C1 wall vn gate skipped.",
+  "wall_vn_plf_asd": 720.0,
+  "wall_vn_source": "manufacturer",
+  "wall_vn_cite": "EXAMPLE Acme CFS Steel Sheet Table C — 0.55 mm lower / 0.46 mm mid / 0.40 mm upper tiers, #8 perimeter (not-for-construction)",
+  "wall_vn_found": true,
   "seis": {
     "R": 2.5,
     "R_source": "eor_documented",
@@ -26,9 +27,8 @@
   "notes": {
     "amd1": "IS_811_1987_Amd1_2011 property deltas found:false when empty — does not alone block COMPLETE",
     "s400_omega0": "found:false / N/A — does not alone block COMPLETE",
-    "table9": "CFS portal cold-storage / cold-formed / light-gauge R row found:false in LIVE RAG",
-    "snow": "IS 875 Part 4 LIVE RAG required — EXAMPLE does not invent pg/Ct/drift",
-    "cold_service": "Freezer toughness / fastener note — EXAMPLE completeness check",
-    "strap_longitudinal": "Longitudinal straps may use EXAMPLE strap Tn if enlisted; portal vn N/A"
+    "table9": "CFS steel-sheet / light-gauge R row found:false in LIVE RAG",
+    "plan": "Cruciform re-entrant collectors — EXAMPLE only",
+    "height": "8-storey rod elongation in drift — EXAMPLE note"
   }
 }

@@ -1,6 +1,6 @@
 """India CFS complete-gap wave1: R eor_documented, manufacturer vn, IS811 depth alias.
 
-Toward COMPLETE on IN_CFS_Ex1/Ex2 without inventing IS tables or IS 800 OMRF R.
+Toward COMPLETE on IN_CFS_Ex7/IN_CFS_Ex1 without inventing IS tables or IS 800 OMRF R.
 Amd1 found:false and S400 Ω0 N/A must not alone block COMPLETE.
 """
 import json
@@ -108,7 +108,7 @@ def test_vn_manufacturer_ok_for_complete():
 
 
 def test_ex1_eor_inputs_example_exercises_complete_gate():
-    path = ROOT / "test_buildings" / "IN_CFS_Ex1_EOR_inputs_EXAMPLE.json"
+    path = ROOT / "test_buildings" / "IN_CFS_Ex7_EOR_inputs_EXAMPLE.json"
     assert path.exists()
     data = json.loads(path.read_text(encoding="utf-8"))
     assert "EXAMPLE" in data["_label"].upper() or "not-for-construction" in data["_label"].lower()

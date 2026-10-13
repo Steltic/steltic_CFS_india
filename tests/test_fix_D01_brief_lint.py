@@ -11,8 +11,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 TB = ROOT / "test_buildings"
 GLOB = "IN_CFS_Ex*_*.txt"
-CYCLONE = {"Ex2", "Ex7", "Ex11"}             # inside the IS 875-3 6.3.4 belt (Chennai, Surat, Visakhapatnam)
-REENTRANT = {"Ex6", "Ex7", "Ex8", "Ex9", "Ex10", "Ex11", "Ex12"}     # L / Z / T / U / L-junction / L / cruciform
+CYCLONE = {"Ex1", "Ex13", "Ex5"}             # inside the IS 875-3 6.3.4 belt (Chennai, Surat, Visakhapatnam)
+REENTRANT = {"Ex11", "Ex13", "Ex8", "Ex14", "Ex4", "Ex5", "Ex15"}     # L / Z / T / U / L-junction / L / cruciform
 BANNED = ("rod / angle X-bracing", "vertical irregularity (IS 1893 Table 6, stated)", "Table 8, clinic",
           "Table 8, owner ruling D8", "6.3.4: k4, Kd 1.0")
 
@@ -121,13 +121,13 @@ def test_banned_stale_phrases(p):
         assert ph not in t, "%s still says %r" % (p.name, ph)
 
 
-def test_ex2_scbf_braces_resist_compression():
+def test_ex1_scbf_braces_resist_compression():
     """B18: an SCBF brace resists compression (IS 800 12.8, KL/r <= 160); rods cannot."""
-    t = _flat(_text(next(p for p in BRIEFS if _id(p) == "Ex2")))
+    t = _flat(_text(next(p for p in BRIEFS if _id(p) == "Ex1")))
     assert "designed for compression" in t and "KL/r <= 160" in t
 
 
-def test_ex15_food_storage_importance():
+def test_ex2_food_storage_importance():
     """B17: cold storage of food -> Table 8 (i) food storage buildings, I = 1.5."""
-    t = _flat(_text(next(p for p in BRIEFS if _id(p) == "Ex15")))
+    t = _flat(_text(next(p for p in BRIEFS if _id(p) == "Ex2")))
     assert "I = 1.5" in t and "food_storage: True" in t

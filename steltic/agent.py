@@ -180,7 +180,7 @@ _R21_TABLE = ("R21 - the OpenSees docs RAG exists for exactly this. error -> cau
     "- rigidDiaphragm/'failed to add' -> constraint-handler mismatch; master missing mass; releasing a "
     "constrained DOF -> constraints('Transformation'); do NOT release diaphragm DOFs. Query: rigidDiaphragm.\n"
     "- KeyError 'heights_m'/'lateral_frame'/'cfs_members'/is811_sections.* -> FRAMEWORK-API guess, not OpenSees -> re-read the "
-    "India cfg schema in AGENT_START and india_cfs_lateral / india_cfs_portal docstrings (fixtures: tests/fixtures/IN_CFS_Ex1, Ex5).")
+    "India cfg schema in AGENT_START and india_cfs_lateral / india_cfs_portal docstrings (fixtures: tests/fixtures/IN_CFS_Ex7, IN_CFS_Ex3).")
 
 
 def _r21_track(ws, result):
@@ -642,7 +642,7 @@ def run_design(ws, executor, base_url, api_key, model, building, brief, max_tok=
         if re.search(r"portal", brief or "", re.I) and re.search(r"hyderabad", brief or "", re.I):
             user += ("\n\n[framework note] This is the ONE all-CFS portal brief: cfg['all_cfs_portal'] = True, "
                      "cfg['portal']['seismic_basis'] = 'elastic_R1' (R = 1.0 stated), IS 801 working stress, wind governs; "
-                     "see tests/fixtures/IN_CFS_Ex5/build_and_run.py for the schema.")
+                     "see tests/fixtures/IN_CFS_Ex3/build_and_run.py for the schema.")
         elif re.search(r"portal|warehouse|cold.?storage", brief or "", re.I):
             user += ("\n\n[framework note] A portal brief outside Hyderabad is a HOT-ROLLED IS 800 SMF portal "
                      "(SMRF R 5.0, h < 15 m) with cold-formed purlins / girts / mezzanine joists to IS 801; declare it "
@@ -956,7 +956,7 @@ def _milestones(name, args, result):
 # ---------------- MOCK design (offline pipe test) ----------------
 def _mock_design(ws, executor, building, brief):
     """Scripted run to exercise the sandbox pipe (no LLM): imports the India engines and computes one IS 801 hand value
-    (the CLR100X50X15X2 stud of the Ex1 reference building) -- no wall path, no portal LRFD combos (D3)."""
+    (the CLR100X50X15X2 stud of the IN_CFS_Ex7 reference building) -- no wall path, no portal LRFD combos (D3)."""
     yield {"type": "status", "text": "MOCK model -- scripted run to exercise the sandbox pipe (no LLM)"}
     seq = [
         ("new_activity_log", {"building": building}),

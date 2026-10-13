@@ -1,5 +1,7 @@
 # steltic-cfs-india 1.1.0 — 2026-09 review fixes
 
+> **Numbering note (2026-10):** this is a dated record. Example brief numbers in it (IN_ExN, IN_CFS_ExN and short forms such as Ex9) use the numbering **before** the 2026-10 renumbering. Map: `steltic_india/test_buildings/RENUMBERING_2026-10.md`.
+
 Branch `fix/2026-09-review`, based on the delivered 1.0.2 tree. Scope rows C01–C16, the CFS side of H22, H30 and R01–R04, the CFS part of X01, X02 and X06, D01, D04 and D05, and the re-run fixes (RR-BUG-3, RR-BUG-4, RR-BUG-6, DOCS-OPEN-1).
 
 `steel_engine/hr_vendor/` is re-vendored from steltic_india `fix/2026-09-review`; `VENDORED_FROM.md` records the exact commit. After steltic_india is merged, re-run `scripts/check_vendored.py` against the merged HR checkout.
