@@ -512,7 +512,8 @@ def _wind_pd(cfg, z_m):
 
 def _member_record(role, spec, sec, fy, combos, checks_by_combo, extra=None, tag=None):
     # the member D/C is the strength / serviceability ratio; detailing limits (IS 801 5.2.3 / 5.2.4 geometry, 8.2.1 brace
-    # spacing) keep their own rows and block when they fail, but do not set the member D/C
+    # spacing) and the brace elements (sag rods, straps) keep their own rows and block when they fail, but do not set the
+    # member D/C
     dcs = [c["dc"] for c in checks_by_combo if isinstance(c.get("dc"), (int, float)) and not c.get("informational")
            and not c.get("detailing")]
     unevaluated = [c for c in checks_by_combo if c.get("ok") is None and not c.get("informational")]
@@ -580,6 +581,8 @@ def _stamp_restraint(rows, text):
 
 def _defl_row(combo, check, defl, span, spec, cite):
     crit = spec.get("deflection_limit_ratio")
+    if crit:                                     # a declared criterion makes it a real check, not information
+        check = check.replace(" (information)", "")
     return {"combo": combo, "check": check, "value": round(defl, 2), "units": "mm",
             "limit": (span / float(crit)) if crit else None, "dc": (defl / (span / float(crit))) if crit else None,
             "ok": (defl <= span / float(crit)) if crit else None,
@@ -804,7 +807,7 @@ def bracing_rows(cfg, spec, sec, role, span, s, br, w_max, w_par=0.0, sheeted=Tr
     bsp = br.get("spec") or {}
     n, n_how = _members_per_line(cfg, spec, role, s, br)
     per_member = bf["P1_int_N"] + abs(w_par) * a + abs(w_vert_member) * a
-    F = n * per_member
+    F = round(n * per_member, 1)                 # rounded once: value and D/C of the brace rows agree exactly
     if typ == "sag_rods":
         fy_r = _num(bsp.get("rod_fy_MPa"), 250.0); fu_r = _num(bsp.get("rod_fu_MPa"), 410.0)
         dmin = _num(bsp.get("min_rod_dia_mm"), 12.0)
@@ -820,14 +823,31 @@ def bracing_rows(cfg, spec, sec, role, span, s, br, w_max, w_par=0.0, sheeted=Tr
                      "value": round(F, 1), "limit": round(pick["T_allow_N"], 1), "dc": F / pick["T_allow_N"],
                      "ok": F <= pick["T_allow_N"] + 1e-6, "clause": "IS 800:2007 11.2.1 / 6.3.1 (working stress)",
                      "cite": ROD_CITE, "units": "N", "capacity_basis": "IS800_WSM", "allowable_increase": 1.0, "source": M.SRC,
-                     "rod": pick, "members_per_line": n,
+                     "rod": pick, "members_per_line": n, "brace_element": True, "detailing": True,
                      "note": "rod force = %d members x (P1 %.0f N + along-line load %.0f N) per line (%s); M%d: Ag %.0f mm2, "
                              "root %.0f mm2" % (n, bf["P1_int_N"], (abs(w_par) + abs(w_vert_member)) * a, n_how,
                                                 round(pick["d_mm"]), pick["Ag_mm2"], pick["A_root_mm2"])})
+    elif typ == "straps" and bsp.get("strap_width_mm") and bsp.get("strap_t_mm"):
+        # flat strap bridging (tension): IS 801 6.1 F = 0.60 Fy on the net section (one fastener hole), the strap grade
+        # declared (default the generic G350 coil); the strap line is anchored to blocking every members_per_line
+        fy_s = _num(bsp.get("strap_Fy_MPa"), 350.0)
+        An = (float(bsp["strap_width_mm"]) - _num(bsp.get("hole_mm"), 5.0)) * float(bsp["strap_t_mm"])
+        cap = 0.60 * fy_s * An
+        rows.append({"combo": "bracing (governing w)", "check": "strap %sx%s tension (IS 801 6.1, net section)"
+                     % (_fmt_num(bsp["strap_width_mm"]), _fmt_num(bsp["strap_t_mm"])),
+                     "value": round(F, 1), "limit": round(cap, 1), "dc": F / cap if cap > 0 else None, "ok": F <= cap + 1e-6,
+                     "clause": "IS 801 6.1 (F = 0.60 Fy, net section)", "cite": IS801_82_CITE, "units": "N",
+                     "capacity_basis": "IS801_allowable", "allowable_increase": 1.0, "source": M.SRC,
+                     "brace_element": True, "detailing": True,
+                     "note": "strap force = %d members x (P1 %.0f N + along-line load %.0f N) between anchor blocking (%s); "
+                             "An = (%s - %s) x %s mm2, Fy %s MPa" % (n, bf["P1_int_N"], (abs(w_par) + abs(w_vert_member)) * a,
+                                                                    n_how, _fmt_num(bsp["strap_width_mm"]),
+                                                                    _fmt_num(_num(bsp.get("hole_mm"), 5.0)),
+                                                                    _fmt_num(bsp["strap_t_mm"]), _fmt_num(fy_s))})
     else:
         cap = bsp.get("capacity_N")
         r = {"combo": "bracing (governing w)", "check": "%s brace force (per brace, %d member(s) per line)" % (typ, n),
-             "value": round(F, 1), "limit": float(cap) if cap else None, "units": "N",
+             "value": round(F, 1), "limit": float(cap) if cap else None, "units": "N", "brace_element": True, "detailing": True,
              "clause": "IS 801 8.2.2", "cite": IS801_82_CITE, "capacity_basis": "test" if cap else "IS801_allowable",
              "allowable_increase": 1.0, "source": M.SRC}
         if cap:
@@ -1337,7 +1357,9 @@ def auto_select(cfg, spec, design_group):
     fam = asel.get("family")
     if not fam:
         raise ValueError("auto_select.family required (one of %s)" % ", ".join(AUTO_FAMILY_NAMES))
-    cands = family_candidates(fam, spec)
+    plies = [int(x) for x in (asel.get("n_ply_options") or [int(spec.get("n_ply") or 1)])]
+    cands = sorted(((lab, mass * n, h, t, n) for lab, mass, h, t in family_candidates(fam, spec) for n in plies),
+                   key=lambda r: (r[1], r[4], r[2]))
     if not cands:
         raise ValueError("auto_select: no candidate in family %r within the declared limits" % (fam,))
     ref = asel.get("reference_section") or (spec.get("section") if str(spec.get("section") or "").lower() not in ("", "auto") else None)
@@ -1345,34 +1367,35 @@ def auto_select(cfg, spec, design_group):
     if ref:
         try:
             n_r, base_r = S.parse_designator(ref)
-            ref_mass = (S.props(base_r).get("mass_kg_m") or 0.0) * int(spec.get("n_ply") or n_r)
+            ref_mass = (S.props(base_r).get("mass_kg_m") or 0.0) * int(asel.get("reference_n_ply") or n_r)
         except (KeyError, ValueError):
             ref_mass = None
     rejected, chosen, tried = [], None, 0
-    nply = int(spec.get("n_ply") or 1)
-    for lab, mass, h, t in cands:
+    for lab, mass, h, t, nply in cands:
         tried += 1
         trial = dict(spec, section=lab, n_ply=nply)
         trial.pop("designator", None)
+        nm = ("2x" if nply == 2 else "") + lab
         try:
             recs = design_group(trial)
         except (KeyError, ValueError, ZeroDivisionError) as ex:
-            rejected.append({"section": lab, "mass_kg_m": round(mass * nply, 3), "reason": "not designable: %s" % ex})
+            rejected.append({"section": nm, "mass_kg_m": round(mass, 3), "reason": "not designable: %s" % ex})
             continue
         why = _first_failure(recs)
         if why is None:
             chosen = recs
             break
-        rejected.append({"section": lab, "mass_kg_m": round(mass * nply, 3), "reason": why})
+        rejected.append({"section": nm, "mass_kg_m": round(mass, 3), "reason": why})
     meta = {"family": fam, "criterion": "lightest mass per metre (base metal) passing every IS 801 check of the group",
             "n_candidates": len(cands), "n_tried": tried, "lighter_rejected": rejected[-6:],
             "reference_section": ref, "reference_mass_kg_m": ref_mass}
     if chosen is None:
-        lab = cands[-1][0]
+        lab, nply = cands[-1][0], cands[-1][4]
         chosen = design_group(dict(spec, section=lab, n_ply=nply))
         meta["note"] = "no section of family %s passes; the heaviest candidate %s is reported (FAIL)" % (fam, lab)
     for r in chosen:
-        r["auto_selected"] = dict(meta, section=r.get("designator"), mass_kg_m=r.get("mass_kg_m"))
+        r["auto_selected"] = dict(meta, section=r.get("designator"), mass_kg_m=r.get("mass_kg_m"),
+                                  n_ply_options=plies)
     return chosen
 
 

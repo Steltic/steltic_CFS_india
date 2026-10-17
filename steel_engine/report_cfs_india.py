@@ -108,14 +108,12 @@ def clean(text):
 # titles (review item 6)
 # ---------------------------------------------------------------------------------------------------------------
 def building_kind(cfg, pkg=None):
-    """'portal_cfs' (all-cold-formed portal), 'portal_hr' (hot-rolled portal with CFS purlins / girts) or 'hybrid'
-    (hot-rolled braced / moment frame with LGSF infill walls and cold-formed floor joists)."""
+    """'portal_cfs' (all-cold-formed portal), 'portal_hr' (hot-rolled portal / shed frame carrying cold-formed purlins and
+    girts only) or 'hybrid' (hot-rolled braced / moment frame with LGSF infill walls and cold-formed floor joists)."""
     if (cfg or {}).get("all_cfs_portal"):
         return "portal_cfs"
     cm = (cfg or {}).get("cfs_members") or {}
-    if (cfg or {}).get("portal") and not cm.get("studs") and not cm.get("joists"):
-        return "portal_hr"
-    if (cfg or {}).get("portal") and (cm.get("purlins") or cm.get("girts")) and not cm.get("joists"):
+    if not cm.get("studs") and not cm.get("joists") and (cm.get("purlins") or cm.get("girts")):
         return "portal_hr"
     return "hybrid"
 
@@ -126,23 +124,43 @@ def _frame_words(cfg):
     braced = any(k in sysn for k in ("CBF", "OBF", "SBF", "EBF"))
     moment = any(k in sysn for k in ("SMF", "SMRF", "OMF", "OMRF"))
     if braced and moment:
-        return "braced and moment frame"
+        return "moment and braced frame"
     if moment:
         return "moment frame"
     return "braced frame"
 
 
+def _flat_roof_joists(cm):
+    pu = cm.get("purlins")
+    gs = pu if isinstance(pu, list) else ([pu] if isinstance(pu, dict) else [])
+    return bool(gs) and all(float(g.get("roof_pitch_deg") or 0.0) == 0.0 and float(g.get("spacing_mm") or 1e9) <= 600.0
+                            for g in gs)
+
+
 def report_title(cfg, pkg=None):
-    """Report title by building type; cfg['report_title'] overrides."""
+    """Report title by building type (review item 6); cfg['report_title'] overrides."""
     if (cfg or {}).get("report_title"):
         return str(cfg["report_title"])
     k = building_kind(cfg, pkg)
     if k == "portal_cfs":
         return "All-cold-formed portal frame building (IS 801)"
     if k == "portal_hr":
+        fw = _frame_words(cfg)
         return "Cold-formed purlins and girts on a hot-rolled %s (IS 801 / IS 800)" % (
-            "portal frame" if "moment" in _frame_words(cfg) else _frame_words(cfg))
-    return "Hot-rolled %s with LGSF infill walls and cold-formed floor joists (IS 800 / IS 801)" % _frame_words(cfg)
+            "portal frame" if fw == "moment frame" else ("portal frame with braced bays" if "moment" in fw else fw))
+    cm = (cfg or {}).get("cfs_members") or {}
+    fl = []
+    if cm.get("joists"):
+        fl.append("floor")
+    if _flat_roof_joists(cm):
+        fl.append("roof")
+    items = ["%s joists" % " and ".join(fl)] if fl else []
+    if (cm.get("purlins") and not _flat_roof_joists(cm)) or cm.get("girts"):
+        items.append("purlins and girts")
+    cf = ("cold-formed " + (", ".join(items[:-1]) + ", " + items[-1] if len(items) > 1 else items[0])) if items else ""
+    parts = (["LGSF infill walls"] if cm.get("studs") else []) + ([cf] if cf else [])
+    txt = " and ".join(parts) if parts else "cold-formed members"
+    return "Hot-rolled %s with %s (IS 800 / IS 801)" % (_frame_words(cfg), txt)
 
 
 CSS = """<style>body{font-family:Georgia,serif;max-width:1100px;margin:24px auto;padding:0 16px;color:#222}

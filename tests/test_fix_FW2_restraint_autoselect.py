@@ -151,3 +151,31 @@ def test_auto_select_studs_over_all_storeys_and_is811_family():
     assert cands and all(S.props(c[0])["h"] == 200.0 for c in cands)
     with pytest.raises(ValueError):
         CM.family_candidates("thin_X_G999")
+
+
+def test_strap_bridging_and_brace_rows_do_not_set_member_dc():
+    cfg = _cfg()
+    pu = cfg["cfs_members"]["purlins"]
+    pu["bracing"] = {"type": "straps", "lines": 2, "strap_width_mm": 40.0, "strap_t_mm": 1.2, "hole_mm": 5.0,
+                     "members_per_line": 8}
+    rec = CM.design_purlins(cfg, "purlin")
+    st = [c for c in rec["checks"] if c["check"].startswith("strap 40x1.2")][0]
+    assert st["limit"] == pytest.approx(0.6 * 350.0 * 35.0 * 1.2) and st["brace_element"]
+    assert st["ok"] == (st["value"] <= st["limit"]) and st["dc"] == pytest.approx(st["value"] / st["limit"])
+    assert rec["DC"] == max(c["dc"] for c in rec["checks"] if isinstance(c.get("dc"), float)
+                            and not c.get("informational") and not c.get("detailing"))
+    pu["bracing"] = {"type": "fly_braces", "lines": 2}                  # no capacity declared -> not evaluated
+    rec = CM.design_purlins(cfg, "purlin")
+    fb = [c for c in rec["checks"] if c["check"].startswith("fly_braces brace force")][0]
+    assert fb["ok"] is None and rec["ok"] is None
+
+
+def test_auto_select_ply_options_and_deflection_naming():
+    cfg = _cfg()
+    jt = dict(cfg["cfs_members"]["joists"], section="auto",
+              auto_select={"family": "thin_C_G350", "n_ply_options": [1, 2], "depth_max_mm": 150.0})
+    rec = CM.design_all(dict(cfg, cfs_members={"Fy_MPa": 294.0, "joists": jt}))[0]
+    assert rec["ok"] is True and rec["auto_selected"]["n_ply_options"] == [1, 2]
+    assert any(r["section"].startswith("2x") for r in rec["auto_selected"]["lighter_rejected"]) or rec["n_ply"] in (1, 2)
+    d = [c for c in rec["checks"] if c["check"].startswith("deflection")][0]
+    assert d["check"] == "deflection under imposed load" and not d["informational"]

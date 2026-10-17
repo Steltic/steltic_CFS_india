@@ -100,12 +100,20 @@ def test_portal_basis_and_titles():
     assert "hot-rolled IS 800:2007 frame" in B.basis_statement({})
     assert "Reaffirmed 2021" in B.basis_statement({})
     assert R.report_title({"all_cfs_portal": True}).startswith("All-cold-formed portal")
-    hr_portal = {"portal": {"spans_m": [18]}, "cfs_members": {"purlins": {}, "girts": {}},
+    hr_portal = {"portal": {"spans_m": [18]}, "cfs_members": {"purlins": {"section": "a"}, "girts": {"section": "a"}},
                  "lateral_frame": {"system": "SCBF", "hr_cfg_extra": {"system": "SMF+SCBF"}}}
     assert R.report_title(hr_portal).startswith("Cold-formed purlins and girts on a hot-rolled")
-    hyb = {"cfs_members": {"studs": {}, "joists": {}}, "lateral_frame": {"system": "SCBF"}}
+    hyb = {"cfs_members": {"studs": {"section": "a"}, "joists": {"section": "a"}}, "lateral_frame": {"system": "SCBF"}}
     assert R.report_title(hyb) == "Hot-rolled braced frame with LGSF infill walls and cold-formed floor joists (IS 800 / IS 801)"
     assert R.report_title(dict(hyb, report_title="X")) == "X"
+    flat = {"cfs_members": {"studs": {"section": "a"}, "joists": {"section": "a"},
+                            "purlins": {"section": "a", "roof_pitch_deg": 0.0, "spacing_mm": 400.0}},
+            "lateral_frame": {"system": "OCBF"}}
+    assert R.report_title(flat) == ("Hot-rolled braced frame with LGSF infill walls and cold-formed floor and roof joists "
+                                    "(IS 800 / IS 801)")
+    shed = {"cfs_members": {"purlins": {"section": "a", "roof_pitch_deg": 5.4}, "girts": {"section": "a"}},
+            "lateral_frame": {"system": "SMF+EBF"}}
+    assert R.report_title(shed).startswith("Cold-formed purlins and girts on a hot-rolled portal frame")
 
 
 def test_report_cleanup_helpers():
