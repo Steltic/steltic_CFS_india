@@ -69,6 +69,25 @@ def resolve_is811_label(name: str) -> dict[str, Any]:
         out["note"] = "Empty section label (found:false)."
         return out
     import is811_sections as S
+    import cfs_generic_sections as GS
+    if GS.looks_generic(bare):
+        # 2026-10 first wave: computed thin lipped C / Z (not an IS 811 row; grade carried by the label)
+        if n_ply > 2:
+            out["note"] = "%d plies requested: IS 801 7.3 covers two channels back to back only (found:false)." % n_ply
+            return out
+        try:
+            p = S.built_up(bare, 2) if n_ply == 2 else S.props(bare)
+        except (KeyError, ValueError) as ex:
+            out["note"] = str(ex)
+            return out
+        out.update(found=True, in_catalog=False, generic=True, label=p["label"], type=p.get("type"), family=p.get("family"),
+                   table=None, designation=p.get("designation"), h=p.get("h"), b=p.get("b"), c=p.get("c"), t=p.get("t"),
+                   Ri=p.get("Ri"), A=p.get("A"), mass_kg_m=p.get("mass_kg_m"), Ix=p.get("Ix"), Iy=p.get("Iy"),
+                   rx=p.get("rx"), ry=p.get("ry"), r_min=p.get("r_min"), Fy=p.get("Fy"), material=p.get("material"),
+                   source=p.get("source"), units="mm, mm2, mm4, kg/m (SI)",
+                   note="computed thin section (cfs_generic_sections, IS 801 5.2 conventional methods); grade and coating "
+                        "from the label: %s" % p.get("material"))
+        return out
     if not S.looks_is811(bare):
         out["note"] = "Not an IS 811 designation (%r): use CLR / CLS / CWR / CWS / EA / UA / HS / HRH / HRB / LZ labels." % (name,)
         return out

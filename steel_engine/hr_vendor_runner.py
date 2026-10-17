@@ -25,6 +25,15 @@ import traceback
 HERE = os.path.dirname(os.path.abspath(__file__))
 VENDOR = os.path.join(HERE, "hr_vendor")
 sys.path.insert(0, VENDOR)                      # HR modules first (this process runs the HR engine only)
+# 2026-10 first wave: Python puts the REAL path of the script directory in sys.path[0]; when the repo is reached
+# through a symlink (work/steltic_CFS_india -> steltic_cfs_india) the vendored HR pipeline.py does not find its
+# parent folder (the symlinked spelling of steel_engine/) in sys.path and inserts it at sys.path[0] -- the CFS
+# preflight / consistency / report modules then shadow the HR ones and the lateral run is blocked by the CFS
+# preflight.  Both spellings of steel_engine/ are listed AFTER the vendored folder, so the HR guard is satisfied and
+# the HR modules always win.
+for _p in (HERE, os.path.realpath(HERE)):
+    if _p not in sys.path:
+        sys.path.append(_p)
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
 
@@ -87,7 +96,9 @@ def _callables(spec):
     return braces, col_sec, beam_sec, col_strong, releases
 
 
-def build_cfg(spec):
+def build_cfg(spec, esm=True, saved_plan=None):
+    """The HR cfg of the lateral frame.  esm=False (the job's cfg.py, 2026-10 first wave): no ESM analysis -- the
+    seismic summary and story forces come from the saved load_plan.json of the run (saved_plan)."""
     import india_units as IU
     import engine3d as E
     import example_build as EB
@@ -135,7 +146,7 @@ def build_cfg(spec):
         cfg["diaphragm_7_6_4"] = spec["diaphragm_7_6_4"]
     if spec.get("diaphragm_by_level"):                      # GOLD-COLL: per-level rigid / flexible labels
         cfg["diaphragm_by_level"] = spec["diaphragm_by_level"]
-    for key in ("diaphragm_type", "delegated_design"):      # AUD-3 / AUD-4 (7.6.4 deck kind; anchor breakout item)
+    for key in ("diaphragm_type", "delegated_design", "ponding"):   # AUD-3 / AUD-4; 2026-10 first wave: IS 875-4 4.4 ponding
         if spec.get(key) is not None:
             cfg[key] = spec[key]
     for key in ("diaphragm_stiffness", "flexible_diaphragm_analysis", "flexible_diaphragm_eor"):   # X01 (Table 5(ii))
@@ -171,6 +182,13 @@ def build_cfg(spec):
         sp_ = importlib.util.spec_from_file_location("cfs_job_frame_build", cbm)   # steel_engine must NOT enter sys.path here)
         mod = importlib.util.module_from_spec(sp_); sp_.loader.exec_module(mod)
         mod.attach(cfg, spec)
+    if not esm:
+        if saved_plan:
+            cfg["load_plan"] = saved_plan
+            ss0 = saved_plan.get("seismic_summary") or {}
+            cfg["seis"].update(Ah=ss0.get("Ah"), Ta=max([v for v in (ss0.get("Ta_x_s"), ss0.get("Ta_y_s")) if v] or [0.0]),
+                               Sa_g=ss0.get("Sa_g"), VB_kN=ss0.get("VB_kN"))
+        return cfg, None
     # ---- IS 1893 seismic summary from the engine weights (W = model mass, WP1.6) ----
     h = sum(heights)
     dx = float(spec.get("d_x_m") or spec["NX"] * spec["bay_x_m"]); dy = float(spec.get("d_y_m") or spec["NY"] * spec["bay_y_m"])
@@ -229,7 +247,10 @@ def _summary(cfg, out, root):
                          **_governing(m.get("checks"), m.get("DC")))
                     for m in pkg.get("members", [])],
         "connections": [dict({"id": c["id"], "type": c["type"], "DC": c.get("DC"),
-                              "not_evaluated": [x["name"] for x in c.get("checks", []) if x.get("ok") is None]},
+                              "not_evaluated": [x["name"] for x in c.get("checks", []) if x.get("ok") is None],
+                              # 2026-10 first wave: what a D/C-less row means (e.g. 'no_splice': single-length column)
+                              "check_names": [x.get("name") for x in c.get("checks", [])],
+                              "all_checks_ok": bool(c.get("checks")) and all(x.get("ok") is True for x in c.get("checks", []))},
                              **_governing(c.get("checks"), c.get("DC")))
                         for c in pkg.get("connections", [])],
         "drift_table": pkg.get("drift_table"), "drift_max": max((d["drift"] for d in pkg.get("drift_table") or []), default=None),
@@ -241,8 +262,15 @@ def _summary(cfg, out, root):
                             "n_not_evaluated": sum(1 for c in ((pkg.get("capacity_design") or {}).get("checks") or {}).values() if c.get("ok") is None)},
         "collectors": pkg.get("collectors"), "diaphragm_7_6_4": pkg.get("diaphragm_7_6_4"),
         "load_combinations_n": len(pkg.get("load_combinations") or []),
-        "gates": pkg.get("gates"), "report_html": out.get("report_html"),
+        "gates": pkg.get("gates"), "report_html": out.get("report_html"), "ponding": pkg.get("ponding"),
     })
+    # 2026-10 first wave (review item 4): the frame report's numerical self-consistency list ('N item(s) to reconcile')
+    # travels to the CFS package so the CFS design status can inherit it
+    try:
+        import consistency as HC                          # the vendored HR module (hr_vendor first on sys.path)
+        res["consistency"] = HC.check(os.path.basename(root), root=root, pkg=pkg, verbose=False)
+    except Exception as ex:                               # pragma: no cover - reported, never silent
+        res["consistency"] = ["frame report self-consistency check unavailable: %s" % ex]
     # base reactions for the CFS package (frame anchors): from the static export when present
     try:
         import static_model as SM  # noqa: F401
@@ -250,6 +278,37 @@ def _summary(cfg, out, root):
     except Exception:
         pass
     return res
+
+
+CFG_PY = '''"""%(name)s -- the hot-rolled lateral frame of a CFS job (written by steel_engine/hr_vendor_runner.py).
+
+Reproducible and editable: the HR cfg is rebuilt from the declarative frame spec (%(spec_rel)s) by
+hr_vendor_runner.build_cfg -- the same function the run used.  The IS 1893 seismic summary and story forces are read
+from this folder's load_plan.json (the ESM of the run); call build_cfg(spec) with esm=True to recompute them.
+"""
+import importlib.util as _ilu
+import json as _json
+import os as _os
+
+_HERE = _os.path.dirname(_os.path.abspath(__file__))
+_RUNNER = %(runner)r
+_sp = _ilu.spec_from_file_location("cfs_hr_vendor_runner_cfgpy", _RUNNER)
+_m = _ilu.module_from_spec(_sp)
+_sp.loader.exec_module(_m)
+_spec = _json.load(open(_os.path.join(_HERE, %(spec_rel)r)))
+_plan_p = _os.path.join(_HERE, "load_plan.json")
+_plan = _json.load(open(_plan_p)) if _os.path.exists(_plan_p) else None
+cfg, _ = _m.build_cfg(_spec, esm=False, saved_plan=_plan)
+'''
+
+
+def _write_job_cfg_py(root, spec_path):
+    """2026-10 first wave (frame-report reconcile item 'cfg.py not found'): every lateral sub-job gets a cfg.py that
+    rebuilds its HR cfg from the spec, so the saved OpenSees model is reproducible and editable."""
+    name = os.path.basename(os.path.normpath(root))
+    rel = os.path.relpath(os.path.abspath(spec_path), root)
+    with open(os.path.join(root, "cfg.py"), "w", encoding="utf-8") as f:
+        f.write(CFG_PY % {"name": name, "spec_rel": rel, "runner": os.path.abspath(__file__)})
 
 
 def main(spec_path, jobs_root, name):
@@ -260,6 +319,7 @@ def main(spec_path, jobs_root, name):
     root = os.path.join(jobs_root, name)
     os.makedirs(root, exist_ok=True)
     try:
+        _write_job_cfg_py(root, spec_path)
         cfg, esm = build_cfg(spec)
         json.dump(cfg["load_plan"], open(os.path.join(root, "load_plan.json"), "w"), indent=1, default=str)
         import pipeline as P

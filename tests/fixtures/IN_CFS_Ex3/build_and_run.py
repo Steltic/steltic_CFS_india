@@ -82,9 +82,12 @@ def build_cfg():
             # C02 re-size (R12): member-level wind (element Ka 1.0 on 7.5 m2, Table 6 local strips -1.4 with Kd 1.0, Cpi 0.2)
             "purlins": {"section": "CLR200X80X20X3.15", "zone": "all", "spacing_mm": 1500.0, "span_mm": 5000.0, "roof_pitch_deg": 13.1,
                         "L_unbraced_mm": 3000.0, "L_unbraced_top_mm": 0.0, "bearing_mm": 60.0,
+                        # 2026-10 first wave: the bracing system must be declared (else the free flange is unbraced)
+                        "bracing": {"type": "sag_rods", "lines": 1, "note": "one sag-rod line at mid-span"},
                         "wind_uplift_kNm2": None, "wind_pressure_kNm2": None,
                         "deflection_limit_ratio": 150, "deflection_cite": "IS 800:2007 Table 6 (read-only): purlins, elastic cladding, span/150"},
             "girts": {"section": "CLR180X80X20X3.15", "zone": "all", "spacing_mm": 1500.0, "span_mm": 5000.0, "L_unbraced_mm": 3000.0,
+                      "bracing": {"type": "sag_rods", "lines": 1, "note": "one sag-rod line at mid-span"},
                       "wind_suction_kNm2": None, "wind_pressure_kNm2": None,
                       "deflection_limit_ratio": 150, "deflection_cite": "IS 800:2007 Table 6 (read-only): girts, elastic cladding, span/150"},
             "joists": {"section": "CLR200X80X25X4", "n_ply": 1, "spacing_mm": 500.0, "span_mm": 3000.0, "bearing_mm": 60.0,

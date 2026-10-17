@@ -47,13 +47,228 @@ def _sec(spec):
     return S.built_up(base, n) if n == 2 else S.props(base)
 
 
-def _grade(cfg):
+def _grade(cfg, sec=None):
+    """(Fy MPa, grade cite) of a member.  2026-10 first wave: a computed thin section carries its own grade in the label
+    (-G350: IS 277 grade 350, Fy 350 MPa inside the IS 801 Table 2 36 kgf/mm2 row); an IS 811 section takes the job
+    grade cfs_members.Fy_MPa (IS 811 prints no grade)."""
+    if sec is not None and sec.get("generic") and sec.get("Fy"):
+        return float(sec["Fy"]), sec.get("grade_cite")
     cm = cfg.get("cfs_members") or {}
     fy = cm.get("Fy_MPa")
     if fy is None:
         raise ValueError("cfs_members.Fy_MPa required: IS 811 sections carry no default grade (IS 1079 / IS 801 Table 2, "
                          "declare it with a cite)")
     return float(fy), cm.get("grade_cite")
+
+
+def material_statement(cfg, sec) -> str:
+    """Grade and coating of a member as printed in the report (review item 8: stated in every report)."""
+    if sec.get("generic"):
+        return sec.get("material")
+    cm = cfg.get("cfs_members") or {}
+    mat = cm.get("material") or ("IS 1079 hot-rolled sheet / strip (IS 801 2.1), Fy %s MPa (%s)"
+                                 % (_fmt_num(cm.get("Fy_MPa")), cm.get("grade_cite") or "IS 801 Table 2"))
+    coat = cm.get("coating") or "coating not declared -- IS 811 sections are formed from uncoated IS 1079 sheet: specify " \
+                                "hot-dip galvanising or a paint system (IS 4180) -- design engineer"
+    return "%s; %s" % (mat, coat)
+
+
+def _fmt_num(v, nd=3):
+    """A number without float noise (13.799999999999999 -> 13.8)."""
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        return "-" if v is None else str(v)
+    s = ("%%.%df" % nd) % float(v)
+    s = s.rstrip("0").rstrip(".") if "." in s else s
+    return s if s not in ("-0", "") else "0"
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# 2026-10 first wave: restraint basis, IS 801 8.2 bracing of channels / zeds, sag rods, non-permanent dead loads
+# ---------------------------------------------------------------------------------------------------------------
+BRACE_TYPES = {"sag_rods": "sag-rod line(s)", "bridging": "bridging line(s)", "fly_braces": "fly brace(s)",
+               "straps": "strap / flat bracing line(s)", "blocking": "solid blocking line(s)"}
+IS801_82_CITE = ("IS 801:1975 8.2 (channel and Z-sections used as beams): 8.2.1 braces at the ends and at intervals not "
+                 "greater than one-quarter of the span; 8.2.2 each intermediate brace (top and bottom flange) resists "
+                 "P1 = 1.5 K' x the load within 0.5 a each side (uniform load), 1.0 K' P within 0.3 a and (1 - x/a) P K' "
+                 "for 0.3 a < x <= a (concentrated loads); end braces one-half; K' = m/d (channels, m per 7.3), Ixy/Ix (Z); "
+                 "8.2.3 the bracing interval a replaces L in 6.3")
+IS801_82_SCOPE = ("8.2 applies only when neither flange is connected to deck or sheathing (8.2 (a)); with one flange "
+                  "sheeted 'bracing may or may not be needed' (8.2 footnote) -- the 8.2.1 spacing is shown for reference "
+                  "and the 8.2.2 force is used to size the declared braces")
+ROD_PITCH = {10: 1.5, 12: 1.75, 16: 2.0, 20: 2.5, 24: 3.0}          # ISO 261 coarse pitch (mm) -- VERIFY
+ROD_CITE = ("sag rod: IS 2062 E250 round bar threaded at the ends (fy 250, fu 410 MPa unless declared); IS 800:2007 "
+            "11.2.1 working stress: f_at = 0.6 fy on the gross area and 0.69 Tdn on the thread root, Tdn = 0.9 An fu / "
+            "gamma_m1 (6.3.1, gamma_m1 1.25, Table 5); root area at the bottom of the threads (IS 800 10.3.5), "
+            "d3 = d - 1.2269 p (ISO 724 basic profile, coarse pitch -- VERIFY); no 11.1.4 increase (wind is the major load)")
+
+
+def _flange_names(role):
+    """(sheeted flange, free flange) names by member role."""
+    return ("outer", "inner") if role == "girt" else ("top", "bottom")
+
+
+def bracing_basis(spec, span, role="purlin"):
+    """Declared bracing of the free flange of a purlin / girt / joist (2026-10 first wave, review item 3).
+    spec['bracing'] = {type: sag_rods | bridging | fly_braces | straps | blocking, lines: n, spacing_mm (optional,
+    default span / (lines + 1)), rod_dia_mm, rod_fy_MPa, rod_fu_MPa, min_rod_dia_mm, members_per_line, capacity_N,
+    capacity_source, note}; the legacy spec['sag_rods'] = <number of lines> (PEB secondary jobs) is read as sag rods.
+    No declared bracing -> the free flange is unbraced over the span (an L_unbraced_mm without a bracing system is not
+    used and the record says so)."""
+    span = float(span)
+    br = spec.get("bracing")
+    rec = {"declared": False, "type": None, "type_text": None, "lines": 0, "spacing_mm": span, "source": None, "spec": None,
+           "note": None}
+    sr = spec.get("sag_rods")
+    if isinstance(br, dict) and str(br.get("type") or "").lower() not in ("", "none"):
+        typ = str(br["type"]).lower()
+        lines = int(_num(br.get("lines"), 0))
+        a = _num(br.get("spacing_mm"), 0.0) or (span / (lines + 1) if lines else 0.0)
+        if a and not lines:
+            lines = max(int(round(span / a)) - 1, 0)
+        if a > 0:
+            rec.update(declared=True, type=typ, lines=lines, spacing_mm=min(a, span), source="cfg bracing", spec=dict(br))
+    elif isinstance(sr, (int, float)) and not isinstance(sr, bool) and sr > 0:
+        lines = int(sr)
+        rec.update(declared=True, type="sag_rods", lines=lines, spacing_mm=span / (lines + 1),
+                   source="cfg sag_rods = %d line(s)" % lines, spec={"type": "sag_rods", "lines": lines})
+    Lu = spec.get("L_unbraced_mm")
+    if rec["declared"]:
+        if Lu not in (None, "") and float(Lu) > rec["spacing_mm"] + 1e-6:
+            rec["note"] = ("declared L_unbraced_mm %.0f mm is longer than the bracing interval %.0f mm: the longer length "
+                           "is used (conservative)" % (float(Lu), rec["spacing_mm"]))
+            rec["spacing_mm"] = float(Lu)
+        rec["type_text"] = BRACE_TYPES.get(rec["type"], rec["type"])
+    else:
+        if Lu not in (None, "") and float(Lu) < span - 1e-6:
+            rec["note"] = ("L_unbraced_mm %.0f mm declared without a bracing system (bracing / sag_rods): not used -- the "
+                           "free flange is checked unbraced over the span %.0f mm" % (float(Lu), span))
+    return rec
+
+
+def restraint_text(flange, restrained, L_mm=None, brace=None, span=None, basis=None):
+    """One-line compression-flange restraint statement printed with every bending / interaction check."""
+    if restrained:
+        return "compression flange: %s, continuously restrained by %s" % (flange, basis or "the sheeting fastened to it")
+    if brace and brace.get("declared"):
+        return ("compression flange: %s (free), braced at a = %.0f mm by %d %s (IS 801 8.2.3: a replaces L in 6.3)"
+                % (flange, brace["spacing_mm"], brace["lines"], brace.get("type_text") or brace.get("type")))
+    return "compression flange: %s (free), UNBRACED over %.0f mm (no bracing declared)" % (flange, float(L_mm or span or 0.0))
+
+
+def k_prime_82(sec):
+    """IS 801 8.2.2 K' = m / d (channels; m by the 7.3 lipped / plain channel formula) or Ixy / Ix (Z-sections);
+    0 for a back-to-back pair (doubly symmetric, no twisting tendency)."""
+    if sec.get("n_ply", 1) == 2 or sec.get("doubly_symmetric"):
+        return 0.0, "back-to-back pair: doubly symmetric, no twisting tendency (K' = 0)"
+    if sec.get("type") == "LZ":
+        ixy = sec.get("Ixy")
+        if ixy is None:
+            return None, "Ixy not available for %s" % sec.get("label")
+        return abs(ixy) / sec["Ix"], "K' = Ixy / Ix (Z-section, 8.2.2)"
+    d, t = sec["h"], sec["t"]
+    wf = sec["b"] - t                                    # projection of the flange from the inside face of the web
+    if sec.get("c"):
+        d1 = sec["c"]
+        m = wf * d * t / (4.0 * sec["Ix"]) * (wf * d + 2.0 * d1 * (d - 4.0 * d1 ** 2 / (3.0 * d)))
+        how = ("m = (wf d t / 4 Ix)[wf d + 2 d1 (d - 4 d1^2 / 3d)] (IS 801 7.3, lipped channel; t restored where the corpus "
+               "OCR drops it -- dimensional check)")
+    else:
+        m = wf ** 2 / (2.0 * wf + d / 3.0)
+        how = "m = wf^2 / (2 wf + d/3) (IS 801 7.3, channel without lips)"
+    return m / d, "K' = m / d = %.1f / %.0f; %s" % (m, d, how)
+
+
+def brace_force_82(sec, w_N_per_mm, a_mm, span_mm, point_loads=None, P_scale=1.0):
+    """IS 801 8.2.2 lateral force P1 (N) on the most loaded intermediate brace and on the end brace."""
+    kp, how = k_prime_82(sec)
+    if kp is None:
+        return {"P1_int_N": None, "P1_end_N": None, "K_prime": None, "K_prime_basis": how}
+    P1u = 1.5 * kp * abs(w_N_per_mm) * a_mm
+    worst = P1u
+    braces = [a_mm * k for k in range(1, int(span_mm / a_mm + 1e-6)) if a_mm * k < span_mm - 1e-6]
+    for xb in braces:
+        pc = 0.0
+        for p in point_loads or []:
+            P = abs(float(p["P_kN"])) * 1e3 * P_scale
+            x = abs(float(p["a_m"]) * 1e3 - xb)
+            if x <= 0.3 * a_mm:
+                pc += 1.0 * kp * P
+            elif x <= a_mm:
+                pc += (1.0 - x / a_mm) * P * kp
+        worst = max(worst, P1u + pc)
+    return {"P1_int_N": worst, "P1_end_N": 0.5 * worst, "P1_uniform_N": P1u, "K_prime": kp, "K_prime_basis": how,
+            "n_intermediate_braces": len(braces)}
+
+
+def rod_capacity(d_mm, fy=250.0, fu=410.0):
+    """Working-stress tension capacity (N) of a threaded round sag rod (ROD_CITE)."""
+    p = ROD_PITCH.get(int(round(d_mm)), 0.125 * d_mm)
+    Ag = math.pi * d_mm ** 2 / 4.0
+    d3 = d_mm - 1.226869 * p
+    Ar = math.pi * d3 ** 2 / 4.0
+    T1 = 0.6 * fy * Ag
+    T2 = 0.69 * 0.9 * Ar * fu / 1.25
+    return {"d_mm": d_mm, "pitch_mm": p, "Ag_mm2": Ag, "A_root_mm2": Ar, "T_yield_N": T1, "T_rupture_N": T2,
+            "T_allow_N": min(T1, T2)}
+
+
+def _members_per_line(cfg, spec, role, s_mm, br):
+    """Members tied into one brace line (the rod force accumulates over them): declared members_per_line, else the
+    purlins on one roof slope (portal half-span along the slope / spacing + 1) or the girts over the eave height."""
+    if br.get("spec") and br["spec"].get("members_per_line"):
+        return int(br["spec"]["members_per_line"]), "declared members_per_line"
+    po = cfg.get("portal") or {}
+    geo = cfg.get("geometry") or {}
+    if role == "purlin" and po.get("spans_m"):
+        pitch = math.radians(_num(spec.get("roof_pitch_deg"), 0.0))
+        Ls = float(po["spans_m"][0]) / 2.0 / max(math.cos(pitch), 1e-6) * 1000.0
+        return int(Ls // s_mm) + 1, "purlins on one slope: %.2f m along the slope / %.0f mm spacing + 1" % (Ls / 1000.0, s_mm)
+    if role == "girt":
+        h = _num(po.get("eave_m"), sum(float(x) for x in (geo.get("heights_m") or [0.0]))) * 1000.0
+        if h > 0:
+            return max(int(h // s_mm), 1), "girts over the %.2f m wall height at %.0f mm" % (h / 1000.0, s_mm)
+    return 1, "members per brace line not derivable -- one member (declare bracing.members_per_line)"
+
+
+def nonpermanent_dead(cfg, spec, collateral_kNm2=None, pv_kNm2=None):
+    """Lead requirement (review item 5): named non-permanent dead components -- collateral (services hung from the
+    purlins / joists) and rooftop PV.  Keyword argument > member spec key > cfg['loads'] key; default 0.
+    Applied only where dead load adds to the effect (gravity combinations); excluded where the dead load resists
+    (wind uplift / suction with 0.9 DL or DL)."""
+    ld = cfg.get("loads") or {}
+    out = {}
+    for key, kw in (("collateral_kNm2", collateral_kNm2), ("pv_kNm2", pv_kNm2)):
+        v = kw if kw is not None else spec.get(key, ld.get(key))
+        out[key] = _num(v, 0.0)
+    return out
+
+
+def _with_nonpermanent(w, w_np):
+    """Include the non-permanent dead line load w_np (>= 0, along gravity) only when it increases |w|."""
+    if not w_np:
+        return w, False
+    w2 = w + w_np
+    return (w2, True) if abs(w2) >= abs(w) - 1e-12 and w >= 0 else (w, False)
+
+
+def geometry_rows(sec):
+    """IS 801 5.2.3 / 5.2.4 flat-width and web-depth limits as check rows (computed thin sections and IS 811)."""
+    rows = []
+    t = sec["t"]
+    fl = sec.get("flats") or {}
+    if fl.get("web"):
+        rows.append(("5.2.4(a) web h/t", fl["web"] / t, 150.0, "IS 801 5.2.4 (a)", "(h/t)max = 150 for unstiffened webs"))
+    if fl.get("flange") and sec.get("lipped"):
+        rows.append(("5.2.3(a) flange w/t (simple-lip stiffened)", fl["flange"] / t, 60.0, "IS 801 5.2.3 (a)",
+                     "stiffened compression element, other edge stiffened by a simple lip: 60"))
+    if fl.get("lip"):
+        rows.append(("5.2.3(c) lip w/t (unstiffened)", fl["lip"] / t, 60.0, "IS 801 5.2.3 (c)", "unstiffened compression element: 60"))
+    out = []
+    for nm, v, lim, cl, cite in rows:
+        out.append({"combo": "geometry", "check": nm, "value": round(v, 2), "limit": lim, "dc": v / lim, "ok": v <= lim + 1e-9,
+                    "clause": cl, "cite": cite, "capacity_basis": "IS801_allowable", "allowable_increase": 1.0, "source": M.SRC,
+                    "units": "-", "detailing": True})
+    return out
 
 
 def groups(cm, key):
@@ -296,22 +511,49 @@ def _wind_pd(cfg, z_m):
 
 
 def _member_record(role, spec, sec, fy, combos, checks_by_combo, extra=None, tag=None):
-    dcs = [c["dc"] for c in checks_by_combo if isinstance(c.get("dc"), (int, float))]
+    # the member D/C is the strength / serviceability ratio; detailing limits (IS 801 5.2.3 / 5.2.4 geometry, 8.2.1 brace
+    # spacing) keep their own rows and block when they fail, but do not set the member D/C
+    dcs = [c["dc"] for c in checks_by_combo if isinstance(c.get("dc"), (int, float)) and not c.get("informational")
+           and not c.get("detailing")]
     unevaluated = [c for c in checks_by_combo if c.get("ok") is None and not c.get("informational")]
     des = sec.get("designator") or sec["label"]
+    length = spec.get("span_mm") or spec.get("height_mm") or (extra or {}).get("span_mm") or (extra or {}).get("height_mm")
     rec = {"id": "%s-%s%s" % (role, (str(tag) + "-") if tag not in (None, "") else "", des), "role": role, "section": sec["label"],
            "designator": des, "n_ply": sec.get("n_ply", 1), "Fy_MPa": fy,
-           "spacing_mm": spec.get("spacing_mm"), "length_mm": spec.get("span_mm") or spec.get("height_mm"),
+           "spacing_mm": spec.get("spacing_mm"), "length_mm": length,
            "demand_level": "working", "capacity_basis": "IS801_allowable", "design_basis": B.DESIGN_BASIS,
            "combinations": [c["label"] for c in combos], "checks": checks_by_combo,
            "DC": max(dcs) if dcs else None,
-           "ok": (None if unevaluated else (all(c.get("ok") is not False for c in checks_by_combo) if checks_by_combo else None)),
-           "limit_state": "IS 801:1975 working stress (is801_members)", "source": M.SRC}
+           "ok": (None if unevaluated else (all(c.get("ok") is not False for c in checks_by_combo if not c.get("informational"))
+                                            if checks_by_combo else None)),
+           "limit_state": "IS 801:1975 working stress (is801_members)", "source": M.SRC,
+           # 2026-10 first wave: section family, mass and material on every record
+           "section_family": sec.get("family") or ("IS 811:1987 Table %s" % sec.get("table") if sec.get("table") else "IS 811:1987"),
+           "section_source": sec.get("source"),
+           "mass_kg_m": (sec.get("mass_kg_m") if sec.get("mass_kg_m") is not None else None)}
     if spec.get("name"):
         rec["group"] = spec["name"]
     if extra:
         rec.update(extra)
     return rec
+
+
+def _units_for(name):
+    """Display units of a check row (the report converts N-mm to kN-m and N to kN)."""
+    n = str(name).lower()
+    if "web bending + shear" in n or "6.4.3" in n or "interaction" in n or "both faces" in n:
+        return "-"
+    if "bending" in n:
+        return "N-mm"
+    if "web shear" in n or n.startswith("stability"):
+        return "MPa"
+    if "crippling" in n or "pmin" in n or "brace force" in n or "sag rod" in n or "attachment capacity" in n:
+        return "N"
+    if "deflection" in n or "a <= amax" in n or "interconnection" in n or "spacing" in n:
+        return "mm"
+    if "kw" in n:
+        return "N/mm"
+    return "-"
 
 
 def _rnd(x, n=2):
@@ -321,7 +563,7 @@ def _rnd(x, n=2):
 def _row(label, name, r, extra=None):
     o = {"combo": label, "check": name, "value": r.get("value"), "limit": r.get("limit"), "dc": r.get("dc"), "ok": r.get("ok"),
          "clause": r.get("clause"), "cite": r.get("cite"), "allowable_increase": r.get("allowable_increase", 1.0),
-         "capacity_basis": "IS801_allowable", "source": M.SRC}
+         "capacity_basis": "IS801_allowable", "source": M.SRC, "units": _units_for(name)}
     if r.get("note"):
         o["note"] = r["note"]
     if extra:
@@ -329,9 +571,16 @@ def _row(label, name, r, extra=None):
     return o
 
 
+def _stamp_restraint(rows, text):
+    """Every row carries the member's compression-flange restraint basis (rows with their own keep it)."""
+    for r in rows:
+        r.setdefault("restraint", text)
+    return rows
+
+
 def _defl_row(combo, check, defl, span, spec, cite):
     crit = spec.get("deflection_limit_ratio")
-    return {"combo": combo, "check": check, "value": round(defl, 2),
+    return {"combo": combo, "check": check, "value": round(defl, 2), "units": "mm",
             "limit": (span / float(crit)) if crit else None, "dc": (defl / (span / float(crit))) if crit else None,
             "ok": (defl <= span / float(crit)) if crit else None,
             "clause": "IS 801 5.1 (no limit); criterion %s" % (("L/%s: %s" % (crit, spec.get("deflection_cite"))) if crit else "not declared"),
@@ -345,8 +594,8 @@ def design_studs(cfg, storey=None, spec=None, tag=None):
     + axial (own wall weight, or the declared bearing reaction); IS 801 8.1 bracing, 6.7 combined, 6.4 shear, 6.5
     crippling."""
     cm = cfg["cfs_members"]; st = spec or groups(cm, "studs")[0]
-    fy, cite = _grade(cfg)
     sec = _sec(st)
+    fy, cite = _grade(cfg, sec)
     H = list(cfg["geometry"]["heights_m"])
     k = storey or 1
     L = float(st.get("height_mm") or H[k - 1] * 1000.0)
@@ -387,6 +636,15 @@ def design_studs(cfg, storey=None, spec=None, tag=None):
             rows.append(_row(c["label"], "6.5 web crippling at track (end reaction)",
                              M.web_crippling_65(sec, fy, V + P, _num(st.get("bearing_mm"), sec["b"]), end=True,
                                                 back_to_back=sec.get("n_ply", 1) == 2, wind_eq=we)))
+    if braced:
+        rtext = ("both flanges braced in the plane of the wall by the sheathing on both faces at a = %.0f mm (IS 801 8.1 "
+                 "(a)-(c) met); weak-axis and torsional buckling over a" % float(sh["a_mm"]))
+    elif sh.get("both_faces"):
+        rtext = ("sheathing on both faces declared but IS 801 8.1 (b) / (c) not met: stud UNBRACED over its height %.0f mm "
+                 "(weak-axis, torsional-flexural and lateral buckling over L)" % L)
+    else:
+        rtext = "no sheathing bracing declared: stud UNBRACED over its height %.0f mm" % L
+    _stamp_restraint(rows, rtext)
     if s81:
         for nm, ck in s81["checks"].items():
             if nm.startswith("(d)"):
@@ -402,7 +660,11 @@ def design_studs(cfg, storey=None, spec=None, tag=None):
     # deflection at working wind (information: IS 801 5.1 has no limit; the declared criterion is the EOR's)
     defl = 5.0 * w * L ** 4 / (384.0 * E_MPA * sec["Ix"])
     rows.append(_defl_row("DL+1.0WL (service)", "deflection (information)", defl, L, st, "IS 801 5.1 deflection determination by conventional methods"))
-    extra = {"storey": k, "height_mm": L,
+    rows += geometry_rows(sec)
+    _stamp_restraint(rows, rtext)
+    extra = {"storey": k, "height_mm": L, "restraint_basis": {"text": rtext, "sheathing_braced": braced,
+                                                              "a_mm": float(sh["a_mm"]) if braced else None},
+             "material": material_statement(cfg, sec),
              "wind": {"z_m": z_top, "member_pd": mw, "p_design_kNm2": p, "w_N_per_mm": w, "cite": mw["cite"]},
              "axial": {"P_dead_N": P_D, "P_live_N": P_L, "bearing": bool(st.get("bearing")),
                        "note": "non-load-bearing infill (joists bear on the hot-rolled grid beams)" if not st.get("bearing")
@@ -412,29 +674,46 @@ def design_studs(cfg, storey=None, spec=None, tag=None):
     return _member_record("stud", st, sec, fy, combos, rows, extra, tag=tag if tag is not None else "S%d" % k)
 
 
-def design_joists(cfg, spec=None, tag=None):
+def design_joists(cfg, spec=None, tag=None, *, collateral_kNm2=None, pv_kNm2=None):
     """Floor joists (simply supported between the hot-rolled grid beams): D + partitions + IL (per group, C14); bending
-    on the effective section (compression flange restrained by the deck when declared), 6.4 shear, 6.5 crippling,
-    6.4.3 web bending + shear, deflection vs the declared criterion."""
+    on the effective section, 6.4 shear, 6.5 crippling, 6.4.3 web bending + shear, deflection vs the declared criterion.
+    2026-10 first wave: the compression (top) flange is restrained only when the job declares it
+    (compression_flange_restrained: true + restraint_basis text, e.g. the floor board / deck screwed to it); otherwise
+    the joist is checked unbraced over the bridging interval (spec['bracing']) or the span.  collateral_kNm2 /
+    pv_kNm2 (keyword, spec or cfg['loads']) are non-permanent dead loads added to the gravity combinations."""
     cm = cfg["cfs_members"]; jt = spec or groups(cm, "joists")[0]
-    fy, cite = _grade(cfg)
     sec = _sec(jt)
+    fy, cite = _grade(cfg, sec)
     ld = cfg["loads"]
     span = float(jt["span_mm"]); s = float(jt["spacing_mm"])
     D = _num(jt.get("D_kNm2"), _num(ld.get("D_floor")))
     part = _num(jt.get("partition_kNm2"), _num(ld.get("partition_design_kNm2")))
     Lq = _num(jt.get("L_kNm2"), _num(ld.get("L_floor")))
+    npd = nonpermanent_dead(cfg, jt, collateral_kNm2, pv_kNm2)
     wD = (D + part) * 1e-3 * s     # N/mm
     wL = Lq * 1e-3 * s
+    wNP = (npd["collateral_kNm2"] + npd["pv_kNm2"]) * 1e-3 * s
     rows = []
     combos = [c for c in B.cfs_combinations(cfg.get("load_plan"), cfg) if not c.get("lateral_ref") and not c.get("fS")]
-    restr = bool(jt.get("compression_flange_restrained", True))
+    declared = jt.get("compression_flange_restrained")
+    restr = bool(declared)
+    br = bracing_basis(jt, span, "joist")
+    Lb = br["spacing_mm"] if br["declared"] else span
+    basis = jt.get("restraint_basis") or "the floor deck / board fastened to it (declared compression_flange_restrained)"
+    rtext = restraint_text("top", restr, Lb, br, span, basis=basis)
+    if declared is None:
+        rtext += " -- compression_flange_restrained not declared, so no deck restraint is assumed"
+    zb = jt.get("zed_basis") if sec.get("type") == "LZ" else None
     for c in combos:
-        w = c["fD"] * wD + c["fL"] * wL
+        w, inc_np = _with_nonpermanent(c["fD"] * wD + c["fL"] * wL, c["fD"] * wNP)
         Mx = w * span ** 2 / 8.0; V = w * span / 2.0
-        b = M.bending_allowable(sec, fy, _num(jt.get("L_unbraced_mm"), span), Cb=1.0, compression_flange_restrained=restr)
+        b = M.bending_allowable(sec, fy, Lb, Cb=1.0, compression_flange_restrained=restr, zed_basis=zb)
+        if b.get("ok") is None:
+            rows.append(_row(c["label"], "6.1/6.2/6.3 bending", {"ok": None, "note": b.get("note"), "clause": b.get("clause")}))
+            continue
         rows.append(_row(c["label"], "6.1/6.2/6.3 bending", M._rec(Mx, b["Ma_Nmm"], b["clause"], b["cite"], allowable_increase=1.0),
                          {"M_Nmm": round(Mx, 1), "Fb_MPa": _rnd(b["Fb_MPa"]), "Sx_eff_cm3": _rnd(b["Sx_eff_cm3"]), "ltb": b["ltb_clause"],
+                          "L_unbraced_mm": 0.0 if restr else Lb, "restraint": rtext, "nonpermanent_dead_included": inc_np,
                           **({"note": b["note"]} if b.get("note") else {})}))
         rows.append(_row(c["label"], "6.4.1 web shear", M.web_shear_64(sec, fy, V), {"V_N": round(V, 1)}))
         rows.append(_row(c["label"], "6.5 web crippling (end reaction)",
@@ -447,15 +726,117 @@ def design_joists(cfg, spec=None, tag=None):
         rows.append({"combo": "-", "check": "7.3 interconnection (flexural)", "value": jt.get("connector_spacing_mm"),
                      "limit": ic["Smax_mm"], "dc": (float(jt["connector_spacing_mm"]) / ic["Smax_mm"]) if jt.get("connector_spacing_mm") else None,
                      "ok": (float(jt["connector_spacing_mm"]) <= ic["Smax_mm"]) if jt.get("connector_spacing_mm") else None,
-                     "clause": ic["clause"], "cite": ic["cite"], "capacity_basis": "IS801_allowable", "allowable_increase": 1.0, "source": M.SRC})
+                     "clause": ic["clause"], "cite": ic["cite"], "capacity_basis": "IS801_allowable", "allowable_increase": 1.0, "source": M.SRC,
+                     "units": "mm"})
+    if not restr:
+        rows += bracing_rows(cfg, jt, sec, "joist", span, s, br, w_max=max(wD + wL + wNP, 0.0), w_par=0.0,
+                             sheeted=False)
     defl = 5.0 * wL * span ** 4 / (384.0 * E_MPA * sec["Ix"])
     rows.append(_defl_row("IL (service)", "deflection under imposed load", defl, span, jt,
                           "IS 800:2007 Table 6 read-only (serviceability_limits_table6) when cited: other buildings, floor, "
                           "span/300 (not susceptible to cracking) / span/360 (susceptible)"))
-    extra = {"span_mm": span, "w_dead_N_per_mm": wD, "w_live_N_per_mm": wL, "grade_cite": cite,
-             "loads_kNm2": {"D": D, "partition": part, "L": Lq, "L_cite": jt.get("L_cite")},
-             "clauses": ["IS 801 5.2.1.1", "6.1", "6.2", "6.3", "6.4.1", "6.4.3", "6.5", "7.3"]}
+    rows += geometry_rows(sec)
+    _stamp_restraint(rows, rtext)
+    load_table = [
+        {"component": "dead (permanent: deck, finishes, joist)", "kNm2": D, "kN_per_m": D * s / 1000.0, "applied": "every combination"},
+        {"component": "partitions (IS 875-2 3.1.2)", "kNm2": part, "kN_per_m": part * s / 1000.0, "applied": "with dead load"},
+        {"component": "collateral (services hung below; non-permanent dead)", "kNm2": npd["collateral_kNm2"],
+         "kN_per_m": npd["collateral_kNm2"] * s / 1000.0, "applied": "gravity combinations only (adds to the effect)"},
+        {"component": "imposed (IS 875-2)", "kNm2": Lq, "kN_per_m": Lq * s / 1000.0, "applied": "DL+IL", "cite": jt.get("L_cite")},
+    ]
+    if npd["pv_kNm2"]:
+        load_table.insert(3, {"component": "rooftop PV (non-permanent dead)", "kNm2": npd["pv_kNm2"],
+                              "kN_per_m": npd["pv_kNm2"] * s / 1000.0, "applied": "gravity combinations only (adds to the effect)"})
+    extra = {"span_mm": span, "w_dead_N_per_mm": wD, "w_live_N_per_mm": wL, "w_nonpermanent_dead_N_per_mm": wNP, "grade_cite": cite,
+             "loads_kNm2": {"D": D, "partition": part, "L": Lq, "L_cite": jt.get("L_cite"), **npd},
+             "load_table": load_table, "material": material_statement(cfg, sec),
+             "restraint_basis": {"text": rtext, "compression_flange_restrained": restr, "declared": declared is not None,
+                                 "bracing": br},
+             "clauses": ["IS 801 5.2.1.1", "5.2.3", "5.2.4", "6.1", "6.2", "6.3", "6.4.1", "6.4.3", "6.5", "7.3", "8.2"]}
     return _member_record("joist", jt, sec, fy, combos, rows, extra, tag=tag)
+
+
+def bracing_rows(cfg, spec, sec, role, span, s, br, w_max, w_par=0.0, sheeted=True, point_loads=None, w_vert_member=0.0):
+    """IS 801 8.2 rows for a channel / Z beam with declared intermediate bracing (2026-10 first wave, review item 3):
+    8.2.1 spacing (blocking when neither flange is sheeted, reference otherwise), 8.2.2 brace force P1 and -- for sag
+    rods -- the rod tension accumulated over the members tied into one line, sized from M10-M24 (IS 800 11.2.1 WSM).
+    w_max: the governing line load normal to the member (N/mm, any sign); w_par: the line load along the brace line
+    (gravity component down the roof slope for purlins); w_vert_member: own weight + cladding carried by girt rods."""
+    rows = []
+    if not br.get("declared"):
+        if not sheeted:
+            rows.append({"combo": "bracing", "check": "8.2.1 brace spacing a <= L/4", "value": span, "limit": span / 4.0,
+                         "dc": 4.0, "ok": False, "detailing": True, "clause": "IS 801 8.2.1", "cite": IS801_82_CITE, "units": "mm",
+                         "capacity_basis": "IS801_allowable", "allowable_increase": 1.0, "source": M.SRC,
+                         "note": "no bracing declared and neither flange is connected to deck / sheathing: 8.2.1 requires braces "
+                                 "at the ends and at not more than one-quarter of the span"})
+        return rows
+    a = br["spacing_mm"]
+    info = bool(sheeted)
+    # with one flange sheeted the 8.2.1 row is a reference (no D/C: it must never read as a failed check downstream)
+    rows.append({"combo": "bracing", "check": "8.2.1 brace spacing a <= L/4", "value": round(a, 1), "limit": span / 4.0,
+                 "dc": None if info else a / (span / 4.0), "ok": None if info else a <= span / 4.0 + 1e-6,
+                 "a_over_L4": a / (span / 4.0), "clause": "IS 801 8.2.1", "cite": IS801_82_CITE, "detailing": True,
+                 "units": "mm", "capacity_basis": "IS801_allowable", "allowable_increase": 1.0, "source": M.SRC,
+                 "informational": info, **({"note": IS801_82_SCOPE + " (a / (L/4) = %.2f)" % (a / (span / 4.0))} if info else {})})
+    if point_loads:
+        tot = abs(w_max) * span + sum(abs(float(p["P_kN"])) * 1e3 for p in point_loads)
+        big = max(abs(float(p["P_kN"])) * 1e3 for p in point_loads)
+        if tot > 0 and big >= tot / 3.0:
+            rows.append({"combo": "bracing", "check": "8.2.1 additional brace at a concentrated load >= 1/3 of the total",
+                         "value": round(big / tot, 3), "limit": 1.0 / 3.0, "dc": None, "ok": None, "informational": True,
+                         "clause": "IS 801 8.2.1", "cite": IS801_82_CITE, "units": "-", "capacity_basis": "IS801_allowable",
+                         "allowable_increase": 1.0, "source": M.SRC,
+                         "note": "one-third or more of the load is concentrated: place a brace at or near that load"})
+    bf = brace_force_82(sec, w_max, a, span, point_loads)
+    if bf["P1_int_N"] is None:
+        rows.append({"combo": "bracing", "check": "8.2.2 brace force P1", "value": None, "limit": None, "dc": None, "ok": None,
+                     "clause": "IS 801 8.2.2", "cite": IS801_82_CITE, "units": "N", "capacity_basis": "IS801_allowable",
+                     "allowable_increase": 1.0, "source": M.SRC, "note": bf["K_prime_basis"]})
+        return rows
+    rows.append({"combo": "bracing (governing w)", "check": "8.2.2 brace force P1, intermediate brace (per flange)",
+                 "value": round(bf["P1_int_N"], 1), "limit": None, "dc": None, "ok": True, "informational": True,
+                 "clause": "IS 801 8.2.2", "cite": IS801_82_CITE, "units": "N", "capacity_basis": "IS801_allowable",
+                 "allowable_increase": 1.0, "source": M.SRC,
+                 "note": "K' = %.4f (%s); w = %.3f kN/m; a = %.0f mm; end braces %.0f N" % (bf["K_prime"], bf["K_prime_basis"],
+                                                                                         abs(w_max), a, bf["P1_end_N"])})
+    typ = br.get("type")
+    bsp = br.get("spec") or {}
+    n, n_how = _members_per_line(cfg, spec, role, s, br)
+    per_member = bf["P1_int_N"] + abs(w_par) * a + abs(w_vert_member) * a
+    F = n * per_member
+    if typ == "sag_rods":
+        fy_r = _num(bsp.get("rod_fy_MPa"), 250.0); fu_r = _num(bsp.get("rod_fu_MPa"), 410.0)
+        dmin = _num(bsp.get("min_rod_dia_mm"), 12.0)
+        cands = [float(bsp["rod_dia_mm"])] if bsp.get("rod_dia_mm") else [d for d in (10.0, 12.0, 16.0, 20.0, 24.0) if d >= dmin]
+        pick = None
+        for d in cands:
+            rc = rod_capacity(d, fy_r, fu_r)
+            pick = rc
+            if F <= rc["T_allow_N"]:
+                break
+        sized = not bsp.get("rod_dia_mm")
+        rows.append({"combo": "bracing (governing w)", "check": "sag rod M%d tension (%s)" % (round(pick["d_mm"]), "sized" if sized else "declared"),
+                     "value": round(F, 1), "limit": round(pick["T_allow_N"], 1), "dc": F / pick["T_allow_N"],
+                     "ok": F <= pick["T_allow_N"] + 1e-6, "clause": "IS 800:2007 11.2.1 / 6.3.1 (working stress)",
+                     "cite": ROD_CITE, "units": "N", "capacity_basis": "IS800_WSM", "allowable_increase": 1.0, "source": M.SRC,
+                     "rod": pick, "members_per_line": n,
+                     "note": "rod force = %d members x (P1 %.0f N + along-line load %.0f N) per line (%s); M%d: Ag %.0f mm2, "
+                             "root %.0f mm2" % (n, bf["P1_int_N"], (abs(w_par) + abs(w_vert_member)) * a, n_how,
+                                                round(pick["d_mm"]), pick["Ag_mm2"], pick["A_root_mm2"])})
+    else:
+        cap = bsp.get("capacity_N")
+        r = {"combo": "bracing (governing w)", "check": "%s brace force (per brace, %d member(s) per line)" % (typ, n),
+             "value": round(F, 1), "limit": float(cap) if cap else None, "units": "N",
+             "clause": "IS 801 8.2.2", "cite": IS801_82_CITE, "capacity_basis": "test" if cap else "IS801_allowable",
+             "allowable_increase": 1.0, "source": M.SRC}
+        if cap:
+            r.update(dc=F / float(cap), ok=F <= float(cap), note="declared brace capacity: %s" % (bsp.get("capacity_source") or "design engineer -- VERIFY"))
+        else:
+            r.update(dc=None, ok=None, note="brace / connection capacity not declared (bracing.capacity_N + capacity_source): "
+                                            "the design engineer sizes the %s for this force" % typ)
+        rows.append(r)
+    return rows
 
 
 def _point_load_effects(pls, span, kind):
@@ -568,17 +949,30 @@ def continuous_unit_effects(n_spans, L, lap, nseg=24):
     return {k: (float(v) if isinstance(v, (_np.floating, _np.integer)) else v) for k, v in out.items()}
 
 
-def design_purlins(cfg, role="purlin", spec=None, tag=None):
+def design_purlins(cfg, role="purlin", spec=None, tag=None, *, collateral_kNm2=None, pv_kNm2=None):
     """Roof purlins (or wall girts with role='girt'): gravity (D + Lr / snow on the projection, declared point loads)
     and member-level wind (C02: element Ka, Table 6 / Table 5 governing Cpe, local strips, Cpi from openings;
-    derived on every path, declared values only increase it); 6.3 LTB on the unrestrained flange between sag rods."""
+    derived on every path, declared values only increase it); 6.3 LTB on the unrestrained flange between braces.
+
+    2026-10 first wave (review item 3 + lead item 5), backward compatible:
+      * restraint basis: the sheeted flange (purlin top / girt outer) is restrained by the sheeting (L_unbraced_top_mm
+        = 0); the free flange (purlin bottom / girt inner) is braced at the declared bracing interval
+        (spec['bracing'] {type, lines, spacing_mm, ...} or the legacy spec['sag_rods'] = number of lines) and is
+        checked UNBRACED over the span when no bracing is declared.  Every returned check row carries 'restraint' (the
+        compression-flange statement) and the record carries 'restraint_basis'.
+      * IS 801 8.2: 8.2.1 spacing (reference when one flange is sheeted, 8.2 (a)), 8.2.2 brace force, sag rods sized.
+      * collateral_kNm2 / pv_kNm2 (keyword, spec or cfg['loads']; default 0): non-permanent dead components included
+        in the gravity combinations and excluded where the dead load resists wind uplift / suction; shown as separate
+        rows of the record's 'load_table'.
+      * girts: 'suction' (inner flange in compression) / 'pressure' (outer flange), never 'uplift'."""
     cm = cfg["cfs_members"]; pu = spec or groups(cm, role + "s")[0]
-    fy, cite = _grade(cfg)
     sec = _sec(pu)
+    fy, cite = _grade(cfg, sec)
     ld = cfg["loads"]
     span = float(pu["span_mm"]); s = float(pu["spacing_mm"])
     pitch = math.radians(_num(pu.get("roof_pitch_deg")))
     bg = building_wind_geometry(cfg)
+    npd = nonpermanent_dead(cfg, pu, collateral_kNm2, pv_kNm2) if role == "purlin" else {"collateral_kNm2": 0.0, "pv_kNm2": 0.0}
     if role == "purlin":
         wD = _num(ld.get("D_roof")) * 1e-3 * s
         wL = _num(ld.get("Lr")) * 1e-3 * s * math.cos(pitch)
@@ -591,65 +985,145 @@ def design_purlins(cfg, role="purlin", spec=None, tag=None):
         mw = member_pd(cfg, s * span / 1e6, bg["h_m"], "wall", pu.get("zone", "all"), pu)
         p_up = -max(mw["p_out_kNm2"], abs(_num(pu.get("wind_suction_kNm2"))))
         p_dn = max(mw["p_in_kNm2"], _num(pu.get("wind_pressure_kNm2")))
+    wNP = (npd["collateral_kNm2"] + npd["pv_kNm2"]) * 1e-3 * s
     wW_up = p_up * 1e-3 * s; wW_dn = p_dn * 1e-3 * s
     pls = pu.get("point_loads") or []
     MpD, VpD = _point_load_effects(pls, span, "D")
     MpL, VpL = _point_load_effects(pls, span, "L")
-    Lu_top = _num(pu.get("L_unbraced_top_mm"), 0.0)        # top flange restrained by sheeting -> 0
-    Lu_bot = _num(pu.get("L_unbraced_mm"), span)             # bottom flange between sag rods
+    Lu_top = _num(pu.get("L_unbraced_top_mm"), 0.0)        # sheeted flange restrained by the sheeting -> 0
+    br = bracing_basis(pu, span, role)
+    Lu_bot = br["spacing_mm"]                                # free flange: bracing interval, or the span (unbraced)
+    f_sheet, f_free = _flange_names(role)
+    zb = pu.get("zed_basis") if sec.get("type") == "LZ" else None
+    if Lu_top == 0.0:
+        rt_sheet = restraint_text(f_sheet, True, 0.0, None, span,
+                                  basis="the sheeting through-fastened to it" if role == "purlin" else "the wall sheeting fastened to it")
+    elif br["declared"]:
+        rt_sheet = ("compression flange: %s (not taken as restrained by the sheeting), braced at %.0f mm (declared "
+                    "L_unbraced_top_mm; %d %s)" % (f_sheet, Lu_top, br["lines"], br.get("type_text")))
+    else:
+        rt_sheet = restraint_text(f_sheet, False, Lu_top, None, span)
+    rt_free = restraint_text(f_free, False, Lu_bot, br, span)
+    if br.get("note"):
+        rt_free += " (" + br["note"] + ")"
     rows = []
     combos = [c for c in B.cfs_combinations(cfg.get("load_plan"), cfg) if c["fE"] == 0]
+    common = dict(npd=npd, wNP=wNP, br=br, rt_sheet=rt_sheet, rt_free=rt_free, f_sheet=f_sheet, f_free=f_free, zb=zb,
+                  pitch=pitch)
     if str(pu.get("continuity") or "").lower() == "lapped":
         return _design_lapped(cfg, role, pu, sec, fy, cite, span, s, wD, wL, wS, wW_up, wW_dn, mw, p_up, p_dn,
-                              Lu_top, Lu_bot, combos, tag)
+                              Lu_top, Lu_bot, combos, tag, **common)
+    w_gov, w_par_gov = 0.0, 0.0
     for c in combos:
         w_grav = c["fD"] * wD + c["fL"] * wL + c.get("fS", 0.0) * wS
-        # wind sign: +fW with the suction pattern gives uplift, -fW the pressure pattern
+        # wind sign: +fW with the suction pattern gives uplift / outward suction, -fW the pressure pattern
         w = w_grav
         if c["fW"] > 0:
             w = w_grav + wW_up
         elif c["fW"] < 0:
             w = w_grav + wW_dn
+        w, inc_np = _with_nonpermanent(w, c["fD"] * wNP)
         Mp = c["fD"] * MpD + c["fL"] * MpL
         Vp = c["fD"] * VpD + c["fL"] * VpL
         Mx = w * span ** 2 / 8.0 + Mp; V = abs(w) * span / 2.0 + Vp
-        uplift = Mx < 0
+        free_comp = Mx < 0
+        if abs(w) > abs(w_gov):
+            w_gov = w
+        if role == "purlin" and w > 0:
+            w_par_gov = max(w_par_gov, (w_grav + (c["fD"] * wNP if inc_np else 0.0)) * math.sin(pitch))
         we = bool(c["wind_eq"])
-        b = M.bending_allowable(sec, fy, Lu_bot if uplift else Lu_top, Cb=1.0, wind_eq=we,
-                                compression_flange_restrained=(not uplift and Lu_top == 0.0))
-        rows.append(_row(c["label"], "6.1/6.2/6.3 bending (%s)" % ("uplift, bottom flange" if uplift else "gravity"),
-                         M._rec(abs(Mx), b["Ma_Nmm"], b["clause"], b["cite"], allowable_increase=b["allowable_increase"]),
-                         {"M_Nmm": round(Mx, 1), "w_N_per_mm": round(w, 4), "Fb_MPa": _rnd(b["Fb_MPa"]), "ltb": b["ltb_clause"],
-                          **({"M_point_Nmm": round(Mp, 1)} if pls else {}), **({"note": b["note"]} if b.get("note") else {})}))
+        b = M.bending_allowable(sec, fy, Lu_bot if free_comp else Lu_top, Cb=1.0, wind_eq=we,
+                                compression_flange_restrained=(not free_comp and Lu_top == 0.0), zed_basis=zb)
+        if role == "girt":
+            lab = "suction, %s flange in compression" % f_free if free_comp else "pressure, %s flange in compression" % f_sheet
+        else:
+            lab = "uplift, %s flange in compression" % f_free if free_comp else "gravity, %s flange in compression" % f_sheet
+        if b.get("ok") is None:
+            rows.append(_row(c["label"], "6.1/6.2/6.3 bending (%s)" % lab, {"ok": None, "note": b.get("note"), "clause": b.get("clause")},
+                             {"restraint": rt_free if free_comp else rt_sheet}))
+        else:
+            rows.append(_row(c["label"], "6.1/6.2/6.3 bending (%s)" % lab,
+                             M._rec(abs(Mx), b["Ma_Nmm"], b["clause"], b["cite"], allowable_increase=b["allowable_increase"]),
+                             {"M_Nmm": round(Mx, 1), "w_N_per_mm": round(w, 4), "Fb_MPa": _rnd(b["Fb_MPa"]), "ltb": b["ltb_clause"],
+                              "L_unbraced_mm": Lu_bot if free_comp else Lu_top, "restraint": rt_free if free_comp else rt_sheet,
+                              "nonpermanent_dead_included": inc_np,
+                              **({"M_point_Nmm": round(Mp, 1)} if pls else {}), **({"note": b["note"]} if b.get("note") else {})}))
         rows.append(_row(c["label"], "6.4.1 web shear", M.web_shear_64(sec, fy, V, wind_eq=we), {"V_N": round(V, 1)}))
         rows.append(_row(c["label"], "6.5 web crippling (support)",
                          M.web_crippling_65(sec, fy, V, _num(pu.get("bearing_mm"), 50.0), end=False, back_to_back=sec.get("n_ply", 1) == 2, wind_eq=we)))
+    w_vert = 0.0
+    if role == "girt":
+        w_vert = (sec.get("mass_kg_m") or 0.0) * 9.80665e-3 + _num(ld.get("clad")) * 1e-3 * s
+    rows += bracing_rows(cfg, pu, sec, role, span, s, br, w_gov, w_par=w_par_gov, sheeted=(Lu_top == 0.0), point_loads=pls,
+                         w_vert_member=w_vert)
     defl = 5.0 * max(wL + wS, abs(wW_up), wW_dn) * span ** 4 / (384.0 * E_MPA * sec["Ix"])
     rows.append(_defl_row("service", "deflection (information)", defl, span, pu, "IS 800:2007 Table 6 read-only when cited"))
-    extra = {"span_mm": span, "loads_N_per_mm": {"dead": wD, "live": wL, "snow": wS, "wind_up": wW_up, "wind_down": wW_dn},
+    rows += geometry_rows(sec)
+    _stamp_restraint(rows, "%s; %s" % (rt_sheet, rt_free))
+    extra = {"span_mm": span, "loads_N_per_mm": {"dead": wD, "collateral": npd["collateral_kNm2"] * 1e-3 * s,
+                                                 "pv": npd["pv_kNm2"] * 1e-3 * s, "live": wL, "snow": wS,
+                                                 "wind_up": wW_up, "wind_down": wW_dn},
+             "load_table": _purlin_load_table(role, ld, npd, s, pitch, p_up, p_dn, mw),
              "wind": {"member_pd": mw, "p_uplift_kNm2": p_up, "p_down_kNm2": p_dn, "cite": mw["cite"],
                       "declared": {k: pu.get(k) for k in ("wind_uplift_kNm2", "wind_suction_kNm2", "wind_pressure_kNm2") if pu.get(k) is not None}},
-             "point_loads": pls or None, "zone": pu.get("zone", "all"),
-             "grade_cite": cite, "clauses": ["IS 801 5.2.1.1", "6.1", "6.1.2", "6.2", "6.3", "6.4.1", "6.5"]}
+             "point_loads": pls or None, "zone": pu.get("zone", "all"), "material": material_statement(cfg, sec),
+             "restraint_basis": {"sheeted_flange": f_sheet, "free_flange": f_free, "sheeted_text": rt_sheet, "free_text": rt_free,
+                                 "bracing": br, "L_unbraced_free_mm": Lu_bot, "L_unbraced_sheeted_mm": Lu_top},
+             "zed_basis": zb,
+             "grade_cite": cite, "clauses": ["IS 801 5.2.1.1", "5.2.3", "5.2.4", "6.1", "6.1.2", "6.2", "6.3", "6.4.1", "6.5", "8.2"]}
     return _member_record(role, pu, sec, fy, combos, rows, extra, tag=tag)
 
 
+def _purlin_load_table(role, ld, npd, s, pitch, p_up, p_dn, mw):
+    """Separate rows for every load component of a purlin / girt (kN/m2 and kN/m on the member)."""
+    k = s / 1000.0
+    if role == "girt":
+        return [{"component": "wind suction (member pd, IS 875-3 7.3)", "kNm2": abs(p_up), "kN_per_m": abs(p_up) * k,
+                 "applied": "+W rows (inner flange in compression)"},
+                {"component": "wind pressure (member pd, IS 875-3 7.3)", "kNm2": p_dn, "kN_per_m": p_dn * k,
+                 "applied": "-W rows (outer flange in compression)"}]
+    c = math.cos(pitch)
+    return [
+        {"component": "dead (permanent: sheeting, purlin, insulation)", "kNm2": _num(ld.get("D_roof")),
+         "kN_per_m": _num(ld.get("D_roof")) * k, "applied": "every combination (0.9 DL on the uplift rows)"},
+        {"component": "collateral (services hung from the purlins; non-permanent dead)", "kNm2": npd["collateral_kNm2"],
+         "kN_per_m": npd["collateral_kNm2"] * k, "applied": "gravity combinations only; excluded from uplift"},
+        {"component": "rooftop PV (non-permanent dead)", "kNm2": npd["pv_kNm2"], "kN_per_m": npd["pv_kNm2"] * k,
+         "applied": "gravity combinations only; excluded from uplift"},
+        {"component": "roof imposed load (IS 875-2, on plan)", "kNm2": _num(ld.get("Lr")), "kN_per_m": _num(ld.get("Lr")) * k * c,
+         "applied": "DL+IL rows"},
+        {"component": "snow (IS 875-4, on plan)", "kNm2": _num(ld.get("snow")), "kN_per_m": _num(ld.get("snow")) * k * c,
+         "applied": "DL+SL rows"},
+        {"component": "wind uplift (member pd, IS 875-3 7.3)", "kNm2": abs(p_up), "kN_per_m": abs(p_up) * k, "applied": "+W rows"},
+        {"component": "wind downward (member pd)", "kNm2": p_dn, "kN_per_m": p_dn * k, "applied": "-W rows"},
+    ]
+
+
 def _design_lapped(cfg, role, pu, sec, fy, cite, span, s, wD, wL, wS, wW_up, wW_dn, mw, p_up, p_dn, Lu_top, Lu_bot,
-                   combos, tag):
+                   combos, tag, npd=None, wNP=0.0, br=None, rt_sheet=None, rt_free=None, f_sheet="top", f_free="bottom",
+                   zb=None, pitch=0.0):
     """PEB (2026-10): lapped (continuous) zed purlins / girts over n_spans equal spans with nested laps of lap_mm each
     side of every interior support (continuous_unit_effects; laps at 2 EI).  Checked per working-stress combination
     (IS 875-5 8.1 / IS 801 6.1.2): span (single section), lap end (single, moment + shear and 6.4.3 web bending +
     shear), interior support (two nested sections: 2 x the single capacity), web crippling at the interior support
     (two webs) and the end support; the flange in compression decides the restraint -- the flange fastened to the
-    sheeting is restrained (zed_basis), the free flange buckles over the sag-rod spacing (span, uplift) or over the
-    distance from the support to the point of contraflexure (hogging zones; spec 'L_unbraced_hog_mm' overrides)."""
+    sheeting is restrained (zed_basis), the free flange buckles over the bracing interval (span, uplift / suction) or over
+    the distance from the support to the point of contraflexure (hogging zones; spec 'L_unbraced_hog_mm' overrides).
+    2026-10 first wave: restraint text on every row, IS 801 8.2 bracing rows, non-permanent dead (collateral / PV)."""
     n = int(pu.get("n_spans") or 5)
     lap = float(pu.get("lap_mm") or 0.0)
     ce = continuous_unit_effects(n, span, lap)
     zb = pu.get("zed_basis") if sec.get("type") == "LZ" else (pu.get("zed_basis") or "channel")
     L_hog = _num(pu.get("L_unbraced_hog_mm"), ce.get("x_inflection_max_mm") or span / 4.0)
+    npd = npd or {"collateral_kNm2": 0.0, "pv_kNm2": 0.0}
+    br = br or bracing_basis(pu, span, role)
+    rt_sheet = rt_sheet or restraint_text(f_sheet, Lu_top == 0.0, Lu_top, None, span)
+    rt_free = rt_free or restraint_text(f_free, False, Lu_bot, br, span)
+    rt_hog = ("compression flange: %s (free) in the hogging zone, unbraced from the support to the point of contraflexure, "
+              "%.0f mm" % (f_free, L_hog))
     rows = []
     L2 = span ** 2
+    w_gov, w_par_gov = 0.0, 0.0
     for c in combos:
         w_grav = c["fD"] * wD + c["fL"] * wL + c.get("fS", 0.0) * wS
         w = w_grav
@@ -657,6 +1131,11 @@ def _design_lapped(cfg, role, pu, sec, fy, cite, span, s, wD, wL, wS, wW_up, wW_
             w = w_grav + wW_up
         elif c["fW"] < 0:
             w = w_grav + wW_dn
+        w, inc_np = _with_nonpermanent(w, c["fD"] * wNP)
+        if abs(w) > abs(w_gov):
+            w_gov = w
+        if role == "purlin" and w > 0:
+            w_par_gov = max(w_par_gov, (w_grav + (c["fD"] * wNP if inc_np else 0.0)) * math.sin(pitch))
         we = bool(c["wind_eq"])
         down = w >= 0
         # continuous_unit_effects is for w = 1 N/mm on the actual spans: scale by w
@@ -667,22 +1146,29 @@ def _design_lapped(cfg, role, pu, sec, fy, cite, span, s, wD, wL, wS, wW_up, wW_
         Vl = ce["V_lap"] * abs(w)
         Ri = ce["R_int"] * abs(w)
         Re = ce["R_end"] * abs(w)
-        # span: top flange in compression when w > 0 (restrained by the sheeting), else the free bottom flange
+        if role == "girt":
+            lab = "pressure" if down else "suction"
+        else:
+            lab = "gravity" if down else "uplift"
+        # span: sheeted flange in compression when w > 0 (restrained by the sheeting), else the free flange
         b1 = M.bending_allowable(sec, fy, Lu_top if down else Lu_bot, Cb=1.0, wind_eq=we,
                                  compression_flange_restrained=(down and Lu_top == 0.0), zed_basis=zb)
-        rows.append(_row(c["label"], "6.1/6.2/6.3 bending, span (single, %s)" % ("gravity" if down else "uplift"),
+        rows.append(_row(c["label"], "6.1/6.2/6.3 bending, span (single, %s)" % lab,
                          M._rec(abs(Ms), b1["Ma_Nmm"], b1["clause"], b1["cite"], allowable_increase=b1["allowable_increase"]),
-                         {"M_Nmm": round(Ms, 1), "w_N_per_mm": round(w, 4), "ltb": b1["ltb_clause"]}))
+                         {"M_Nmm": round(Ms, 1), "w_N_per_mm": round(w, 4), "ltb": b1["ltb_clause"],
+                          "L_unbraced_mm": Lu_top if down else Lu_bot, "restraint": rt_sheet if down else rt_free,
+                          "nonpermanent_dead_included": inc_np}))
         # lap end and support: hogging for w > 0 -> free flange in compression over the hogging length
         b2 = M.bending_allowable(sec, fy, L_hog if down else Lu_top, Cb=1.0, wind_eq=we,
                                  compression_flange_restrained=(not down and Lu_top == 0.0), zed_basis=zb)
         rows.append(_row(c["label"], "6.1/6.2/6.3 bending, lap end (single)",
                          M._rec(abs(Ml), b2["Ma_Nmm"], b2["clause"], b2["cite"], allowable_increase=b2["allowable_increase"]),
-                         {"M_Nmm": round(Ml, 1), "ltb": b2["ltb_clause"], "L_unbraced_mm": L_hog if down else 0.0}))
+                         {"M_Nmm": round(Ml, 1), "ltb": b2["ltb_clause"], "L_unbraced_mm": L_hog if down else 0.0,
+                          "restraint": rt_hog if down else rt_sheet}))
         rows.append(_row(c["label"], "6.1/6.2/6.3 bending, interior support (2 nested sections)",
                          M._rec(abs(Mu), 2.0 * b2["Ma_Nmm"], b2["clause"], b2["cite"] + "; lapped: 2 x single",
                                 allowable_increase=b2["allowable_increase"]),
-                         {"M_Nmm": round(Mu, 1)}))
+                         {"M_Nmm": round(Mu, 1), "restraint": rt_hog if down else rt_sheet}))
         rows.append(_row(c["label"], "6.4.1 web shear, lap end (single)", M.web_shear_64(sec, fy, Vl, wind_eq=we),
                          {"V_N": round(Vl, 1)}))
         sh2 = M.web_shear_64(sec, fy, Vs / 2.0, wind_eq=we)
@@ -695,11 +1181,18 @@ def _design_lapped(cfg, role, pu, sec, fy, cite, span, s, wD, wL, wS, wW_up, wW_
         rows.append(_row(c["label"], "6.5 web crippling, end support",
                          M.web_crippling_65(sec, fy, Re, _num(pu.get("bearing_mm"), 100.0), end=True,
                                             back_to_back=False, wind_eq=we), {"R_N": round(Re, 1)}))
+    w_vert = 0.0
+    if role == "girt":
+        w_vert = (sec.get("mass_kg_m") or 0.0) * 9.80665e-3 + _num((cfg.get("loads") or {}).get("clad")) * 1e-3 * s
+    rows += bracing_rows(cfg, pu, sec, role, span, s, br, w_gov, w_par=w_par_gov, sheeted=(Lu_top == 0.0),
+                         w_vert_member=w_vert)
     I = sec["Ix"]
     wsv = max(wL + wS, abs(wW_up), wW_dn)
     defl = ce["defl_max_per_EI"] * wsv / (E_MPA * I)
     rows.append(_defl_row("service (max of IL, WL)", "deflection, lapped continuous (laps 2 EI)", defl, span, pu,
                           "IS 800:2007 Table 6 purlins / girts span/150 (elastic cladding) when declared"))
+    rows += geometry_rows(sec)
+    _stamp_restraint(rows, "%s; %s" % (rt_sheet, rt_free))
     extra = {"span_mm": span, "continuity": {"type": "lapped", "n_spans": n, "lap_mm": lap,
                                              "coefficients_wL2": {k: round(ce[k] / L2, 4) for k in
                                                                   ("M_span_end", "M_span_int", "M_support", "M_lap")},
@@ -708,10 +1201,15 @@ def _design_lapped(cfg, role, pu, sec, fy, cite, span, s, wD, wL, wS, wW_up, wW_
                                              "basis": "continuous beam, equal spans, laps 2 EI (india_cfs_members."
                                                       "continuous_unit_effects)"},
              "zed_basis": pu.get("zed_basis"),
-             "loads_N_per_mm": {"dead": wD, "live": wL, "snow": wS, "wind_up": wW_up, "wind_down": wW_dn},
+             "loads_N_per_mm": {"dead": wD, "collateral": npd["collateral_kNm2"] * 1e-3 * s, "pv": npd["pv_kNm2"] * 1e-3 * s,
+                                "live": wL, "snow": wS, "wind_up": wW_up, "wind_down": wW_dn},
+             "load_table": _purlin_load_table(role, cfg.get("loads") or {}, npd, s, pitch, p_up, p_dn, mw),
              "wind": {"member_pd": mw, "p_uplift_kNm2": p_up, "p_down_kNm2": p_dn, "cite": mw["cite"]},
-             "zone": pu.get("zone", "all"), "grade_cite": cite,
-             "clauses": ["IS 801 5.2.1.1", "6.1", "6.1.2", "6.2", "6.3(b) zeds", "6.4.1", "6.4.3", "6.5"],
+             "zone": pu.get("zone", "all"), "grade_cite": cite, "material": material_statement(cfg, sec),
+             "restraint_basis": {"sheeted_flange": f_sheet, "free_flange": f_free, "sheeted_text": rt_sheet, "free_text": rt_free,
+                                 "hogging_text": rt_hog, "bracing": br, "L_unbraced_free_mm": Lu_bot,
+                                 "L_unbraced_sheeted_mm": Lu_top, "L_unbraced_hog_mm": L_hog},
+             "clauses": ["IS 801 5.2.1.1", "5.2.3", "5.2.4", "6.1", "6.1.2", "6.2", "6.3(b) zeds", "6.4.1", "6.4.3", "6.5", "8.2"],
              "mass_kg_per_m": sec.get("mass_kg_m"), "lap_mass_factor": 1.0 + 2.0 * lap * (n - 1) / (n * span)}
     return _member_record(role, pu, sec, fy, combos, rows, extra, tag=tag)
 
@@ -719,8 +1217,8 @@ def _design_lapped(cfg, role, pu, sec, fy, cite, span, s, wD, wL, wS, wW_up, wW_
 def design_eave_strut(cfg, spec, tag=None):
     """C14: eave strut -- the longitudinal strut at the eave carrying the declared axial force (gable wind / EQ into the
     bracing, P_N + P_cite) with its own-weight bending; IS 801 6.6 / 6.7 with the 6.1.2 increase (W / EL force)."""
-    fy, cite = _grade(cfg)
     sec = _sec(spec)
+    fy, cite = _grade(cfg, sec)
     L = float(spec["span_mm"])
     if spec.get("P_N") is None:
         raise ValueError("cfs_members.eave_struts: declared axial force P_N (+ P_cite) required -- the strut force of the "
@@ -749,8 +1247,8 @@ def design_eave_strut(cfg, spec, tag=None):
 
 def design_header(cfg, spec, tag=None):
     """C14: header over a wall opening -- simply supported beam under the declared dead / imposed line loads."""
-    fy, cite = _grade(cfg)
     sec = _sec(spec)
+    fy, cite = _grade(cfg, sec)
     span = float(spec["span_mm"])
     if spec.get("w_dead_kN_per_m") is None:
         raise ValueError("cfs_members.headers: w_dead_kN_per_m (+ w_live_kN_per_m, load_cite) required")
@@ -780,8 +1278,107 @@ def _tag(g, i, n):
     return g.get("name") or (("G%d" % (i + 1)) if n > 1 else None)
 
 
+# ---------------------------------------------------------------------------------------------------------------
+# 2026-10 first wave (review item 2): auto-selection of the lightest passing section from a declared family
+# ---------------------------------------------------------------------------------------------------------------
+AUTO_FAMILY_NAMES = ("thin_C_G350", "thin_Z_G350", "IS811_CLR", "IS811_CLS", "IS811_LZ")
+
+
+def family_candidates(family, spec=None):
+    """Candidate labels of one family (or a list of families), lightest first: [(label, mass_kg_m, h, t)].
+    spec['auto_select'] filters: depth_min_mm / depth_max_mm / t_min_mm / t_max_mm.  Generic thin sections outside
+    the IS 801 5.2.3 / 5.2.4 limits are not candidates."""
+    import cfs_generic_sections as GS
+    asel = (spec or {}).get("auto_select") or {}
+    fams = family if isinstance(family, (list, tuple)) else [family]
+    out = []
+    for f in fams:
+        if f in GS.FAMILIES:
+            labs = GS.family_labels(f)
+        elif str(f).upper().startswith("IS811_"):
+            labs = S.list_labels(str(f).split("_", 1)[1].upper())
+        else:
+            raise ValueError("auto_select.family %r unknown (known: %s)" % (f, ", ".join(AUTO_FAMILY_NAMES)))
+        for lab in labs:
+            try:
+                p = S.props(lab)
+            except KeyError:
+                continue
+            if p.get("generic") and not p.get("is801_geometry_ok"):
+                continue
+            h, t = p["h"], p["t"]
+            if h < _num(asel.get("depth_min_mm"), 0.0) or h > _num(asel.get("depth_max_mm"), 1e9):
+                continue
+            if t < _num(asel.get("t_min_mm"), 0.0) or t > _num(asel.get("t_max_mm"), 1e9):
+                continue
+            if p.get("mass_kg_m") is None:
+                continue
+            out.append((lab, p["mass_kg_m"], h, t))
+    return sorted(out, key=lambda r: (r[1], r[2]))
+
+
+def _first_failure(recs):
+    for r in recs:
+        for c in r.get("checks") or []:
+            if c.get("informational"):
+                continue
+            if c.get("ok") is None:
+                return "not evaluated: %s (%s)" % (c.get("check"), c.get("combo"))
+            if c.get("ok") is False:
+                return "%s (%s) D/C %s" % (c.get("check"), c.get("combo"), _fmt_num(c.get("dc"), 3))
+    return None
+
+
+def auto_select(cfg, spec, design_group):
+    """Pick the lightest section of spec['auto_select']['family'] for which every record of design_group(spec) passes
+    every IS 801 check (no D/C > 1, nothing unevaluated).  Returns the records of the chosen section with
+    rec['auto_selected'] = {family, criterion, n_candidates, n_tried, lighter_rejected, reference_section, ...}."""
+    asel = spec.get("auto_select") or {}
+    fam = asel.get("family")
+    if not fam:
+        raise ValueError("auto_select.family required (one of %s)" % ", ".join(AUTO_FAMILY_NAMES))
+    cands = family_candidates(fam, spec)
+    if not cands:
+        raise ValueError("auto_select: no candidate in family %r within the declared limits" % (fam,))
+    ref = asel.get("reference_section") or (spec.get("section") if str(spec.get("section") or "").lower() not in ("", "auto") else None)
+    ref_mass = None
+    if ref:
+        try:
+            n_r, base_r = S.parse_designator(ref)
+            ref_mass = (S.props(base_r).get("mass_kg_m") or 0.0) * int(spec.get("n_ply") or n_r)
+        except (KeyError, ValueError):
+            ref_mass = None
+    rejected, chosen, tried = [], None, 0
+    nply = int(spec.get("n_ply") or 1)
+    for lab, mass, h, t in cands:
+        tried += 1
+        trial = dict(spec, section=lab, n_ply=nply)
+        trial.pop("designator", None)
+        try:
+            recs = design_group(trial)
+        except (KeyError, ValueError, ZeroDivisionError) as ex:
+            rejected.append({"section": lab, "mass_kg_m": round(mass * nply, 3), "reason": "not designable: %s" % ex})
+            continue
+        why = _first_failure(recs)
+        if why is None:
+            chosen = recs
+            break
+        rejected.append({"section": lab, "mass_kg_m": round(mass * nply, 3), "reason": why})
+    meta = {"family": fam, "criterion": "lightest mass per metre (base metal) passing every IS 801 check of the group",
+            "n_candidates": len(cands), "n_tried": tried, "lighter_rejected": rejected[-6:],
+            "reference_section": ref, "reference_mass_kg_m": ref_mass}
+    if chosen is None:
+        lab = cands[-1][0]
+        chosen = design_group(dict(spec, section=lab, n_ply=nply))
+        meta["note"] = "no section of family %s passes; the heaviest candidate %s is reported (FAIL)" % (fam, lab)
+    for r in chosen:
+        r["auto_selected"] = dict(meta, section=r.get("designator"), mass_kg_m=r.get("mass_kg_m"))
+    return chosen
+
+
 def design_all(cfg):
-    """All declared CFS members -> list of member records (groups per role, C14)."""
+    """All declared CFS members -> list of member records (groups per role, C14).  A group with 'auto_select'
+    {family, depth / thickness limits, reference_section} gets the lightest passing section of the family."""
     cm = cfg.get("cfs_members") or {}
     out = []
     H = (cfg.get("geometry") or {}).get("heights_m") or []
@@ -789,11 +1386,16 @@ def design_all(cfg):
     for i, st in enumerate(st_groups):
         # C02: every storey by default (the top storey carries the highest pz; equal storeys no longer pick storey 1 only)
         storeys = st.get("storeys") or list(range(1, len(H) + 1))
-        for k in storeys:
-            t = "S%d" % int(k)
-            if len(st_groups) > 1:
-                t = "%s-%s" % (_tag(st, i, len(st_groups)), t)
-            out.append(design_studs(cfg, storey=int(k), spec=st, tag=t))
+
+        def _studs(g, i=i, storeys=storeys):
+            recs = []
+            for k in storeys:
+                t = "S%d" % int(k)
+                if len(st_groups) > 1:
+                    t = "%s-%s" % (_tag(g, i, len(st_groups)), t)
+                recs.append(design_studs(cfg, storey=int(k), spec=g, tag=t))
+            return recs
+        out += auto_select(cfg, st, _studs) if st.get("auto_select") else _studs(st)
     for key, fn in (("joists", lambda g, t: design_joists(cfg, g, t)),
                     ("purlins", lambda g, t: design_purlins(cfg, "purlin", g, t)),
                     ("girts", lambda g, t: design_purlins(cfg, "girt", g, t)),
@@ -801,5 +1403,9 @@ def design_all(cfg):
                     ("headers", lambda g, t: design_header(cfg, g, t))):
         gs = groups(cm, key)
         for i, g in enumerate(gs):
-            out.append(fn(g, _tag(g, i, len(gs))))
+            tg = _tag(g, i, len(gs))
+            if g.get("auto_select"):
+                out += auto_select(cfg, g, lambda gg, fn=fn, tg=tg: [fn(gg, tg)])
+            else:
+                out.append(fn(g, tg))
     return out
