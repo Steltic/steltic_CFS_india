@@ -1,11 +1,13 @@
 # hr_vendor — the shared India engine, vendored byte-identically from work/hr
 
-Source: steltic_india (hot-rolled IS 800 engine), branch fix/2026-09-review
-Commit: **69701f6070706e5d2adc6fefaea16b42c9f4e221** [steltic_india main] (steltic_india fix/2026-09-review, 2026-09-26, after the 2026-09 review fixes), copied with every file of `steel_engine/` except `tools/` and `__pycache__/`. After the steltic_india PR merges, re-run `scripts/check_vendored.py` against the merged checkout and record the merged commit here.
+Source: steltic_india (hot-rolled IS 800 engine), branch fix/2026-10-first-wave
+Commit: **54e7463343f1b6ba19429c5aa28c169118fd3bc3** [steltic_india fix/2026-10-first-wave] (2026-10 first wave; every file of `steel_engine/` except `tools/` and `__pycache__/`, copied with `git show 54e7463:steel_engine/<path>`)
 
 **2026-10 re-sync:** the vendored files were rewritten together with `steltic_india` branch `fix/2026-10-peb-briefs` (the 2026-10 renumbering of the example briefs: brief ids in comments, docstrings and one message string; no logic change). Merged steltic_india commit: **083a500845e04566a3b3dfc5be79e494498c3ef1**.
 
 **2026-10 PEB re-sync:** rewritten together with `steltic_india` branch `fix/2026-10-peb-tapered` (the PEB release: welded and web-tapered portal frames). Ten files changed (design_pipeline, engine3d, india_combos, india_connections, india_is800, india_is800_s12, report_india, roof_geometry, sections, static_model) and four are new (peb_build, peb_checks, peb_outputs, peb_report). The CFS gold runs are unchanged (gold pack REGRESSION_2026-10.md). Merged steltic_india commit: **083a500845e04566a3b3dfc5be79e494498c3ef1**.
+
+**2026-10 first-wave re-sync:** rewritten from steltic_india commit 54e7463 (branch `fix/2026-10-first-wave`): HR-1 (`consistency._gather_uncomputed_text` skips `delegated_criteria` / `delegated_item`), HR-2 (the IS 1893 Table 8 floor-area row text), HR-3 (codes table IS 875 (Part 4):2021), collateral / PV non-permanent dead loads, crane bracket, STAAD load export and report clean-up. 14 files changed and 3 are new (`crane_bracket.py`, `report_first_wave.py`, `staad_loads.py`); 52 files in all. Earlier pin: 69701f6070706e5d2adc6fefaea16b42c9f4e221. `scripts/check_vendored.py` now compares against the pinned commit (`git show <commit>:steel_engine/<path>`), not the live HR working tree.
 
 Rules (IMPL_BRIEF conventions, spec WP1.14):
 - Every file in this folder is byte-identical to `work/hr/steel_engine/<same path>` at the commit above.
