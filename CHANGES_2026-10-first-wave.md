@@ -84,11 +84,22 @@ root causes that live there are listed at the end for the HR repo.
 
 ## Tests
 
-- New: `tests/test_fix_FW1_generic_sections.py` (11), `tests/test_fix_FW2_restraint_autoselect.py` (9),
-  `tests/test_fix_FW3_status_report.py` (9).
-- `python3 -m pytest tests -q -p no:cacheprovider`: see the final count in the hand-over. The only failure is
-  `test_vendored_engine_is_byte_identical`. It compares `hr_vendor/` with the live `/home/claude/steltic_india`
-  working tree, which the HR first-wave branch is editing now; `hr_vendor/` itself is unchanged.
+- New: `tests/test_fix_FW1_generic_sections.py` (11), `tests/test_fix_FW3_status_report.py` (9).
+- New: `tests/test_fix_FW2_restraint_autoselect.py` now has 11 tests (strap bridging, brace rows outside the member
+  D/C, ply options).
+- `python3 -m pytest tests -q -p no:cacheprovider`: 353 collected, 352 passed and 1 failed. The failure is
+  `test_vendored_engine_is_byte_identical`. It compares `hr_vendor/` with the live `/home/claude/steltic_india` working
+  tree, which the HR first-wave branch is editing now. `hr_vendor/` is unchanged and equals steltic_india `main`,
+  checked file by file.
+
+## Gold re-run (15 CFS golds, working copies in /home/claude/gold/jobs_cfs)
+
+- Every gold `cfg.py` has a "2026-10 first wave (CFS)" block. Its groups are auto-selected from the thin G350 family,
+  the IS 811 section is kept as the reference, the bracing is declared, and Ex2 has `service_temperature_C`.
+- Results: CFS kg/m² down 30–60 %. The worst CFS D/C is 0.79–0.98. The hot-rolled frames are unchanged.
+- Status: Ex3 COMPLETE. The other 14 are PARTIAL, solely from the inherited frame-report items of HR root cause 1
+  below.
+- The before / after table is in the lead's brief folder (`CFS_RESULT.md`).
 
 ## Root causes in the vendored HR engine (for steltic_india; not edited here)
 
