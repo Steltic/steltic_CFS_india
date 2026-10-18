@@ -34,7 +34,7 @@ numbers are those of the IS 801 PDF (read at 300 dpi when the engine was written
 | 7.5.3 | Bearing 2.1 Fy | 30 | `bolted_connection_75` |
 | 7.5.4 | Bolt shear 970 (precision) / 820 (black) / 1060 (4.6) kgf/cm² | 30 | `bolted_connection_75`, `bolt_group_75` |
 | 8.1 | Wall studs sheathed both faces: amax = 8 E I2 Kw/(A² Fy²) and ≤ L r2/(2 r1); Kw,min = Fy² a A²/(8 E I2); Pmin = Kw Ps (L/240)/(2 √(E I2 Kw/a) − Ps); attachment capacity (d) | 30–31 | `wall_stud_81` |
-| 8.2 | Channel and Z-sections used as beams — bracing against twist when neither flange is connected to deck / sheathing: 8.2.1 brace spacing ≤ L/4, 8.2.2 brace force P1 (K' = m/d channels, Ixy/Ix zeds), 8.2.3 stress per 6.3 with L = a | 32 | purlins / girts without a restrained flange: `L_unbraced_mm` = the 8.2.1 brace interval (fly braces) |
+| 8.2 | Channel and Z-sections used as beams — bracing against twist when neither flange is connected to deck / sheathing: 8.2.1 brace spacing ≤ L/4, 8.2.2 brace force P1 (K' = m/d channels, Ixy/Ix zeds), 8.2.3 stress per 6.3 with L = a | 32 | purlins / girts / joists: declared `bracing` (sag rods / bridging / fly braces) → interval a, 8.2.1 / 8.2.2 rows, sag rods sized (`india_cfs_members.bracing_rows`); no bracing → unbraced over the span |
 | 9.1.4 | "The provisions of 9 do not apply to light gauge steel diaphragms" | 33 | diaphragm capacity = cited product / test value |
 
 ## IS 811:1987 — Cold-formed light gauge structural steel sections

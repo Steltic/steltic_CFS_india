@@ -29,8 +29,9 @@ import report_cfs_india as R
 import consistency as CC
 
 STEMS = {
-    "IS_801_1975": ("IS 801:1975", "cold-formed member allowables (5.2, 6.1-6.7, 7, 8.1)"),
-    "IS_811_1987": ("IS 811:1987", "cold-formed section properties (Tables 1-10)"),
+    "IS_801_1975": ("IS 801:1975 (Reaffirmed 2021)", "cold-formed member allowables (5.2, 6.1-6.7, 7, 8.1, 8.2)"),
+    "IS_811_1987": ("IS 811:1987 (Reaffirmed 2024)", "cold-formed section properties (Tables 1-10; computed thin sections by "
+                                                      "IS 801 5.2 conventional methods)"),
     "IS_875_Part_1_2026": ("IS 875 (Part 1):2026", "dead loads"),
     "IS_875_Part_2_1987": ("IS 875 (Part 2):1987", "imposed loads, partitions"),
     "IS_875_Part_3_2015": ("IS 875 (Part 3):2015", "wind: Vb, k2, k4/Kd, Ka, Cpe, Cpi"),
@@ -153,7 +154,7 @@ def design_and_report(name, cfg, outdir=None, do_report=True):
     if errs:
         raise RuntimeError("preflight ERRORs -- fix the cfg before any analysis:\n- " + "\n- ".join(errs))
     pkg = {"building": name, "design_basis": B.DESIGN_BASIS, "lateral_frame_basis": B.LATERAL_FRAME_BASIS,
-           "basis_statement": B.BASIS_STATEMENT, "units": {"engine": "N, mm, MPa", "display": "kN, kN-m, m, mm, kN/m2, MPa"},
+           "basis_statement": B.basis_statement(cfg), "units": {"engine": "N, mm, MPa", "display": "kN, kN-m, m, mm, kN/m2, MPa"},
            "preflight": [{"sev": s, "msg": m} for s, m in pf]}
     # ---- 2 lateral frame ----
     if cfg.get("all_cfs_portal"):
@@ -192,9 +193,12 @@ def design_and_report(name, cfg, outdir=None, do_report=True):
             "members": lat.get("members"), "connections": lat.get("connections"), "drift_table": lat.get("drift_table"), "drift_max": lat.get("drift_max"),
             "irregularity": lat.get("irregularity"), "capacity_design": lat.get("capacity_design"), "collectors": lat.get("collectors"),
             "diaphragm_7_6_4": lat.get("diaphragm_7_6_4"), "load_combinations_n": lat.get("load_combinations_n"), "gates": lat.get("gates"),
+            # 2026-10 first wave (review item 4): the frame report's open items travel with the package
+            "consistency": lat.get("consistency"), "ponding": lat.get("ponding"),
+            "hr_report_items_basis": "numerical self-consistency check printed at the end of the frame report",
             "demand_level": "LSD", "capacity_basis": "IS800_LSD",
-            "note": "hot-rolled IS 800 Section 12 frame designed by the vendored HR India pipeline (IS 800 Table 4 limit state); "
-                    "the CFS members claim no seismic force-resisting role (D3)"}
+            "note": "hot-rolled IS 800 Section 12 frame designed with the Steltic hot-rolled IS 800 engine (IS 800 Table 4 "
+                    "limit state); the cold-formed members claim no seismic force-resisting role"}
         # ---- 3 CFS members ----
         pkg["cfs_members"] = CM.design_all(cfg)
         # ---- 4 diaphragm + declared CFS connections ----
@@ -236,11 +240,11 @@ def design_and_report(name, cfg, outdir=None, do_report=True):
         out["report_html"] = R.build_report_cfs_india(name, cfg, pkg, root)
     eor = _eor_inputs(cfg, pkg)
     json.dump(_jsonable(eor), open(os.path.join(root, "EOR_inputs.json"), "w"), indent=1)
-    basis_text = B.BASIS_STATEMENT
+    basis_text = B.basis_statement(cfg)
     if cfg.get("all_cfs_portal"):
-        basis_text = ((pkg.get("lateral_frame") or {}).get("statement") or "") + "\n\n" + B.BASIS_STATEMENT.split(" The lateral force-resisting system")[0]
+        basis_text = ((pkg.get("lateral_frame") or {}).get("statement") or "") + "\n\n" + basis_text
     with open(os.path.join(root, "STATUS.md"), "w") as f:
-        f.write("# %s -- design status: %s\n\nAuthority: %s\nVendored HR engine: %s\n\n%s\n\nOpen reasons (%d):\n%s"
+        f.write("# %s -- design status: %s\n\nAuthority: %s\nHot-rolled engine version (vendored): %s\n\n%s\n\nOpen reasons (%d):\n%s"
                 % (name, st["status"].upper(), st["authority"], (pkg.get("lateral_frame") or {}).get("vendored_commit"), basis_text,
                    len(st["reasons"]), "".join("- %s\n" % r for r in st["reasons"])))
         if eor:

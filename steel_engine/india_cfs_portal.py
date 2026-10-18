@@ -537,17 +537,35 @@ def seismic_elastic(cfg, secs, meta):
 # ------------------------------------------------------------------------------------------------ checks
 def _gov_row(c):
     """C12: value / limit / check of the governing check row of a connection (summary D/C traceable, not 'literal')."""
-    rows = [r for r in (c.get("checks") or []) if isinstance(r.get("dc"), (int, float))]
+    if c.get("units") == "N" and isinstance(c.get("limit"), (int, float)):
+        # 2026-10 first wave: a bolt group carries its own force demand / capacity (IS 801 7.5 per-bolt capacity)
+        return {"value": c.get("value"), "limit": c.get("limit"), "units": "N",
+                "governing_check": c.get("governing_check"), "governing_combo": c.get("governing_combo")}
+    rows = [r for r in (c.get("checks") or []) if isinstance(r.get("dc"), (int, float)) and not r.get("detailing")]
     if not rows:
         return {"value": c.get("value"), "limit": c.get("limit")}
     g = max(rows, key=lambda r: r["dc"])
     return {"value": g.get("value"), "limit": g.get("limit"), "governing_check": g.get("check"), "governing_combo": g.get("combo")}
 
 
+def _portal_units(name):
+    """Display units of a portal / base / bracing / bolt-group check row value."""
+    n = str(name).lower()
+    if n.startswith("7.5.1"):
+        return "mm"
+    if (n.startswith(("7.5.", "tension", "6.1 tension", "plate bending", "anchor tension", "anchor shear", "concrete bearing"))
+            or "web shear" in n or n.startswith("stability")):
+        return "MPa"
+    if n.startswith(("compression", "6.6", "anchorage embedment")):
+        return "N"
+    return "-"
+
+
 def _mrow(label, name, r, extra=None):
     o = {"combo": label, "check": name, "value": r.get("value"), "limit": r.get("limit"), "dc": r.get("dc"), "ok": r.get("ok"),
          "clause": r.get("clause"), "cite": r.get("cite"), "allowable_increase": r.get("allowable_increase", 1.0),
          "capacity_basis": r.get("capacity_basis", "IS801_allowable"), "source": SRC}
+    o["units"] = r.get("units") or _portal_units(name)   # 2026-10 first wave: display units (report kN / MPa / mm)
     if r.get("note"):
         o["note"] = r["note"]
     if extra:
@@ -984,9 +1002,22 @@ def run(cfg, root):
                 if worst is None or fd > worst[1]["dc_force"]:
                     worst = (cl, bg, (P, V, Mz), lab)
         cl, bg, (P, V, Mz), lab = worst
+        # 2026-10 first wave (review item 5): demand = the most loaded bolt (elastic vector method), capacity = the IS 801
+        # 7.5 per-bolt force capacity in the n_ply sheets (bearing / edge-distance force / bolt shear, 6.1.2 increase);
+        # the D/C is that force ratio -- the 7.5.1 e >= 1.5 d geometry is a detailing row, not the connection D/C
+        nply = max(int(secs["raf"].get("n_ply", 1)), 1)
+        cap = bg["capacity_per_bolt_N"] * nply
+        dcf = bg["F_bolt_max_N"] / cap if cap > 0 else None
+        chk = [_mrow(cl, k, v) for k, v in bg["checks"].items()]
+        for r_ in chk:
+            if r_["check"].startswith("7.5.1"):
+                r_["detailing"] = True
         conns.append({"id": key + "-bolt-group", "type": "bolted gusset (%dx%d M%d, %s)" % (spec["rows"], spec["cols"], spec["d_mm"], lab),
-                      "checks": [_mrow(cl, k, v) for k, v in bg["checks"].items()], "value": bg["F_bolt_max_N"], "limit": None,
-                      "dc": bg["dc"], "ok": bg["ok"], "governing_combo": cl, "demand": {"P_N": P, "V_N": V, "M_Nmm": Mz},
+                      "checks": chk, "value": bg["F_bolt_max_N"], "limit": cap, "units": "N",
+                      "governing_check": "%s x %d sheet(s)" % (bg["governing_capacity"], nply),
+                      "capacity_components_N": bg["capacity_components_N"], "n_bolts": bg["n_bolts"],
+                      "dc": dcf, "ok": bg["ok"] and (dcf is not None and dcf <= 1.0 + 1e-9), "governing_combo": cl,
+                      "demand": {"P_N": P, "V_N": V, "M_Nmm": Mz},
                       "clause": "IS 801 7.5 (%s)" % bg["method"], "capacity_basis": "IS801_allowable",
                       "allowable_increase": bg["allowable_increase"], "demand_level": "working"})
     base = cn.get("base")

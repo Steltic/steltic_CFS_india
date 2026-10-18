@@ -143,7 +143,8 @@ All-CFS elastic portal (IN_CFS_Ex3 only): `"all_cfs_portal": True`, `"portal": {
 "n_frames", "length_m", "girt_spacing_m", "purlin_spacing_m", "base", "opening_ratio", "seismic_basis": "elastic_R1",
 "knee_brace"}`, optional `"mezzanine"`, `"cfs_members"` with `columns` / `rafters` / `knee_braces` / `purlins` / `girts` /
 `joists` / `mezzanine_posts`, `"connections"` (IS 801 7.5 bolt groups at knee / apex, base plates), `"longitudinal_bracing"`.
-Sections are IS 811 labels only (`CLR…`, `CLS…`, `CWR…`, `CWS…`, `EA…`, `UA…`, `HS…`, `HRH…` / `HRB…` hat, `LZ…`);
+Sections are IS 811 labels (`CLR…`, `CLS…`, `CWR…`, `CWS…`, `EA…`, `UA…`, `HS…`, `HRH…` / `HRB…` hat, `LZ…`) or the
+computed thin `C…-G350` / `Z…-G350` sections (see CFS members below);
 `n_ply` 1 or 2 (two channels back to back with IS 801 7.3 interconnection). Hot-rolled sections are IS 808 labels
 (`WPB…`, `NPB…`, `ISMB…`) in E250 / E350 per IS 2062.
 
@@ -269,7 +270,42 @@ Sections are IS 811 labels only (`CLR…`, `CLS…`, `CWR…`, `CWS…`, `EA…`
   `partition_kNm2`. `purlins.point_loads`: `[{"P_kN", "a_m", "kind": "D" | "L", "cite"}]` (evaporator units).
   `eave_struts`: `{section, n_ply, span_mm, P_N, P_cite, L_unbraced_mm}` (IS 801 6.7 with the 6.1.2 increase).
   `headers`: `{section, n_ply, span_mm, w_dead_kN_per_m, w_live_kN_per_m, load_cite, bearing_mm, deflection_limit_ratio}`.
-* Lipped zeds (`LZ…`) are refused in bending (found:false) until principal-axis bending is implemented — use channels.
+* Lipped zeds (`LZ…`, `Z…-G350`) bend about their geometric axis only with a declared `zed_basis` (the sheeting /
+  bracing statement); without it they are refused in bending (found:false).
+* **Computed thin sections (2026-10 first wave).** Besides the IS 811 labels, a group may use a generic thin lipped
+  channel `C<h>X<b>X<c>X<t>-G350` or lipped zed `Z<h>X<b>X<c>X<t>-G350` (e.g. `C200X65X20X1.6-G350`,
+  `Z250X70X20X2.0-G350`): depths 100 / 150 / 200 / 250 / 300 mm (flange × lip 50×15, 60×20, 65×20, 70×20, 80×25),
+  base-metal t 1.0, 1.2, 1.6, 2.0, 2.5, 3.15 mm; properties computed from the geometry (`cfs_generic_sections`,
+  Ri = 1.5 t). Material: IS 277 grade 350 coil, Z275 coating, Fy 350 MPa (inside the IS 801 Table 2 36 kgf/mm² row,
+  353 MPa) — the grade comes from the label, not from `cfs_members.Fy_MPa`. For IS 811 sections declare the coating in
+  `cfs_members.coating` (and optionally `cfs_members.material`); every report prints the grade and coating.
+* **Auto-selection.** `"auto_select": {"family": "thin_C_G350" | "thin_Z_G350" | "IS811_CLR" | "IS811_LZ" (or a list),
+  "depth_min_mm", "depth_max_mm", "t_min_mm", "t_max_mm", "reference_section"}` on a group (with `"section": "auto"` or
+  the old section kept as the reference) picks the lightest section of the family that passes every IS 801 check of
+  the group; the report says it was auto-selected and from which family. A zed family needs `zed_basis`.
+* **Restraint basis (2026-10 first wave).** Every purlin / girt / joist / stud check prints its compression-flange
+  restraint. Purlins / girts: the sheeted flange (purlin top, girt outer) is restrained by the sheeting
+  (`L_unbraced_top_mm` = 0); the free flange is braced only by a declared `"bracing": {"type": "sag_rods" | "bridging" |
+  "fly_braces" | "straps" | "blocking", "lines", "spacing_mm" (default span / (lines + 1)), "rod_dia_mm" (sag rods; else
+  sized M10–M24, `min_rod_dia_mm` default 12), "rod_fy_MPa", "rod_fu_MPa", "members_per_line", "capacity_N" +
+  "capacity_source" (other brace types)}` (the legacy `"sag_rods": <number of lines>` is read as sag rods). Without a
+  declared bracing the free flange is checked UNBRACED over the span — an `L_unbraced_mm` alone is not used. IS 801 8.2:
+  8.2.1 spacing ≤ L/4 (reference when one flange is sheeted, 8.2 (a)), 8.2.2 brace force P1 = 1.5 K′ w a, sag rods
+  sized to IS 800 11.2.1 (working stress). Joists: `compression_flange_restrained: true` (+ optional `restraint_basis`
+  text) is the deck restraint; not declared → unbraced over the bridging interval or the span. Studs: IS 801 8.1
+  sheathing on both faces (`sheathing`).
+* **Report and site keys (2026-10 first wave).** `report_title` (optional; default by building type: all-CFS portal,
+  CFS purlins / girts on a hot-rolled portal, or a hot-rolled braced / moment frame with LGSF infill and floors);
+  `site.coastal_exposure` (true / false; default from the city: Chennai, Visakhapatnam, Surat, Mumbai, Kolkata and other
+  coastal cities) drives the coating note of the "Durability, fire and acoustics" chapter; `service_temperature_C`
+  (e.g. -23 for a freezer) adds the cold-service toughness note. `ponding` = `{span_mm, delta_mm, roof_slope,
+  end_drainage}` is the IS 875 (Part 4) 4.4 ponding-screen input passed to the frame run; without it the CFS engine
+  derives one for a roof with beams of 12 m or more and a declared pitch (simply supported roof beam under max(snow,
+  Lr), conservative). The cold-formed members are added to the frame run's `delegated_design` register.
+* **Non-permanent dead loads.** `collateral_kNm2` (services hung from purlins / joists) and `pv_kNm2` (rooftop PV), on
+  the group, in `loads`, or as keyword arguments of `india_cfs_members.design_purlins` / `design_joists`
+  (default 0): included in the gravity combinations, excluded where the dead load resists wind uplift / suction, and
+  listed as separate rows of the member's load table.
 * Floor deflection criterion: IS 800 Table 6 "other buildings, floor": span/300 (elements not susceptible to cracking) or
   span/360 (susceptible) — span/240 is the industrial row, not a floor of an ordinary building.
 

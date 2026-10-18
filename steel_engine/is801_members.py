@@ -730,4 +730,14 @@ def bolted_connection_75(Fy_MPa, t_mm, d_mm, P_per_bolt_N, n_bolts, edge_mm, spa
     out["ok"] = all(c.get("ok") for c in out["checks"].values())
     out["capacity_basis"] = "IS801_allowable"
     out["allowable_increase"] = inc
+    # 2026-10 first wave (review item 5): the per-bolt force capacity (N) in this sheet -- the smallest of 7.5.3
+    # bearing 2.1 Fy d t, 7.5.1 edge-distance force 0.6 Fy t e and 7.5.4 bolt shear fvb Ab, all with the 6.1.2
+    # increase -- so a bolt group shows demand vs capacity in kN (7.5.1's e >= 1.5 d stays a detailing row)
+    caps = {"7.5.3 bearing (2.1 Fy d t)": 2.1 * Fy * d * t * inc * 9.80665,
+            "7.5.1 edge distance (0.6 Fy t e)": 0.6 * Fy * t * (edge_mm / 10.0) * inc * 9.80665,
+            "7.5.4 bolt shear (fvb Ab)": fvb * Ab * inc * 9.80665}
+    gov = min(caps, key=caps.get)
+    out.update(capacity_per_bolt_N=caps[gov], capacity_components_N=caps, governing_capacity=gov,
+               dc_force=(P_per_bolt_N / caps[gov]) if caps[gov] > 0 else None,
+               edge_min_detailing_mm=1.5 * d_mm)
     return out

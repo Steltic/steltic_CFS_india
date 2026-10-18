@@ -123,6 +123,18 @@ def check(cfg) -> list:
     import india_cfs_members as CMB
     for role in ("studs", "joists", "purlins", "girts", "rafters", "columns", "eave_struts", "headers"):
         for spec in CMB.groups(cm, role):                   # C14: one group or a list of groups
+            if spec.get("auto_select"):                     # 2026-10 first wave: lightest passing section of a family
+                try:
+                    if not CMB.family_candidates(spec["auto_select"].get("family"), spec):
+                        say("ERROR", "cfs_members.%s: auto_select family %r has no candidate within the declared limits"
+                            % (role, spec["auto_select"].get("family")))
+                    elif "Z_" in str(spec["auto_select"].get("family")) and not spec.get("zed_basis"):
+                        say("ERROR", "cfs_members.%s: a zed family needs zed_basis (the sheeting / bracing statement for "
+                                     "geometric-axis bending, IS 801 6.3)" % role)
+                except (ValueError, KeyError, AttributeError) as ex:
+                    say("ERROR", "cfs_members.%s: auto_select: %s" % (role, ex))
+                if str(spec.get("section") or "").lower() in ("", "auto"):
+                    continue
             if spec.get("section"):
                 try:
                     import is811_sections as S

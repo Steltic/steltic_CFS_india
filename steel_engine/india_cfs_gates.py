@@ -35,7 +35,8 @@ SFIA_RE = re.compile(r"^\d{3,4}[SsTtUuFfLl]\d{2,3}-\d{2,3}$")
 DEMAND_CAP_RE = re.compile(r"cap\s*=\s*max\(.*\*\s*1\.(15|25)|DC\"?\s*[:=]\s*0\.8\b|seeded D/C", re.I)
 BLOCKING_RE = re.compile(r"analysis|7\.7\.1|RSA|ESM|irregular|Table 5|Table 6|gate|Amd|flexible|diaphragm|torsion|drift|"
                          r"system|Table 9|18168", re.I)
-AUTHORITY = "india_cfs_gates.design_status (CFS) over india_seismic_gates.design_status (vendored HR, lateral frame)"
+AUTHORITY = ("cold-formed design status (india_cfs_gates) including the hot-rolled frame status and the open items of "
+             "the frame report")
 
 IS800_STEMS = ("IS_800_2007", "IS800", "IS_800", "engineering_standards_IS800", "IS_18168_2023", "IS18168")
 IS800_ALLOWLIST_PURPOSES = frozenset({
@@ -230,6 +231,39 @@ def lateral_issues(pkg) -> list:
     return []
 
 
+def lateral_report_items(pkg) -> list:
+    """2026-10 first wave (review item 4): open items of the linked hot-rolled frame report that its own design status
+    does not count -- the numerical self-consistency list ('N item(s) to reconcile before the report is final') and the
+    frame connections without an evaluated capacity (e.g. a splice 'not evaluated').  The CFS status inherits them, so a
+    CFS report never reads COMPLETE while the frame report it links says it is not final."""
+    lat = pkg.get("lateral_frame") or {}
+    if not lat or pkg.get("portal"):
+        return []
+    out = []
+    cons = [str(x) for x in (lat.get("consistency") or [])]
+    if cons:
+        out.append("lateral frame report: %d item(s) to reconcile before the frame report is final (its numerical "
+                   "self-consistency check)" % len(cons))
+        seen, order = {}, []
+        for x in cons:
+            k = re.sub(r"\d+(\.\d+)?", "#", x)[:160]
+            if k not in seen:
+                seen[k] = [x, 0]
+                order.append(k)
+            seen[k][1] += 1
+        for k in order:
+            x, n = seen[k]
+            out.append("lateral frame report item: %s%s" % (x[:240], (" (x%d)" % n) if n > 1 else ""))
+    for c in lat.get("connections") or []:
+        ne = [str(x) for x in (c.get("not_evaluated") or [])]
+        if ne:
+            out.append("lateral frame connection %s (%s): not evaluated -- %s" % (c.get("id"), c.get("type"), "; ".join(ne)))
+        elif c.get("DC") is None and not c.get("all_checks_ok"):
+            out.append("lateral frame connection %s (%s): no numeric capacity in the frame package (not evaluated)"
+                       % (c.get("id"), c.get("type")))
+    return out
+
+
 def diaphragm_issues(pkg) -> list:
     out = []
     for r in pkg.get("diaphragm") or []:
@@ -307,6 +341,7 @@ def design_status(cfg, pkg=None) -> dict:
             reasons.append("load plan: " + msg)
     reasons += ["basis: " + x for x in B.basis_issues(pkg)]
     reasons += lateral_issues(pkg)
+    reasons += lateral_report_items(pkg)
     reasons += cfs_member_issues(pkg)
     reasons += diaphragm_issues(pkg)
     reasons += anchorage_issues(pkg)

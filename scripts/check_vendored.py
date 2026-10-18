@@ -2,7 +2,13 @@
 """check_vendored.py -- the shared India engine in steel_engine/hr_vendor/ must be byte-identical to work/hr.
 
     python3 scripts/check_vendored.py            # sha256 compare every vendored file; exit 1 on any difference
-    python3 scripts/check_vendored.py --sync     # print the cp commands that would re-sync (never copies itself)
+    python3 scripts/check_vendored.py --sync     # print the commands that would re-sync (never copies itself)
+    python3 scripts/check_vendored.py --worktree # compare with the live HR working tree instead of the pinned commit
+
+2026-10 first wave: by default the comparison is against the PINNED commit recorded in VENDORED_FROM.md ("Commit:
+**<sha>**"), read from the HR git repository with `git show <sha>:steel_engine/<path>` -- a branch being edited in the
+HR checkout no longer breaks the check. Every file of the HR steel_engine/ at that commit (tools/ excepted) must be
+vendored, and no vendored file may be missing from it.
 
 The HR source root is $STELTIC_HR_ROOT, else a sibling checkout ../steltic_india or ../steltic_india-main next to this
 repo; when none exists the script prints SKIP and exits 0 (nothing to compare against).  The commit the folder was
@@ -55,11 +61,55 @@ def vendored_files():
     return sorted(out)
 
 
-def compare():
-    """Return (identical:list, different:list, missing_in_hr:list)."""
+def pinned_commit():
+    """The commit recorded in VENDORED_FROM.md (first 'Commit: **<sha>**' line), or None."""
+    try:
+        for line in open(os.path.join(VENDOR, "VENDORED_FROM.md"), encoding="utf-8"):
+            if line.startswith("Commit:") and "**" in line:
+                return line.split("**")[1].strip()
+    except OSError:
+        return None
+    return None
+
+
+def _git(*args):
+    import subprocess
+    return subprocess.run(["git", "-C", HR_ROOT] + list(args), capture_output=True)
+
+
+def commit_files(commit):
+    """{rel path: bytes} of steel_engine/ at the commit (tools/ excluded), or None when git cannot read it."""
+    r = _git("ls-tree", "-r", "--name-only", commit, "steel_engine")
+    if r.returncode != 0:
+        return None
+    out = {}
+    for path in r.stdout.decode().splitlines():
+        rel = path[len("steel_engine/"):]
+        if rel.startswith("tools/") or "__pycache__" in rel:
+            continue
+        b = _git("show", "%s:%s" % (commit, path))
+        if b.returncode != 0:
+            return None
+        out[rel] = b.stdout
+    return out
+
+
+def compare(commit=None):
+    """Return (identical:list, different:list, missing_in_hr:list, not_vendored:list)."""
     same, diff, missing = [], [], []
+    ref = commit_files(commit) if commit else None
+    if commit and ref is None:                      # no git history (e.g. an exported tree): fall back to the files
+        print("NOTE: commit %s not readable from %s (git); comparing with the working tree" % (commit, HR_ROOT))
     for rel in vendored_files():
         a = os.path.join(VENDOR, rel)
+        if ref is not None:
+            if rel not in ref:
+                missing.append(rel)
+            elif hashlib.sha256(ref[rel]).hexdigest() == sha256(a):
+                same.append(rel)
+            else:
+                diff.append(rel)
+            continue
         b = os.path.join(HR_ENGINE, rel)
         if not os.path.exists(b):
             missing.append(rel)
@@ -67,24 +117,33 @@ def compare():
             same.append(rel)
         else:
             diff.append(rel)
-    return same, diff, missing
+    have = set(vendored_files())
+    not_vendored = sorted(r for r in (ref or {}) if r not in have)
+    return same, diff, missing, not_vendored
 
 
 def main(argv):
     if not HR_ROOT:
         print("SKIP: no HR checkout to compare against (set STELTIC_HR_ROOT, or place steltic_india next to this repo)")
         return 0
-    same, diff, missing = compare()
+    commit = None if "--worktree" in argv else pinned_commit()
+    same, diff, missing, not_vendored = compare(commit)
     if "--sync" in argv:
-        for rel in diff + missing:
-            print("cp %s %s" % (os.path.join(HR_ENGINE, rel), os.path.join(VENDOR, rel)))
+        for rel in diff + not_vendored:
+            if commit:
+                print("git -C %s show %s:steel_engine/%s > %s" % (HR_ROOT, commit, rel, os.path.join(VENDOR, rel)))
+            else:
+                print("cp %s %s" % (os.path.join(HR_ENGINE, rel), os.path.join(VENDOR, rel)))
         return 0
-    print("vendored: %d identical, %d different, %d missing in %s" % (len(same), len(diff), len(missing), HR_ROOT))
+    print("vendored: %d identical, %d different, %d missing in %s, %d not vendored (against %s)"
+          % (len(same), len(diff), len(missing), HR_ROOT, len(not_vendored), commit or "the working tree"))
     for rel in diff:
         print("  DIFFERENT %s" % rel)
     for rel in missing:
         print("  MISSING-IN-HR %s" % rel)
-    return 1 if (diff or missing) else 0
+    for rel in not_vendored:
+        print("  NOT-VENDORED %s" % rel)
+    return 1 if (diff or missing or not_vendored) else 0
 
 
 if __name__ == "__main__":

@@ -363,6 +363,77 @@ def copy_rag_hits(rag_dir, sub_root):
     return n
 
 
+PONDING_BASIS = ("IS 875 (Part 4):2021 4.4 ponding screen (HR india_loads.ponding_screen_4_4, engineering practice: the "
+                 "mid-span deflection must stay below the fall over the half span). Deflection bound computed by the CFS "
+                 "engine: the longest roof beam taken SIMPLY SUPPORTED (conservative for a portal / continuous rafter) under "
+                 "max(snow, roof imposed load) on its tributary width, E = 200 000 MPa; roof slope from the declared pitch")
+
+
+def ponding_input(cfg):
+    """2026-10 first wave (reconcile item 'long-span roof framing and NO ponding evaluation'): the cfg['ponding'] record
+    the HR engine evaluates (span_mm, delta_mm, roof_slope, end_drainage) for a roof with beams of 12 m or more.
+    A declared cfg['ponding'] (or lateral_frame.hr_cfg_extra.ponding) wins.  None when no roof beam reaches 12 m or the
+    roof slope is not declared (the frame report then keeps its reconcile item -- nothing is assumed)."""
+    if cfg.get("ponding"):
+        return dict(cfg["ponding"])
+    lf = cfg.get("lateral_frame") or {}
+    if (lf.get("hr_cfg_extra") or {}).get("ponding"):
+        return None
+    bx, by = float(lf.get("bay_x_m") or 0.0), float(lf.get("bay_y_m") or 0.0)
+    span_m = max(bx, by)
+    if span_m < 12.0:
+        return None
+    po = cfg.get("portal") or {}
+    geo = cfg.get("geometry") or {}
+    pitch = None
+    if po.get("eave_m") is not None and po.get("apex_m") is not None and po.get("spans_m"):
+        pitch = math.degrees(math.atan2(float(po["apex_m"]) - float(po["eave_m"]), float(po["spans_m"][0]) / 2.0))
+    elif geo.get("roof_pitch_deg") is not None:
+        pitch = float(geo["roof_pitch_deg"])
+    if pitch is None:
+        return None
+    trib = (by if bx >= by else bx) * 1000.0
+    ld = cfg.get("loads") or {}
+    q = max(float(ld.get("snow") or 0.0), float(ld.get("Lr") or 0.0))
+    bs = lf.get("beam_sec") or {}
+    beam = bs.get("roof_X" if bx >= by else "roof_Y") or bs.get("roof") or lf.get("beam")
+    if isinstance(beam, dict):
+        beam = list(beam.values())[-1]
+    try:
+        import sections as HS                       # vendored IS 808 / IS 1161 table
+        Ix = float(HS.props(beam)["Ix"])
+    except Exception:
+        return None
+    L = span_m * 1000.0
+    w = q * 1e-3 * trib
+    delta = 5.0 * w * L ** 4 / (384.0 * 200000.0 * Ix)
+    return {"span_mm": L, "delta_mm": round(delta, 1), "roof_slope": round(math.tan(math.radians(pitch)), 4),
+            "end_drainage": True, "beam": beam, "load_kNm2": q, "tributary_mm": trib, "basis": PONDING_BASIS}
+
+
+CFS_DELEGATED_ITEM = {
+    "item": "cold-formed members carried by this frame (floor joists and boards, wall studs, roof purlins and wall girts) -- "
+            "designed in the cold-formed package to IS 801:1975 (Reaffirmed 2021)",
+    "criteria": "IS 801:1975 working stress with the IS 875 (Part 5) combinations; the cold-formed members span between the "
+                "hot-rolled beams / frames and claim no seismic force-resisting role",
+    "interface_forces": "the floor, roof and cladding loads applied to this frame model (dead, imposed / snow and wind line "
+                        "loads); the cold-formed member end reactions are those line loads",
+    "source": "india_cfs_lateral.build_hr_spec (CFS package register entry)"}
+
+
+def delegated_register(cfg):
+    """2026-10 first wave (frame-report reconcile item 'delegated-design components referenced (joists / deck ...) but no
+    cfg['delegated_design'] register'): the job's own register plus the cold-formed members, which ARE delegated from the
+    hot-rolled frame to the cold-formed package (the HR rule fires on the CFS engine's own floor-system text)."""
+    reg = cfg.get("delegated_design")
+    reg = [reg] if isinstance(reg, dict) else list(reg or [])
+    cm = cfg.get("cfs_members") or {}
+    if any(cm.get(k) for k in ("joists", "studs", "purlins", "girts")) and not any(
+            isinstance(r, dict) and str(r.get("source") or "").startswith("india_cfs_lateral") for r in reg):
+        reg.append(dict(CFS_DELEGATED_ITEM))
+    return reg or None
+
+
 def build_hr_spec(cfg, name):
     """Declarative HR-frame spec (JSON) from the CFS cfg."""
     lf = cfg["lateral_frame"]; site = cfg["site"]; geo = cfg["geometry"]; ld = cfg["loads"]
@@ -437,7 +508,8 @@ def build_hr_spec(cfg, name):
         "flexible_diaphragm_eor": lf.get("flexible_diaphragm_eor"),
         # AUD-3 / AUD-4: deck kind for the 7.6.4 preflight rule and the job's delegated-design register (anchor
         # breakout / pedestal item) for the concrete_breakout record of the bases
-        "diaphragm_type": lf.get("diaphragm_type"), "delegated_design": cfg.get("delegated_design"),
+        "diaphragm_type": lf.get("diaphragm_type"), "delegated_design": delegated_register(cfg),
+        "ponding": ponding_input(cfg),                      # 2026-10 first wave: IS 875-4 4.4 screen input (long roof beams)
         "hr_cfg_extra": lf.get("hr_cfg_extra") or {},       # declared HR cfg keys passed through verbatim (e.g. is18168_table2,
                                                             # grade_by_section, custom_sections, column_imposed_load_reduction)
         "notes": "%s: hot-rolled %s lateral frame (R %s) of a CFS building; CFS members gravity / wind only (D3)"

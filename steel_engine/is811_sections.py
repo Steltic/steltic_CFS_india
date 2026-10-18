@@ -113,11 +113,22 @@ def _flats(p, ri, t):
     return {}
 
 
+def looks_generic(name) -> bool:
+    """2026-10 first wave: a computed thin lipped C / Z label (C200X65X20X1.6-G350, cfs_generic_sections)."""
+    import cfs_generic_sections as _G
+    return _G.looks_generic(name)
+
+
 def props(name: str, unit_system: str | None = None) -> dict:
-    """Section properties of an IS 811 label in N-mm.  KeyError (found:false) for unknown / quarantined labels."""
+    """Section properties of an IS 811 label in N-mm.  KeyError (found:false) for unknown / quarantined labels.
+    2026-10 first wave: a generic thin-section label (C<h>X<b>X<c>X<t>-G350 / Z...-G350) is computed from its
+    geometry by cfs_generic_sections (not an IS 811 row; the record says so in 'family' / 'source')."""
     if unit_system not in (None, "N-mm", "SI", "mm"):
         raise ValueError("is811_sections.props: only N-mm properties exist on the India branch (asked %r)" % unit_system)
     lab = str(name).upper().replace(" ", "")
+    if looks_generic(lab):
+        import cfs_generic_sections as _G
+        return _G.props(lab)
     db = _load()
     q = _QUAR.get(lab)
     if lab not in db:

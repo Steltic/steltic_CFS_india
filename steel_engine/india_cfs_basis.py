@@ -2,11 +2,12 @@
 
 Two labelled families live in cfg['load_plan'] and never mix:
 
-  1. CFS members (studs, tracks, joists, purlins, girts, all-CFS portal members) -- IS 801:1975 WORKING STRESS:
+  1. CFS members (studs, tracks, joists, purlins, girts, all-CFS portal members) -- IS 801:1975 (Reaffirmed 2021)
+     WORKING STRESS:
        design_basis = "IS801_WSM"
        F = 0.60 Fy (IS 801 6.1, PDF p.11); loads = IS 875 (Part 5):1987 cl. 8.1 combinations at factor 1.0:
-       DL; DL+IL; DL+WL; DL+EL; DL+IL+WL; DL+IL+EL; (snow replaces IL, Note 1); 0.9DL +- WL/EL for uplift /
-       overturning / sliding (Notes 4, 5).  The allowable stresses are increased by 33 1/3 % ONLY for the
+       DL; DL+IL; DL+WL; DL+EL; DL+IL+WL; DL+IL+EL; (snow replaces IL, Note 1); plus 0.9DL +- WL/EL for uplift /
+       overturning (NOT 8.1 rows: added by the design engineer with the 0.9 DL of the 8.1 stability notes, cited so).  The allowable stresses are increased by 33 1/3 % ONLY for the
        combinations containing WL or EL (IS 801 6.1.2.1 / 6.1.2.2, PDF p.13), with the effective widths for those
        combinations at 0.75 x the stress (5.2.1.1 note, PDF p.6), and the section not less than that required for
        DL + IL (6.1.2.2).  IS 875-2 3.2.1 imposed-load reductions apply to IL only and never with EL (IS 875-5 Note 3).
@@ -28,8 +29,18 @@ from __future__ import annotations
 DESIGN_BASIS = "IS801_WSM"
 LATERAL_FRAME_BASIS = "IS800_LSD"
 INCREASE_WL_EL = 4.0 / 3.0
+IS801_EDITION = "IS 801:1975 (Reaffirmed 2021)"
+IS811_EDITION = "IS 811:1987 (Reaffirmed 2024)"
 IS875_5_CITE = ("IS 875 (Part 5):1987 cl. 8.1: DL; DL+IL; DL+WL; DL+EL; DL+IL+WL; DL+IL+EL (Note 1 snow replaces IL; "
-                "Notes 4/5: 0.9 DL against overturning / sliding); Note 2: permissible stresses per the design code (WSM)")
+                "Note 2: permissible stresses per the design code for working stress design)")
+# 2026-10 first wave (review item 8): 0.9 DL +- WL / EL are NOT IS 875-5 8.1 rows; they are added for uplift /
+# overturning with the dead load at 0.9 where it resists, after the 0.9 DL of the 8.1 notes on overall stability
+UPLIFT_ROW_CITE = ("additional uplift / overturning combination (not an IS 875 (Part 5) 8.1 row): dead load taken at 0.9 "
+                   "where it resists, after the 0.9 DL of the 8.1 notes on overall stability against overturning and "
+                   "sliding -- the design engineer's addition")
+EL_CFS_NOTE = ("EL in the cold-formed rows = the IS 1893 (Part 1):2016 design force of the hot-rolled frame (R-reduced "
+               "V_B) at factor 1.0 with the IS 801 6.1.2 increase (the classical Indian working-stress treatment); the "
+               "cold-formed members are not part of the lateral system")
 IS801_61_CITE = "IS 801:1975 6.1 F = 0.60 Fy; 6.1.2.1 / 6.1.2.2 stresses 33 1/3 percent greater for wind or earthquake"
 CAPACITY_BASES = ("IS801_allowable", "IS800_LSD", "IS800_WSM", "IS800_Table6", "manufacturer_ASD", "nominal", "test", "EOR_input")
 WORKING_BASES = ("IS801_allowable", "IS800_WSM", "IS800_Table6", "manufacturer_ASD", "test", "EOR_input")
@@ -39,12 +50,25 @@ WORKING_BASES = ("IS801_allowable", "IS800_WSM", "IS800_Table6", "manufacturer_A
 # working-stress hot-rolled base details of the all-CFS portal (1.33 members / 1.25 anchor bolts, W / EL with imposed load only)
 INCREASES_BY_BASIS = {"IS801_allowable": (1.0, 4.0 / 3.0), "IS800_WSM": (1.0, 1.25, 1.33)}
 
-BASIS_STATEMENT = (
-    "Design basis: IS 801:1975 working stress for every cold-formed member (F = 0.60 Fy; IS 875 (Part 5) cl. 8.1 "
-    "combinations at factor 1.0; +33 1/3 % allowable only for combinations containing wind or earthquake, IS 801 6.1.2; "
-    "effective widths at 0.75 f for those, 5.2.1.1). The lateral force-resisting system is a hot-rolled IS 800:2007 "
-    "Section 12 frame designed to IS 800 Table 4 limit-state combinations with IS 1893 (Part 1):2016 forces; cold-formed "
-    "members are gravity / wind members only and claim no seismic force-resisting role.")
+CFS_BASIS = (
+    "Design basis: IS 801:1975 (Reaffirmed 2021) working stress for every cold-formed member (F = 0.60 Fy; IS 875 "
+    "(Part 5):1987 8.1 combinations at factor 1.0, with additional 0.9 DL uplift rows; +33 1/3 % allowable only for "
+    "combinations containing wind or earthquake, IS 801 6.1.2; effective widths at 0.75 f for those, 5.2.1.1).")
+HR_LATERAL_BASIS = (
+    " The lateral force-resisting system is a hot-rolled IS 800:2007 frame (Section 12 seismic detailing) designed to "
+    "IS 800 Table 4 limit-state combinations with IS 1893 (Part 1):2016 forces; the cold-formed members carry gravity "
+    "and wind only and claim no seismic force-resisting role.")
+PORTAL_LATERAL_BASIS = (
+    " The lateral system is the cold-formed portal frame itself: wind and earthquake are carried by the IS 801 portal "
+    "members, the earthquake designed elastically (R = 1.0, no ductility claimed, IS 1893 (Part 1):2016 6.4.2); IS 800 "
+    "Section 12 does not apply to cold-formed members; the base details are hot-rolled plate and anchors to IS 800 "
+    "Section 11 (working stress).")
+BASIS_STATEMENT = CFS_BASIS + HR_LATERAL_BASIS
+
+
+def basis_statement(cfg=None) -> str:
+    """The design-basis paragraph of a job: the all-CFS portal never carries the hot-rolled lateral-frame sentence."""
+    return CFS_BASIS + (PORTAL_LATERAL_BASIS if (cfg or {}).get("all_cfs_portal") else HR_LATERAL_BASIS)
 
 
 class BasisError(ValueError):
@@ -70,30 +94,32 @@ def cfs_combinations(plan, cfg=None):
     eq_refs = [k for k in sf if k.upper().startswith(("EQ_", "EL"))] or ["EL"]
     rows = []
 
-    def add(label, fD, fL=0.0, fLr=0.0, fS=0.0, fW=0.0, fE=0.0, ref=None, note=""):
+    def add(label, fD, fL=0.0, fLr=0.0, fS=0.0, fW=0.0, fE=0.0, ref=None, note="", row_cite=None):
         we = bool(fW or fE)
+        rc = row_cite or ("IS 875 (Part 5):1987 " + note)
         rows.append({"label": label, "fD": fD, "fL": fL, "fLr": fLr, "fS": fS, "fW": fW, "fE": fE,
                      "lateral_ref": ref, "wind_eq": we, "allowable_increase": INCREASE_WL_EL if we else 1.0,
                      "eff_width_stress_factor": 0.75 if we else 1.0, "design_basis": DESIGN_BASIS,
-                     "cite": IS875_5_CITE + (" | " + note if note else "")})
+                     "row_cite": rc, "is875_8_1_row": row_cite is None,
+                     "cite": rc + ("" if row_cite else " | " + IS875_5_CITE)})
 
     add("DL", 1.0, note="8.1 (a)")
     add("DL+IL", 1.0, 1.0, 1.0, note="8.1 (b)")
     if has_snow:
-        add("DL+SL", 1.0, 0.0, 0.0, 1.0, note="8.1 Note 1: snow replaces imposed load on roofs")
+        add("DL+SL", 1.0, 0.0, 0.0, 1.0, note="8.1 (b) with Note 1 (snow replaces imposed load on roofs)")
     for w in wind_refs:
         for sg, f in (("+", 1.0), ("-", -1.0)):
             add("DL%s1.0%s" % (sg, w), 1.0, fW=f, ref=w, note="8.1 (c) DL+WL")
             add("DL+IL%s1.0%s" % (sg, w), 1.0, 1.0, 1.0, fW=f, ref=w, note="8.1 (f) DL+IL+WL")
             if has_snow:
-                add("DL+SL%s1.0%s" % (sg, w), 1.0, fS=1.0, fW=f, ref=w, note="8.1 (f) with Note 1 snow")
-            add("0.9DL%s1.0%s" % (sg, w), 0.9, fW=f, ref=w, note="8.1 Notes 4/5: 0.9 DL, uplift / overturning / sliding")
+                add("DL+SL%s1.0%s" % (sg, w), 1.0, fS=1.0, fW=f, ref=w, note="8.1 (f) with Note 1 (snow replaces imposed load)")
+            add("0.9DL%s1.0%s" % (sg, w), 0.9, fW=f, ref=w, row_cite=UPLIFT_ROW_CITE)
     for e in eq_refs:
         for sg, f in (("+", 1.0), ("-", -1.0)):
             add("DL%s1.0%s" % (sg, e), 1.0, fE=f, ref=e, note="8.1 (d) DL+EL")
             add("DL+IL%s1.0%s" % (sg, e), 1.0, 1.0, 0.0, fE=f, ref=e,
-                note="8.1 (g) DL+IL+EL (IS 875-2 3.2.1 reductions not applied with EL, Note 3)")
-            add("0.9DL%s1.0%s" % (sg, e), 0.9, fE=f, ref=e, note="8.1 Notes 4/5: 0.9 DL")
+                note="8.1 (g) DL+IL+EL (Note 3: the IS 1893 part of the imposed load; IS 875-2 reductions not applied with EL)")
+            add("0.9DL%s1.0%s" % (sg, e), 0.9, fE=f, ref=e, row_cite=UPLIFT_ROW_CITE)
     return rows
 
 
