@@ -135,3 +135,11 @@ root causes that live there are listed at the end for the HR repo.
     `capacity_design.delegated_design[0].criteria`. The HR copies the register into `capacity_design`, and
     `_gather_uncomputed_text` still reads it.
 - **Tests:** 353 passed.
+
+## Re-vendor from steltic_india 9f3cd6f (2026-10-18, second re-sync)
+
+- `hr_vendor/consistency.py` now carries `_DELEGATED_KEYS` with `delegated_design`, so the register is no longer read
+  as a symbolic requirement. That is the only file changed; 52 files are byte-identical and the pin is updated.
+- **Re-run of the 14 golds with a hot-rolled frame:** all are COMPLETE with 0 open items. All 15 CFS golds are now
+  COMPLETE.
+- **Tests:** 353 passed.
