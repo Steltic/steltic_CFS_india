@@ -114,3 +114,24 @@ root causes that live there are listed at the end for the HR repo.
    IS 875 (Part 4):2021 (review finding 10, Ex2).
 4. `consistency._consultancy_issues` (B8) fires on engine-written floor-system text ("joists"). The CFS side now
    declares a register entry, but the rule should ignore engine boilerplate.
+
+## Re-vendor from steltic_india 54e7463 (2026-10-18)
+
+- `hr_vendor/` was re-vendored from steltic_india 54e7463 (52 files, byte-identical). The HR fixes it brings in:
+  - HR-1: `delegated_criteria` / `delegated_item` are no longer flagged.
+  - HR-2: the D8 row text.
+  - HR-3: the IS 875-4:2021 codes table.
+  - The new IS 18168 6.2 beam-bracing gate.
+- `VENDORED_FROM.md` records the pin. `scripts/check_vendored.py` now compares against that pinned commit with
+  `git show`, not the live HR working tree. `--worktree` keeps the old behaviour. The script also flags HR files that
+  are not vendored.
+- **Gold cfg change:** Ex1 and Ex2 declare `lateral_frame.hr_cfg_extra.beam_lateral_bracing` for the new
+  IS 18168 6.2 gate:
+  - Ex1: rafters braced at 1.5 m by purlins and fly braces.
+  - Ex2: `provide_at_required`, with the near-end spacing as a drawing requirement.
+- **Re-run of all 15 golds:**
+  - Every hot-rolled frame is COMPLETE. Ex3 is COMPLETE.
+  - The other 14 are PARTIAL on exactly 1 inherited frame-report item:
+    `capacity_design.delegated_design[0].criteria`. The HR copies the register into `capacity_design`, and
+    `_gather_uncomputed_text` still reads it.
+- **Tests:** 353 passed.
