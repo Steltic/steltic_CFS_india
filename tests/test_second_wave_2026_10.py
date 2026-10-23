@@ -74,12 +74,15 @@ def test_C1_revendor_is_scripted_and_repeatable(tmp_path):
     assert subprocess.run(chk, capture_output=True, text=True, env=env).returncode == 0
 
 
-def test_C1_vendor_pinned_to_hr_second_wave():
+def test_C1_vendor_pinned_to_hr_main():
+    """hr_vendor follows steltic_india main after the second wave and the PEB variations merge (c7c9cc9); the
+    PEB-LEVERS hooks it brings do nothing without cfg['peb_rules'], so the CFS results are unchanged."""
     pin = open(os.path.join(ROOT, "steel_engine", "hr_vendor", "VENDORED_FROM.md")).read()
-    assert "Commit: **dd1d8c1f86de79489ea1432c0b1ff748326f23af**" in pin
-    assert os.path.exists(os.path.join(ROOT, "steel_engine", "hr_vendor", "report_second_wave.py"))
+    assert "Commit: **c7c9cc9e65b0efdbb8502ede3f8fb6022c5e92c6**" in pin
+    for f in ("report_second_wave.py", "peb_levers.py", "peb_autosize.py"):
+        assert os.path.exists(os.path.join(ROOT, "steel_engine", "hr_vendor", f))
     import india_cfs_env
-    assert india_cfs_env.vendored_commit().startswith("dd1d8c1")
+    assert india_cfs_env.vendored_commit().startswith("c7c9cc9")
 
 
 # ================================================================================================ fixtures

@@ -152,3 +152,9 @@ the difference).
 Publish folder: `/home/claude/cfs_publish2/cfs/` (the 15 reports, viewers and linked frame reports, every local link
 resolving; `index.json` with the titles of the first wave, the report h1 as `report_title`, a meta line led by the
 strength headline with KL/r beside it, and `headline` / `frame_headline` records for the site build).
+
+## Re-vendor after the PEB variations merge
+`hr_vendor` is re-vendored from steltic_india main c7c9cc9 (the second wave plus the PEB variations study) with
+`scripts/revendor_hr.py`: design_pipeline, engine3d, india_is800, india_is800_s12, peb_checks, pipeline and
+report_second_wave rewritten, peb_levers and peb_autosize added. The PEB-LEVERS hooks do nothing without
+`cfg['peb_rules']` and `study_allow_banned_system`, which no CFS job sets, so the CFS results are unchanged.
