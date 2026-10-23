@@ -200,7 +200,7 @@ def test_C3_slenderness_from_compression_rows():
         {"combo": "DL+1.0W_X", "check": "interaction", "value": 0.5, "limit": 1.0, "dc": 0.5, "P_N": 650.0, "KL_r": 75.4},
         {"combo": "DL", "check": "interaction", "value": 0.1, "limit": 1.0, "dc": 0.1, "P_N": 0.0, "KL_r": 250.0}])
     r = RS.member_ratios(stud)
-    assert r["slenderness"] == {"KL_r": 75.4, "limit": 200.0, "ratio": round(75.4 / 200.0, 4), "clause": "IS 801 6.6.3",
+    assert r["slenderness"] == {"KL_r": 75.4, "limit": 200.0, "ratio": round(75.4 / 200.0, 6), "clause": "IS 801 6.6.3",
                                 "basis": RS.SLENDER_TEXT}                 # a row without axial compression is not counted
     assert "KL/r 75.4 / 200 (0.377)" in RS.member_ratio_text(stud)
 

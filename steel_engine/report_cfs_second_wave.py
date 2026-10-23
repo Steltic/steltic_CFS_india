@@ -88,7 +88,7 @@ def member_ratios(m):
         if k == "information":
             continue
         if k not in out or float(c["dc"]) > out[k]["dc"]:
-            out[k] = {"dc": round(float(c["dc"]), 4), "value": c.get("value"), "limit": c.get("limit"),
+            out[k] = {"dc": round(float(c["dc"]), 6), "value": c.get("value"), "limit": c.get("limit"),
                       "units": c.get("units"), "check": _short_check(c), "combination": c.get("combo"),
                       "clause": c.get("clause")}
             if c.get("sense"):
@@ -99,7 +99,7 @@ def member_ratios(m):
             if klr is None or float(c["KL_r"]) > klr[0]:
                 klr = (float(c["KL_r"]), c.get("combo"))
     if klr:
-        out["slenderness"] = {"KL_r": round(klr[0], 1), "limit": SLENDER_LIMIT, "ratio": round(klr[0] / SLENDER_LIMIT, 4),
+        out["slenderness"] = {"KL_r": round(klr[0], 1), "limit": SLENDER_LIMIT, "ratio": round(klr[0] / SLENDER_LIMIT, 6),
                               "clause": SLENDER_CLAUSE, "basis": SLENDER_TEXT}
     return out
 
@@ -157,7 +157,7 @@ def headline(pkg):
         if "slenderness" in r and (out["slenderness"] is None or r["slenderness"]["ratio"] > out["slenderness"]["ratio"]):
             out["slenderness"] = dict(r["slenderness"], member=mid, section=sec)
         if _num(m.get("DC")) and (out["member_dc_max"] is None or m["DC"] > out["member_dc_max"]["dc"]):
-            out["member_dc_max"] = {"dc": round(float(m["DC"]), 4), "member": mid}
+            out["member_dc_max"] = {"dc": round(float(m["DC"]), 6), "member": mid}
     if out["slenderness"] is None:
         comp = any(_num(c.get("P_N")) and float(c["P_N"]) > 0 for m in pkg.get("cfs_members") or [] if isinstance(m, dict)
                    for c in m.get("checks") or [] if isinstance(c, dict))
@@ -167,7 +167,7 @@ def headline(pkg):
                                    "flexural members): the IS 801 6.6.3 limit does not apply")
     for c in pkg.get("cfs_connections") or []:
         if isinstance(c, dict) and _num(c.get("dc")) and (out["connections"] is None or c["dc"] > out["connections"]["dc"]):
-            out["connections"] = {"dc": round(float(c["dc"]), 4), "id": c.get("id"), "type": c.get("type"),
+            out["connections"] = {"dc": round(float(c["dc"]), 6), "id": c.get("id"), "type": c.get("type"),
                                   "value": c.get("value") if _num(c.get("limit")) else None,
                                   "limit": c.get("limit") if _num(c.get("limit")) else None}
     fh = (pkg.get("lateral_frame") or {}).get("headline")
@@ -362,8 +362,8 @@ def soil_basis(cfg, ss):
     note = _clean(site.get("soil_note")) if site.get("soil_note") else ""
     assumed = "medium soil" if soil == "II" else ("soft soil" if soil == "III" else "this soil type")
     if note:
-        return ("declared in the brief: %s. %s assumed, not from a site investigation; confirm by site investigation "
-                "(geotechnical report)" % (note.rstrip("."), assumed[:1].upper() + assumed[1:]))
+        return ("%s -- not from a site investigation; confirm by site investigation (geotechnical report)"
+                % note.rstrip("."))
     return ("%s (Type %s) as declared in the brief: %s assumed, not from a site investigation; confirm by site "
             "investigation (geotechnical report)" % (_SOIL_NAME.get(soil, "soil"), soil, assumed))
 
@@ -407,6 +407,11 @@ def soil_html(cfg, pkg):
     elif s.get("type") == "III":
         txt += ("<p class='note'>Type III is the softest soil type of IS 1893 (Part 1):2016 6.4.2.1: a firmer soil found by "
                 "the site investigation would not raise the design acceleration.</p>")
+    rsa = str(((((pkg or {}).get("lateral_frame") or {}).get("seismic_analysis")) or {}).get("method") or "").upper()
+    if s.get("next") and rows and rsa.startswith("RSA"):
+        txt += ("<p class='note'>In the response-spectrum analysis of the frame, modes with periods above the Type %s corner "
+                "period would also see the higher Type %s ordinates (IS 1893 (Part 1):2016 6.4.2).</p>"
+                % (_e(s["type"]), _e(s["next"])))
     return txt
 
 
