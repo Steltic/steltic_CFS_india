@@ -633,7 +633,10 @@ def design_studs(cfg, storey=None, spec=None, tag=None):
             continue
         for nm, ck in r["checks"].items():
             rows.append(_row(c["label"], nm, ck, {"P_N": round(P, 1), "M_Nmm": round(Mx, 1), "fa_MPa": round(r["fa_MPa"], 2),
-                                                 "fb_MPa": round(r["fbx_MPa"], 2), "Cm": r["Cm"], "amplification": r.get("amplification")}))
+                                                 "fb_MPa": round(r["fbx_MPa"], 2), "Cm": r["Cm"], "amplification": r.get("amplification"),
+                                                 # 2026-10 second wave: KL/r of the stud (IS 801 6.6.3), report-only
+                                                 "KL_r": (round(float(r["compression"]["KLr"]), 1)
+                                                          if isinstance((r.get("compression") or {}).get("KLr"), (int, float)) else None)}))
         if V > 0:
             rows.append(_row(c["label"], "6.4.1 web shear", M.web_shear_64(sec, fy, V, wind_eq=we), {"V_N": round(V, 1)}))
             rows.append(_row(c["label"], "6.5 web crippling at track (end reaction)",
@@ -1258,7 +1261,9 @@ def design_eave_strut(cfg, spec, tag=None):
     else:
         for nm, ck in r["checks"].items():
             rows.append(_row(lab, nm, ck, {"P_N": round(P, 1), "M_Nmm": round(Mx, 1), "fa_MPa": round(r["fa_MPa"], 2),
-                                           "fb_MPa": round(r["fbx_MPa"], 2)}))
+                                           "fb_MPa": round(r["fbx_MPa"], 2),
+                                           "KL_r": (round(float(r["compression"]["KLr"]), 1)       # second wave, report-only
+                                                    if isinstance((r.get("compression") or {}).get("KLr"), (int, float)) else None)}))
     combos = [{"label": lab}]
     return _member_record("eave_strut", spec, sec, fy, combos, rows,
                           {"span_mm": L, "P_N": P, "P_cite": spec.get("P_cite"), "grade_cite": cite,

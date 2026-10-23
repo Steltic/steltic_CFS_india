@@ -16,6 +16,7 @@ import re
 
 import india_cfs_env  # noqa: F401
 import india_cfs_basis as B
+import report_cfs_second_wave as RS
 
 UNITS = {"force": "kN", "moment": "kN-m", "length": "m", "small_length": "mm", "pressure": "kN/m2", "line_load": "kN/m",
          "stress": "MPa", "engine": "N, mm, MPa (IS 801 kgf/cm2 inside is801_members)"}
@@ -89,6 +90,8 @@ _CLEAN = [
     (re.compile(r"in-repo fallback; prefer corpus exact_table 5", re.I), ""),
     (re.compile(r"\bvendored HR India pipeline\b", re.I), "hot-rolled IS 800 engine"),
     (re.compile(r"\bGOLD(?: round \d+)?\b:?\s*", re.I), ""),
+    (re.compile(r"\b[Aa]n EOR (assumption|input|reading|value|record|decision)\b"), r"a design engineer's \1"),
+    (re.compile(r"\bEOR's\b"), "design engineer's"),
     (re.compile(r"\bEOR\b"), "design engineer"),
     (re.compile(r"\s{2,}"), " "),
     (re.compile(r"\(\s*\)"), ""),
@@ -300,8 +303,9 @@ def _member_header(m):
     word = "height" if role in ("stud", "column", "mezzanine post") else (
         "span" if role in ("joist", "purlin", "girt", "header", "eave_strut", "mezzanine beam") else "length")
     lt = ("%s %s mm, " % (word, _num(ln, 0))) if ln else ""
-    return ("%s -- %s (%s), Fy %s MPa, %s%sD/C %s (%s)"
-            % (m["id"], m.get("designator"), m.get("role"), _num(m.get("Fy_MPa"), 0), sp, lt, _dcf(m.get("DC")), _ok(m.get("ok"))))
+    # 2026-10 second wave (C3): the strength ratio first, deflection / KL/r / limits beside it (not one mixed D/C)
+    return ("%s -- %s (%s), Fy %s MPa, %s%s%s (%s)"
+            % (m["id"], m.get("designator"), m.get("role"), _num(m.get("Fy_MPa"), 0), sp, lt, RS.member_ratio_text(m), _ok(m.get("ok"))))
 
 
 def durability_text(cfg, pkg):
@@ -365,6 +369,7 @@ def build_report_cfs_india(name, cfg, pkg, root):
                % (_e(str(st.get("status", "")).upper()), st.get("n_reasons", 0),
                   "" if not st.get("n_reasons") else " (listed in the last chapter; items inherited from the hot-rolled frame "
                                                      "report are included)"))
+    out.append(RS.headline_html(pkg.get("headline") or RS.headline(pkg)))       # 2026-10 second wave (C3)
     # ---- 1 building ----
     out.append("<h2>1. Building, site and load path</h2>")
     geo = cfg.get("geometry") or {}
@@ -390,7 +395,7 @@ def build_report_cfs_india(name, cfg, pkg, root):
     mats = sorted({str(m.get("material")) for m in (pkg.get("cfs_members") or []) if m.get("material")})
     out.append(_t(["item", "value"], [
         ("brief", clean(cfg.get("brief"))),
-        ("site", "%s, IS 1893 Annex E Zone %s (Z = %s), soil type %s" % (site.get("city"), site.get("zone"), _num(site.get("Z")), site.get("soil"))),
+        ("site", "%s, %s, soil type %s (basis in chapter 2)" % (site.get("city"), RS.zone_text(site), site.get("soil"))),
         ("plan / storey heights", "%s m x %s m; storey heights %s m" % (_num(geo.get("plan_x_m")), _num(geo.get("plan_y_m")),
                                                                       ", ".join(_num(h) for h in hs) or "-")),
         ("lateral system", lat_row),
@@ -400,6 +405,7 @@ def build_report_cfs_india(name, cfg, pkg, root):
         ("occupancy", _occupancy_text(cfg.get("occupancy"))),
         ("units", "kN, kN-m, m, mm, kN/m2, MPa (engine: N, mm, MPa)"),
     ]))
+    out.append(RS.scope_html(cfg, pkg, kind))                                   # 2026-10 second wave (C3)
     # ---- 2 loads ----
     out.append("<h2>2. Loads (IS 875 Parts 1-5, IS 1893)</h2>")
     ld = cfg.get("loads") or {}
@@ -413,7 +419,7 @@ def build_report_cfs_india(name, cfg, pkg, root):
     ws = lp.get("wind_summary") or {}
     out.append("<p>Wind: IS 875 (Part 3):2015, Vb = %s m/s (%s), terrain category %s, k1 %s, k3 %s, k4 %s, Kd %s, Ka %s (frame "
                "tributary area), %s.</p>"
-               % (_num(ws.get("Vb_mps")), _e(clean(ws.get("Vb_source")) or "IS 875-3 Annex A"), ws.get("terrain_category"),
+               % (_num(ws.get("Vb_mps")), _e(RS.vb_source_text(ws, site)), ws.get("terrain_category"),
                   _num(ws.get("k1")), _num(ws.get("k3")), _num(ws.get("k4")), _num(ws.get("Kd")), _num(ws.get("Ka")),
                   _e(("inside the cyclone belt: " if ws.get("cyclone_belt") else "outside the cyclone belt: ")
                      + clean(ws.get("cyclone_belt_cite")))))
@@ -429,8 +435,8 @@ def build_report_cfs_india(name, cfg, pkg, root):
                           [(p.get("name"), _num(p.get("Cpi"), 2), _num(p.get("wall_windward_kNm2"), 3), _num(p.get("wall_leeward_kNm2"), 3),
                             _num(p.get("roof_windward_kNm2"), 3), _num(p.get("roof_leeward_kNm2"), 3)) for p in pats]))
             out.append("<p class='note'>Net pressures in kN/m2 (positive towards the surface) at pd = %s kN/m2, roof pitch %s deg. "
-                       "Frame wind base shear (one frame, governing pattern %s): %s kN; earthquake base shear (one frame): %s kN "
-                       "-- %s governs.</p>"
+                       "Frame wind base shear (one frame, governing combination %s): %s kN; earthquake base shear (one frame): "
+                       "%s kN -- %s governs.</p>"
                        % (_num(ws.get("pd_kNm2"), 4), _num(ws.get("pitch_deg"), 1), _e((lat.get("wind_vs_eq") or {}).get("governing_wind_pattern")),
                           _num((lat.get("wind_vs_eq") or {}).get("H_base_wind_kN"), 2), _num((lat.get("wind_vs_eq") or {}).get("H_base_eq_kN"), 2),
                           _e((lat.get("wind_vs_eq") or {}).get("governing"))))
@@ -453,6 +459,10 @@ def build_report_cfs_india(name, cfg, pkg, root):
                    % (_num(ss.get("Z")), _num(ss.get("I")), _num(ss.get("R")), ss.get("soil"), _f(ss.get("Ta_x_s"), 3), _f(ss.get("Ta_y_s"), 3),
                       _e(clean(ss.get("Ta_formula"))), _num(ss.get("Sa_g")), _num(ss.get("Ah"), 6), _f(ss.get("W_kN"), 1),
                       _f(ss.get("VB_kN") if ss.get("VB_kN") is not None else ss.get("VB_frame_kN"), 2), _e(clean(sa.get("method"))), _e(sc_txt)))
+        if portal:
+            out.append("<p class='note'>%s</p>" % _e(RS.portal_weight_text(ss)))
+        out.append(RS.soil_html(cfg, pkg))                                      # 2026-10 second wave (C3)
+        out.append(RS.ta_html(cfg, pkg))
     # ---- 3 combinations ----
     out.append("<h2>3. Load combinations</h2>")
     cc = pkg.get("cfs_combinations") or []
@@ -475,8 +485,11 @@ def build_report_cfs_india(name, cfg, pkg, root):
     if lat.get("report_html"):
         rel = (os.path.relpath(lat["report_html"], root) if os.path.isabs(lat["report_html"]) else lat["report_html"]).replace(os.sep, "/")
         out.append("<p>Full frame report: <a href='%s'>%s</a> (members, Section 12, connections, bases, drift, irregularity).</p>" % (_e(rel), _e(rel)))
-    out.append(_t(["member group", "role", "section", "n", "governing combination", "D/C"],
-                  [(m["id"], m["role"], m["section"], m.get("n"), m.get("governing_combo") or "-", _dcf(m.get("DC"))) for m in lat.get("members") or []]))
+    # 2026-10 second wave (C3): strength ratio and slenderness in separate columns (as the frame report prints them)
+    if not portal and RS.frame_headline_text(lat):
+        out.append("<p><b>%s</b></p>" % _e(RS.frame_headline_text(lat)))
+    out.append(_t(["member group", "role", "section", "n", "strength ratio", "governing combination", "KL/r / limit (ratio)",
+                   "other limits"], RS.lateral_member_rows(pkg, portal)))
     conn_rows = []
     for c in lat.get("connections") or []:
         dc = c.get("DC")
@@ -581,14 +594,16 @@ def build_report_cfs_india(name, cfg, pkg, root):
                    "flexible cases, earthquake and wind enveloped); the governing line is shown. IS 801 9.1.4 excludes "
                    "diaphragms, so every capacity is a cited test / manufacturer value.</p>")
         out.append(_t(["storey", "dir", "F EQ (kN)", "F W (kN)", "governing case", "line (m)", "R (kN)", "deck length (m)",
-                       "unit shear (kN/m)", "chord (kN)", "capacity (kN/m)", "capacity source", "result"],
+                       "unit shear (kN/m)", "chord (kN)", "capacity (kN/m)", "capacity source", "source status", "result"],
                       [(r["storey"], r["dir"], _kN(r["F_EQ_N"]), _kN(r["F_W_N"]), r.get("governing_case") or r["governing"],
                         _f(r.get("governing_line_m"), 2), _f(r.get("governing_R_kN"), 1), _f(r.get("governing_deck_length_m"), 2),
                         _f(r["v_unit_kN_per_m"], 2), _f(r["chord_force_kN"], 1),
                         _num(r.get("capacity"), 3) if isinstance(r.get("capacity"), (int, float)) else (r.get("capacity") or "not declared"),
                         clean(r.get("capacity_source") or "test / product value required -- VERIFY"),
+                        RS.diaphragm_source(r.get("capacity_source"))[1],
                         _ok(r.get("ok")) if r.get("demand_evaluated") is not False else "NOT EVALUATED")
                        for r in pkg.get("diaphragm") or [] if r.get("kind") != "collector"]))
+        out.append(RS.diaphragm_notes_html([r for r in pkg.get("diaphragm") or [] if r.get("kind") != "collector"]))
         coll = [r for r in pkg.get("diaphragm") or [] if r.get("kind") == "collector"]
         if coll:                                                  # C03: re-entrant collectors
             out.append(_t(["storey", "dir", "re-entrant line", "B_short / B (m)", "collector force (kN)", "capacity (kN)", "result"],
@@ -604,7 +619,8 @@ def build_report_cfs_india(name, cfg, pkg, root):
             un = c.get("units") or "N"
             rows.append((c["id"], clean(c.get("type")), _val_units(dem, un)[0] if isinstance(cap, (int, float)) else "-",
                          _val_units(cap, un)[0] if isinstance(cap, (int, float)) else "-", _f(c.get("dc")),
-                         clean(c.get("governing_check") or "-"), c.get("capacity_basis"), _ok(c.get("ok")), clean(c.get("clause"))))
+                         clean(c.get("governing_check") or (((c.get("plate_design") or {}).get("adopted") or {}).get("governing_check"))
+                               or "-"), c.get("capacity_basis"), _ok(c.get("ok")), clean(c.get("clause"))))
         out.append(_t(["id", "type", "demand (kN)", "capacity (kN)", "D/C", "governing check", "basis", "result", "clause"], rows))
         for c in cn:
             if c.get("checks") and c.get("id", "").endswith("bolt-group"):
@@ -618,6 +634,9 @@ def build_report_cfs_india(name, cfg, pkg, root):
                                "most loaded bolt of %s (elastic vector method) is compared with the smallest, times the "
                                "number of sheets.</p>" % (_e(", ".join("%s %.2f" % (k, v / 1e3) for k, v in c["capacity_components_N"].items())),
                                                           _e(c.get("n_bolts"))))
+        for c in cn:                                                # 2026-10 second wave (C2): the base plate as a result
+            if c.get("plate_design"):
+                out.append(RS.base_plate_html(c))
     else:
         out.append("<p>No cold-formed connections are declared for this job: stud-to-track, joist-to-beam clip, purlin cleat "
                    "and board fasteners are the design engineer's details. IS 801:1975 has no screw provisions (7.2 welds, "
@@ -628,6 +647,7 @@ def build_report_cfs_india(name, cfg, pkg, root):
     # ---- 9 grounding ----
     out.append("<h2>9. Grounding (retrieved standards)</h2>")
     out.append(_t(["standard", "used for", "retrieval hits", "status"], pkg.get("grounding") or []))
+    out.append("%%CODES_TABLE%%")                                               # 2026-10 second wave (C3), filled below
     # ---- 10 status ----
     out.append("<h2>10. Design status</h2>")
     out.append("<p><b>%s</b> (%s)</p>" % (_e(str(st.get("status", "")).upper()), _e(st.get("authority"))))
@@ -635,7 +655,9 @@ def build_report_cfs_india(name, cfg, pkg, root):
     out.append("<p class='note'>Software: Steltic CFS India engine (IS 801 / IS 811)%s; engine versions are recorded in "
                "design/calc_package_cfs.json.</p>" % ("" if portal else " with the Steltic hot-rolled IS 800 engine for the frame"))
     out.append("</body></html>")
+    doc = RS.tidy_html("\n".join(out))                                          # one citation style (C3)
+    doc = doc.replace("%%CODES_TABLE%%", RS.codes_table_html(doc))
     path = os.path.join(root, "report.html")
     with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(out))
+        f.write(doc)
     return path
