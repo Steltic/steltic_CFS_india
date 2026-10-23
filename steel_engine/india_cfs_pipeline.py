@@ -26,6 +26,7 @@ import india_cfs_gates as G
 import india_cfs_lateral as L
 import india_cfs_members as CM
 import report_cfs_india as R
+import report_cfs_second_wave as RS
 import consistency as CC
 
 STEMS = {
@@ -195,6 +196,8 @@ def design_and_report(name, cfg, outdir=None, do_report=True):
             "diaphragm_7_6_4": lat.get("diaphragm_7_6_4"), "load_combinations_n": lat.get("load_combinations_n"), "gates": lat.get("gates"),
             # 2026-10 first wave (review item 4): the frame report's open items travel with the package
             "consistency": lat.get("consistency"), "ponding": lat.get("ponding"),
+            # 2026-10 second wave (C3): the frame report's headline (worst strength ratio, slenderness beside it)
+            "headline": RS.tag_frame_headline(lat.get("headline")), "headline_error": lat.get("headline_error"),
             "hr_report_items_basis": "numerical self-consistency check printed at the end of the frame report",
             "demand_level": "LSD", "capacity_basis": "IS800_LSD",
             "note": "hot-rolled IS 800 Section 12 frame designed with the Steltic hot-rolled IS 800 engine (IS 800 Table 4 "
@@ -205,6 +208,9 @@ def design_and_report(name, cfg, outdir=None, do_report=True):
         pkg["diaphragm"] = L.diaphragm_demands(cfg, lat)
         pkg["cfs_connections"] = list((cfg.get("cfs_connections") or []))
     pkg["cfs_combinations"] = B.cfs_combinations(cfg.get("load_plan"), cfg)
+    # 2026-10 second wave (C3): the headline is the worst cold-formed STRENGTH ratio, slenderness beside it
+    pkg["headline"] = RS.headline(pkg)
+    RS.write_headline(root, pkg["headline"])
     pkg["grounding"], missing = _grounding(cfg, pkg)
     pkg["grounding_missing"] = missing
     pkg["cfg_snapshot"] = _jsonable({k: v for k, v in cfg.items()})

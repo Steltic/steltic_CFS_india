@@ -561,6 +561,13 @@ def _portal_units(name):
     return "-"
 
 
+def _klr(comp):
+    """2026-10 second wave: the governing KL/r of a compression record (IS 801 6.6.3 limit 200), kept on the check row
+    so the report can print the slenderness beside the strength ratio (report-only)."""
+    v = (comp or {}).get("KLr") if isinstance(comp, dict) else None
+    return round(float(v), 1) if isinstance(v, (int, float)) else None
+
+
 def _mrow(label, name, r, extra=None):
     o = {"combo": label, "check": name, "value": r.get("value"), "limit": r.get("limit"), "dc": r.get("dc"), "ok": r.get("ok"),
          "clause": r.get("clause"), "cite": r.get("cite"), "allowable_increase": r.get("allowable_increase", 1.0),
@@ -587,6 +594,7 @@ def check_member(cfg, role, sec, fy, forces_by_combo, K, L_col_mm, Lu_mm, wind_e
                 continue
             for nm, ck in r["checks"].items():
                 rows.append(_mrow(lab, "%s (%s)" % (nm, tagn), ck, {"P_N": round(Pc, 1), "M_Nmm": round(abs(Mz), 1), "KL_mm": round(KLx, 0),
+                                                                    "KL_r": _klr(r.get("compression")),
                                                                     "fa_MPa": round(r["fa_MPa"], 2), "fb_MPa": round(r["fbx_MPa"], 2),
                                                                     "Fa_MPa": round(r["Fa_MPa"], 2), "Fb_MPa": round(r["Fbx_MPa"], 2),
                                                                     "Cm": r["Cm"], "amplification": r.get("amplification")}))
@@ -723,6 +731,70 @@ def base_check(cfg, base, R_N, wind_eq, with_imposed=True):
                                                                        else all(c.get("ok") for c in checks.values())),
             "reactions": {"H_N": H, "V_N": V, "M_Nmm": Mz}, "T_total_N": T_total, "concrete_breakout": checks_breakout,
             "plate_fy": _pfy}
+
+
+def _plate_worst(cfg, base, results, wind_eq, with_imposed):
+    """The governing combination / support of one base-plate geometry over every analysed combination: (combination,
+    support, base_check record).  Same reactions, same checks as the design run (report-only use: no frame change)."""
+    worst = None
+    for cl, r in results.items():
+        for t, R_ in r["reactions"].items():
+            bc = base_check(cfg, base, R_, wind_eq[cl], with_imposed.get(cl, False))
+            if worst is None or (bc["dc"] or 0) > (worst[2]["dc"] or 0):
+                worst = (cl, t, bc)
+    return worst
+
+
+def _plate_summary(base, cl, t, bc):
+    """Plate size, anchors and the governing check of a base_check record (value / limit / dc of that check)."""
+    rows = [(k, v) for k, v in (bc.get("checks") or {}).items() if isinstance(v.get("dc"), (int, float))]
+    k, g = max(rows, key=lambda kv: kv[1]["dc"]) if rows else (None, {})
+    an = base.get("anchors") or {}
+    return {"B_mm": float(base["B_mm"]), "L_mm": float(base["L_mm"]), "t_mm": float(base["t_plate_mm"]),
+            "anchors": "%d x M%d grade %s, lever arm f = %s mm" % (int(an.get("n_total", 0)), int(float(an.get("d_mm", 0))),
+                                                                  an.get("grade", "4.6"), "%.0f" % float(an.get("f_mm", 0.0))),
+            "governing_check": k, "value": g.get("value"), "limit": g.get("limit"), "dc": g.get("dc"),
+            "ok": (bc.get("ok") is not False) and (g.get("dc") is None or g["dc"] <= 1.0 + 1e-9),
+            "combination": cl, "support": str(t), "clause": g.get("clause"),
+            "checks_dc": {kk: round(vv["dc"], 4) for kk, vv in rows}}
+
+
+def plate_design(cfg, base, results, wind_eq, with_imposed, adopted, K_fixed, K_pinned, b2, col_rx_mm=None, He_mm=None):
+    """2026-10 second wave (C2): the column-base plate as a design result.  The adopted plate (cfs_connections_spec.base)
+    with its governing check and ratio; each plate of base.compare_plates checked against the same reactions over every
+    combination (anchors kept at the declared edge distance: lever arm f = L/2 - edge unless declared); and why the bases
+    are fixed (IS 800:2007 Annex D sway K of the exterior column, fixed against pinned).  Nothing here changes the frame:
+    the reactions are those of the fixed-base frame as designed."""
+    cl, t, bc = adopted
+    out = {"adopted": _plate_summary(base, cl, t, bc), "compared": [],
+           "basis": "same reactions (fixed-base frame as designed), every combination and support; IS 800:2007 11.6.2 anchors, "
+                    "11.4.1 (c) plate bending (working stress, 11.1.4 increases); bearing and anchorage as declared"}
+    an0 = dict(base.get("anchors") or {})
+    edge = float(an0.get("edge_mm", 50.0))
+    for alt in base.get("compare_plates") or []:
+        if not isinstance(alt, dict) or not all(k in alt for k in ("B_mm", "L_mm", "t_plate_mm")):
+            continue
+        b_alt = dict(base, B_mm=float(alt["B_mm"]), L_mm=float(alt["L_mm"]), t_plate_mm=float(alt["t_plate_mm"]))
+        b_alt.pop("compare_plates", None)
+        an = dict(an0, **(alt.get("anchors") or {}))
+        if "f_mm" not in (alt.get("anchors") or {}):
+            an["f_mm"] = float(alt["L_mm"]) / 2.0 - edge
+        b_alt["anchors"] = an
+        if "a_mm" in base and "a_mm" not in alt:
+            b_alt.pop("a_mm")                                   # cantilever from the plate size, as for the adopted plate
+        w = _plate_worst(cfg, b_alt, results, wind_eq, with_imposed)
+        rec = _plate_summary(b_alt, *w)
+        rec["note"] = alt.get("note") or "plate compared by the design engineer"
+        out["compared"].append(rec)
+    po = cfg.get("portal") or {}
+    fixed = str(po.get("base", "fixed")).lower() == "fixed"
+    out["fixity"] = {"base": "fixed" if fixed else "pinned", "K_fixed": K_fixed, "K_pinned": K_pinned, "beta2": b2,
+                     "clause": "IS 800:2007 Annex D (sway frames): K from beta1 (base) and beta2 (rafters); pinned base: beta1 = 1",
+                     "reason": po.get("base_reason") or po.get("base_note")}
+    if col_rx_mm and He_mm:                                 # in-plane slenderness of the exterior column, IS 801 6.6.3
+        out["fixity"].update(KLr_fixed=K_fixed * He_mm / col_rx_mm, KLr_pinned=K_pinned * He_mm / col_rx_mm,
+                             KLr_limit=200.0, KLr_clause="IS 801 6.6.3 (KL/r of compression members <= 200)")
+    return out
 
 
 def _bracing_block(cfg, bid, lb, F_by_case, fy, L_diag, cos, n_bays, n_sides, note):
@@ -925,8 +997,8 @@ def run(cfg, root):
             Pc = max(x[0] for x in f["stations"]); Pt = max(-x[0] for x in f["stations"])
             we = wind_eq[cl]
             if Pc > 0:
-                rows.append(_mrow(cl, "6.6 compression (K 1.0)", M.check_compression(ksec, fy, Pc, Lkb, Lkb, wind_eq=we,
-                                                                                         braced_against_twist=(ksec.get("n_ply", 1) == 2)), {"P_N": round(Pc, 1)}))
+                rk = M.check_compression(ksec, fy, Pc, Lkb, Lkb, wind_eq=we, braced_against_twist=(ksec.get("n_ply", 1) == 2))
+                rows.append(_mrow(cl, "6.6 compression (K 1.0)", rk, {"P_N": round(Pc, 1), "KL_r": _klr(rk)}))
             if Pt > 0:
                 inc = B.INCREASE_WL_EL if we else 1.0
                 rows.append(_mrow(cl, "6.1 tension 0.6 Fy (gross; net at the bolts per 7.5.2)", M._rec(Pt / ksec["A"], 0.6 * fy * inc, "IS 801 6.1", "F = 0.60 Fy",
@@ -962,7 +1034,8 @@ def run(cfg, root):
         for lab, P, we in cases:
             r = M.check_compression(psec, fy, P, Lp, Lp, braced_against_twist=(psec.get("n_ply", 1) == 2), wind_eq=we)
             rows.append(_mrow(lab, "6.6 axial (K 1.0 pinned ends)" + (" + bracing overturning" if we else ""), r,
-                              {"P_N": round(P, 1), **({"P_overturning_N": round(P - (PD + (PL if "IL" in lab else 0.0)), 1)} if we else {})}))
+                              {"P_N": round(P, 1), "KL_r": _klr(r),
+                               **({"P_overturning_N": round(P - (PD + (PL if "IL" in lab else 0.0)), 1)} if we else {})}))
         dcs = [r["dc"] for r in rows if isinstance(r.get("dc"), (int, float))]
         members.append({"id": "mezzanine-post-%s" % (psec.get("designator") or psec["label"]), "role": "mezzanine post", "section": psec["label"],
                         "designator": psec.get("designator") or psec["label"], "n_ply": psec.get("n_ply", 1), "Fy_MPa": fy, "length_mm": Lp,
@@ -1039,12 +1112,18 @@ def run(cfg, root):
                                                          "cite": "declare base.anchors.embedment {method: 'bond', ...} or "
                                                                  "embedment_capacity_N + embedment_source + embedment_cite (EOR -- VERIFY)"}
             bc["ok"] = None
+        # 2026-10 second wave (C2): the plate as a design result -- governing check of the adopted plate, the plates the
+        # design engineer compares (same reactions) and the fixed-base reason (Annex D K fixed / pinned); report-only
+        K_pin, _, _ = sway_K(secs["col"]["Ix"], meta0["He"], secs["raf"]["Ix"] / meta0["raf_len_half"], False)
+        K_fix, _, b2_ = sway_K(secs["col"]["Ix"], meta0["He"], secs["raf"]["Ix"] / meta0["raf_len_half"], True)
+        pdz = plate_design(cfg, base, results, wind_eq, with_imposed, (cl, t, bc), K_fix, K_pin, b2_,
+                           col_rx_mm=secs["col"].get("rx"), He_mm=meta0["He"])
         conns.append({"id": "column-base", "type": "base plate %sx%sx%s, %d anchors M%d" % (base["B_mm"], base["L_mm"], base["t_plate_mm"], base["anchors"]["n_total"], base["anchors"]["d_mm"]),
                       "checks": [_mrow(cl, k, v) for k, v in bc["checks"].items()], "value": bc["reactions"]["V_N"], "limit": None,
                       "dc": bc["dc"], "ok": bc["ok"], "governing_combo": cl, "reactions": bc["reactions"], "T_uplift_N": bc["T_total_N"],
                       "clause": "IS 800:2007 11.6.2 / 11.4.1 (c) working stress (11.1.4 increases); concrete bearing EOR input", "capacity_basis": "IS800_WSM",
                       "allowable_increase": 1.0, "demand_level": "working", "concrete_breakout": bc.get("concrete_breakout"),
-                      "plate_fy": bc.get("plate_fy")})
+                      "plate_fy": bc.get("plate_fy"), "plate_design": pdz})
     else:
         conns.append({"id": "column-base", "type": "base", "value": None, "limit": None, "dc": None, "ok": None, "clause": "IS 800 11.6.2",
                       "note": "cfs_connections_spec.base not declared", "capacity_basis": "IS800_WSM", "allowable_increase": 1.0})

@@ -306,6 +306,17 @@ computed thin `C…-G350` / `Z…-G350` sections (see CFS members below);
   the group, in `loads`, or as keyword arguments of `india_cfs_members.design_purlins` / `design_joists`
   (default 0): included in the gravity combinations, excluded where the dead load resists wind uplift / suction, and
   listed as separate rows of the member's load table.
+* **Report-only keys (2026-10 second wave).** None of these changes a design. `soil_basis` (optional text) replaces the
+  printed basis of the declared soil type (default: the type, `site.soil_note` and "not from a site investigation;
+  confirm by site investigation"); `site.zone_source` / `site.Vb_source` = `"derived_from_map"` print the IS 1893 /
+  IS 875 (Part 3) Fig. 1 map reading in words. All-CFS portal: `cfs_connections_spec.base.compare_plates` =
+  `[{"B_mm", "L_mm", "t_plate_mm", "anchors" (optional overrides; default: same anchors at the declared edge distance,
+  lever arm f = L/2 - edge), "note"}]` are checked against the same base reactions and printed beside the adopted plate
+  (the plate as a design result); `portal.base_reason` (text) is printed with the IS 800 Annex D K of the exterior
+  column for fixed and for pinned bases. The headline of every report and `design/headline.json` is the worst
+  cold-formed member strength ratio, with the KL/r of the compression members against IS 801 6.6.3 (200) beside it;
+  the moment-frame directions (`lateral_frame.moment_lines`, or the portal plane) whose Ta is 7.6.2(c) get a note with
+  the 7.6.2(a) bare-frame Ta.
 * Floor deflection criterion: IS 800 Table 6 "other buildings, floor": span/300 (elements not susceptible to cracking) or
   span/360 (susceptible) — span/240 is the industrial row, not a floor of an ordinary building.
 

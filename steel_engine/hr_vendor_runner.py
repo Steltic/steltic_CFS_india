@@ -264,6 +264,17 @@ def _summary(cfg, out, root):
         "load_combinations_n": len(pkg.get("load_combinations") or []),
         "gates": pkg.get("gates"), "report_html": out.get("report_html"), "ponding": pkg.get("ponding"),
     })
+    # 2026-10 second wave (C3): the frame's headline record (worst STRENGTH ratio, slenderness beside it) and each member
+    # group's strength ratio / KL/r, from the vendored HR report_second_wave (the same record the frame report prints)
+    try:
+        import report_second_wave as RS2
+        res["headline"] = RS2.headline(pkg)
+        for rec, m in zip(res["members"], pkg.get("members", [])):
+            st, sc, sl, slc = RS2.member_ratios(m)
+            rec.update(strength_dc=st, strength_combo=(RS2._combo_of(sc) if sc else None),
+                       slenderness_ratio=sl, KL_r=(slc or {}).get("value"), KL_r_limit=(slc or {}).get("limit"))
+    except Exception as ex:                               # pragma: no cover - reported, never silent
+        res["headline_error"] = "%s: %s" % (type(ex).__name__, ex)
     # 2026-10 first wave (review item 4): the frame report's numerical self-consistency list ('N item(s) to reconcile')
     # travels to the CFS package so the CFS design status can inherit it
     try:
