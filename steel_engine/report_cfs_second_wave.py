@@ -623,7 +623,7 @@ def base_plate_html(conn):
                    "fixed bases the exterior column's effective length factor is K = %s (IS 800:2007 Annex D, sway frame, "
                    "&beta;1 = 0, &beta;2 = %s); with pinned bases &beta;1 = 1 and K = %s, %s times the buckling length, "
                    "and the frame would sway more under wind.%s Fixed bases keep the column sections and the frame as "
-                   "designed (owner decision); the cost is a moment-resisting base, the plate and anchors above.%s</p>"
+                   "designed; the cost is a moment-resisting base, the plate and anchors above.%s</p>"
                    % (_f(fx["K_fixed"], 2), _f(fx.get("beta2"), 3), _f(fx["K_pinned"], 2),
                       _f(fx["K_pinned"] / fx["K_fixed"], 1), _e(klr),
                       (" Design note: %s." % _e(_clean(fx["reason"]))) if fx.get("reason") else ""))
