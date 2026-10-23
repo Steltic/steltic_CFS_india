@@ -88,9 +88,11 @@ def member_ratios(m):
         if k == "information":
             continue
         if k not in out or float(c["dc"]) > out[k]["dc"]:
+            # check fixes (2026-10-23, finding 6): the clause text goes to the site index, so it gets the public-text
+            # pass ('design engineer's choice', not 'EOR choice'; no engine table names)
             out[k] = {"dc": round(float(c["dc"]), 6), "value": c.get("value"), "limit": c.get("limit"),
                       "units": c.get("units"), "check": _short_check(c), "combination": c.get("combo"),
-                      "clause": c.get("clause")}
+                      "clause": public_text(c.get("clause")) if c.get("clause") is not None else None}
             if c.get("sense"):
                 out[k]["sense"] = c["sense"]
     klr = None
@@ -686,10 +688,69 @@ def normalise_citations(text):
     return text
 
 
+# ================================================================================================= check fixes (2026-10-23)
+# Independent check of the second-wave publish, finding 5 / 6: the printed report is a public document, so no code
+# module or file name, build-machine path, JSON key or internal word is printed.  Each entry names what the engine
+# writes and how it is printed; the pass changes printed text only.
+_PUBLIC = [
+    (re.compile(r"\s*\(\s*(?:read-only(?: retrieval)?,\s*)?serviceability_limits_table6\s*\)"), ""),
+    (re.compile(r"(Table 6)\s*\(read-only\)"), r"\1"),
+    (re.compile(r"\(declared members_per_line\)"), "(declared number of members per brace line)"),
+    (re.compile(r"\s*\(\s*india_cfs_gates\s*\)"), ""),
+    (re.compile(r"\bvia hr_cfg_extra D_by_level / L_by_level\b"), "level by level"),
+    (re.compile(r"\bvia hr_cfg_extra\b"), "as declared"),
+    (re.compile(r"\bHR india_loads\.ponding_screen_4_4\b"), "the hot-rolled engine's ponding screen"),
+    (re.compile(r"\(declare bracing\.members_per_line\)"), "(declare the number of members per brace line)"),
+    (re.compile(r"\s*\(declared compression_flange_restrained\)"), " (as declared)"),
+    (re.compile(r"engine versions are recorded in design/calc_package_cfs\.json"),
+     "the engine versions are recorded in the job's calc package"),
+    (re.compile(r"\bIS800_WSM\b"), "IS 800 working stress"),
+    (re.compile(r"\bIS801_allowable\b"), "IS 801 allowable stress"),
+    (re.compile(r"\bIS800_LSD\b"), "IS 800 limit state"),
+    (re.compile(r"\bmanufacturer_ASD\b"), "manufacturer value (allowable stress)"),
+    (re.compile(r"\bEOR_input\b"), "design engineer's input"),
+    (re.compile(r"\bno_splice\b"), "no splice"),
+    (re.compile(r"\bcjp_parent_metal\b"), "CJP weld, parent metal"),
+    (re.compile(r"\binteraction_stability\b"), "interaction, stability"),
+    (re.compile(r"\binteraction_strength\b"), "interaction, strength"),
+    (re.compile(r"\btau_c\b"), "\u03c4c"),
+    (re.compile(r"\bfamily (thin|thick)_([CZ])_(G\d+)\b"), r"family \1 \2 sections, \3"),
+    (re.compile(r"\bby owner decision(?:\s*\(\d{4}-\d{2}\))?"), "as an adopted design decision"),
+    (re.compile(r"\bowner decision(?:\s*\(\d{4}-\d{2}\))?"), "adopted design decision"),
+    (re.compile(r"\s*\(\s*(?:india_cfs_\w+|india_\w+|is801_members|hr_vendor\w*|report_cfs_\w+|engine3d)\.\w+(?:\(\))?\s*\)"), ""),
+    (re.compile(r"\b(?:india_cfs_\w+|india_\w+|is801_members|hr_vendor\w*|report_cfs_\w+|engine3d)\.\w+(?:\(\))?"), ""),
+    (re.compile(r"(?<![\w.])/(?:home|tmp|root|mnt|usr|var|opt)/[^\s,;)]*"), ""),
+    (re.compile(r"\bsteltic_(?:cfs_india|CFS_india|india)\b"), "Steltic"),
+    (re.compile(r"\b[Aa]n EOR (assumption|input|reading|value|record|decision|choice)\b"), r"a design engineer's \1"),
+    (re.compile(r"\bEOR (choice|input|assumption|reading|value)\b"), r"design engineer's \1"),
+    (re.compile(r"\bEOR's\b"), "design engineer's"),
+    (re.compile(r"\bEOR\b"), "design engineer"),
+]
+# what the pass refuses to print (asserted by the tests on every rendered report)
+LEAKS = re.compile(r"(?<![\w.])/(?:home|tmp|root)/\S+|\b\w+\.py\b|\b(?:india_cfs_\w+|india_\w+|is801_members|hr_vendor\w*|"
+                   r"report_cfs_\w+)\.\w+|\bsteltic_(?:cfs_india|CFS_india)\b|\bEOR\b|\bowner decision\b|\bowner ruling\b|"
+                   r"serviceability_limits_table6|\bIS80[01]_(?:WSM|allowable|LSD)\b|\bEOR_input\b|\bgold\b|"
+                   r"\bindia_cfs_gates\b|\bhr_cfg_extra\b|\b[DL]_by_level\b|\bponding_screen_\w+|\bmembers_per_line\b|"
+                   r"\(read-only\)")
+
+
+def public_text(text):
+    """The public-text pass on plain text (see _PUBLIC)."""
+    s = str(text if text is not None else "")
+    for rx, rep in _PUBLIC:
+        s = rx.sub(rep, s)
+    return s
+
+
+def leaks(text):
+    """Every match of what the pass refuses, in the text of an HTML document (tags skipped)."""
+    return LEAKS.findall(html.unescape(re.sub(r"<[^>]+>", " ", str(text or ""))))
+
+
 def tidy_html(html_text):
-    """Citation style in the text of an HTML document (tags and attributes untouched)."""
+    """Citation style and the public-text pass in the text of an HTML document (tags and attributes untouched)."""
     parts = re.split(r"(<[^>]+>)", html_text)
-    return "".join(p if p.startswith("<") else normalise_citations(p) for p in parts)
+    return "".join(p if p.startswith("<") else public_text(normalise_citations(p)) for p in parts)
 
 
 def codes_table_html(report_text):

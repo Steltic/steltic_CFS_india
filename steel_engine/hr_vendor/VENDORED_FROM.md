@@ -1,7 +1,7 @@
 # hr_vendor — the shared India engine, vendored byte-identically from work/hr
 
-Source: steltic_india (hot-rolled IS 800 engine), branch steltic_india main (PEB variations merged)
-Commit: **c7c9cc9e65b0efdbb8502ede3f8fb6022c5e92c6** [steltic_india main, PEB variations merged] (copied with `git show c7c9cc9:steel_engine/<path>` by scripts/revendor_hr.py, 2026-10-23)
+Source: steltic_india (hot-rolled IS 800 engine), branch fix/2026-10-check-fixes (independent-check fixes: public-text pass, calc keys in words)
+Commit: **bca53779d5074bf4a3b693907ba8718f8e9306ee** [steltic_india fix/2026-10-check-fixes (independent-check fixes: public-text pass, calc keys in words)] (copied with `git show bca5377:steel_engine/<path>` by scripts/revendor_hr.py, 2026-10-23)
 
 **2026-10 re-sync:** the vendored files were rewritten together with `steltic_india` branch `fix/2026-10-peb-briefs` (the 2026-10 renumbering of the example briefs: brief ids in comments, docstrings and one message string; no logic change). Merged steltic_india commit: **083a500845e04566a3b3dfc5be79e494498c3ef1**.
 
@@ -14,6 +14,10 @@ Commit: **c7c9cc9e65b0efdbb8502ede3f8fb6022c5e92c6** [steltic_india main, PEB va
 **2026-10-23 re-sync (scripts/revendor_hr.py):** from dd1d8c1 (fix/2026-10-second-wave) -- rewritten (2): `consistency.py`, `report_india.py`; new (1): `report_second_wave.py`; every other file byte-identical.
 
 **2026-10-23 re-sync (scripts/revendor_hr.py):** from c7c9cc9 (steltic_india main (PEB variations merged)) -- rewritten (7): `design_pipeline.py`, `engine3d.py`, `india_is800.py`, `india_is800_s12.py`, `peb_checks.py`, `pipeline.py`, `report_second_wave.py`; new (2): `peb_autosize.py`, `peb_levers.py`; every other file byte-identical.
+
+**2026-10-23 re-sync (scripts/revendor_hr.py):** from 7b26cd9 (steltic_india fix/2026-10-check-fixes (independent-check fixes: public-text pass)) -- rewritten (5): `peb_report.py`, `report.py`, `report_first_wave.py`, `report_india.py`, `report_second_wave.py`; new (1): `report_public.py`; every other file byte-identical.
+
+**2026-10-23 re-sync (scripts/revendor_hr.py):** from bca5377 (fix/2026-10-check-fixes (independent-check fixes: public-text pass, calc keys in words)) -- rewritten (5): `peb_report.py`, `report.py`, `report_india.py`, `report_public.py`, `report_second_wave.py`; every other file byte-identical.
 
 Rules (IMPL_BRIEF conventions, spec WP1.14):
 - Every file in this folder is byte-identical to `work/hr/steel_engine/<same path>` at the commit above.
