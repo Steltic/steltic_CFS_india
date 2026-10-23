@@ -158,3 +158,54 @@ strength headline with KL/r beside it, and `headline` / `frame_headline` records
 `scripts/revendor_hr.py`: design_pipeline, engine3d, india_is800, india_is800_s12, peb_checks, pipeline and
 report_second_wave rewritten, peb_levers and peb_autosize added. The PEB-LEVERS hooks do nothing without
 `cfg['peb_rules']` and `study_allow_banned_system`, which no CFS job sets, so the CFS results are unchanged.
+
+## Fix round after the independent check (2026-10-23, branch `fix/2026-10-check-fixes`)
+
+Branch `fix/2026-10-check-fixes`, from origin/main ad53605. An independent check of the second-wave publish (CHECK2)
+asked for report-only fixes; findings 5, 6 and 14 touch this repo. No design changes: every cold-formed section,
+ratio and status and every hot-rolled frame result is unchanged on the 15 golds (table below).
+
+- **Public text in the CFS reports (finding 5).** `report_cfs_second_wave.public_text`, run by `tidy_html` on the
+  text of the whole report, rewrites what the engine writes into printed text:
+  - Ex3 "fixed bases kept by owner decision (2026-10)" → "kept as an adopted design decision";
+  - "(read-only, serviceability_limits_table6)" after "IS 800:2007 Table 6" (every job) → removed;
+  - "(india_cfs_gates)" in the status line, "via hr_cfg_extra D_by_level / L_by_level", "HR
+    india_loads.ponding_screen_4_4", "(declared compression_flange_restrained)", "declare bracing.members_per_line",
+    "design/calc_package_cfs.json" → plain words;
+  - the basis column keys `IS800_WSM`, `IS801_allowable`, `IS800_LSD`, `manufacturer_ASD`, `EOR_input` and the
+    connection words `no_splice`, `cjp_parent_metal`, `interaction_stability / _strength`, `tau_c`, the section
+    family `thin_C_G350` → words;
+  - any remaining `<module>.<function>`, build-machine path or repository name, and "EOR" → "design engineer".
+  `report_cfs_second_wave.leaks()` lists what the pass refuses; the tests assert it on the published strings.
+- **Lateral (hot-rolled frame) reports (finding 5).** These are written by `hr_vendor`. Re-vendored with
+  `scripts/revendor_hr.py` from steltic_india `fix/2026-10-check-fixes`, first 7b26cd9 and then bca5377 (the HR
+  public-text pass, `report_public.py`, and the calc keys in words); 56 files byte-identical to bca5377: no module names, gate or wind-table keys, "spec WP0.2" or Table 6 keys in print, rulings
+  with their meaning, and the occupancy given per use (Ex4, Ex14) printed one use per line instead of a raw list of
+  dicts ("[{'use': 'residential', …}]").
+- **Site index (finding 6).** `headline()` runs the clause text of its records through the same pass, so
+  `design/headline.json` and `cfs/index.json` carry "design engineer's choice", not "EOR choice" (Ex14, Ex15
+  `headline.serviceability.clause`), and no engine table name.
+- **Publish folder.** `/home/claude/cfs_publish2/cfs/` rebuilt by the CFS agent's builder with the check fixes
+  (`publish3.py` in the R-agent scratchpad): every string of the index records gets the public-text pass, the
+  provenance tags (`source`, `derived_from`, which named code modules) are left out of the public index, and the
+  meta line no longer repeats R ("all-CFS portal (elastic, R 1.0) R 1") and says that Ex3's W and VB are one
+  transverse frame's (finding 14).
+- Tests: `tests/test_check_fixes_2026_10.py` (new, 15 tests). Two second-wave tests updated: the pin test follows
+  the new commit (bca5377, with c7c9cc9 still recorded in the history), and the Ex3 base-plate test asserts "adopted
+  design decision" instead of "owner decision".
+- Whole suite: `python -m pytest tests -q -p no:cacheprovider` -- 385 passed, 0 failed (origin/main ad53605: 370; the 15 new tests make the difference).
+
+### Gold re-runs (all 15, each under /home/claude/bin/heavy, engine 56c743b)
+
+- Every job rc 0, status COMPLETE. `compare_cfs2.py` against `/home/claude/gold/baseline_2026-10-23_cfs` (six
+  decimals: cold-formed members and every check row, connections, diaphragm rows, the hot-rolled frame, status,
+  kg/m²): 14 jobs DESIGN IDENTICAL. Ex7 showed the known run-to-run variation of the frame in the batch run and
+  in four plain repeats (diaphragm unit shear up to 0.7 % and chord force up to 1.4 %, one frame connection
+  0.145821 / 0.145811, drift ratios in the fifth decimal). Re-run with `PYTHONHASHSEED=0` it is identical to the
+  snapshot (0 differences), which confirms the second-wave finding: the variation comes from Python's set order
+  in `hr_vendor_runner` (string hashing), not from this branch. In the first batch of this round Ex12 and Ex14
+  (1e-6) also varied; both were identical in the second batch. No cold-formed result, headline or status moved.
+- Public-text scan of the 15 CFS reports (`report_cfs_second_wave.leaks`) and the 14 lateral frame reports
+  (`report_public.leaks`, body before Appendix C): nothing found; no lateral report prints a raw list of dicts.
+- `cfs_publish2/cfs/index.json` rebuilt: every number (headline, frame headline) is identical to the previous index;
+  only the Ex3 meta line changed, and no "EOR", engine table or module name is left in the file.
