@@ -30,10 +30,14 @@ and the 500 × 600 × 40 plate of CFS Ex3 are kept (owner decision). New report 
   - the fixity basis: the IS 800:2007 Annex D sway K of the exterior column for fixed and for pinned bases, and the
     in-plane KL/r of the columns for both against the IS 801 6.6.3 limit of 200.
 - Chapter 7 prints "Column base plate: design result": the adopted plate, the compared plate that fails with its
-  governing check and ratio, and "Why fixed bases" (K, KL/r, owner decision). Chapter 1 and the connection table name
+  governing check and ratio, and "Why fixed bases" (K, KL/r, owner decision). The connection table names
   the plate's governing check.
 - Gold Ex3 `cfg.py`: a "2026-10 second wave (CFS)" block declares `compare_plates` = 400 × 500 × 32 (the plate the
   review expected) and `portal.base_reason`. Report-only inputs.
+- Result (Ex3 gold): adopted 500 × 600 × 40 with 6 M24: plate bending on the uplift side, 121.5 / 180.0 MPa, ratio
+  0.675 (DL+1.0WM0+R). 400 × 500 × 32 with the same anchors 50 mm from its edge (lever arm 200 mm): plate bending on
+  the uplift side, ratio 1.163, FAIL (the first-wave note quoted 1.10; the anchor layout behind that figure is not recorded). Fixed bases: K = 1.20,
+  in-plane KL/r 90; pinned: K = 2.47, KL/r 184 against the IS 801 6.6.3 limit of 200.
 
 ## C3 — report-only fixes
 
@@ -54,8 +58,9 @@ and the 500 × 600 × 40 plate of CFS Ex3 are kept (owner decision). New report 
     `lateral_result.json`) and for the all-CFS portal. The frame's own headline line is printed above the table.
 - **Soil type and basis (as in HR).** Chapter 2 prints the declared type and its basis (`site.soil_note` or the HR
   wording: "medium soil assumed, not from a site investigation; confirm by site investigation") and, from the vendored
-  `report_second_wave.base_shear_notes`, what the next softer type would do to V_B at the design Ta. All 15 jobs: Ta is
-  on both plateaus, V_B would not change. The declared types are kept (Ex10 and Ex15 Type III).
+  `report_second_wave.base_shear_notes`, what the next softer type would do to V_B at the design Ta. The 13 Type II
+  jobs: Ta is on both plateaus, V_B would not change. Ex10 and Ex15 are declared Type III, the softest type (stated).
+  The declared types are kept.
 - **Moment-frame Ta note.** Where a moment-frame direction (the all-CFS portal plane; `lateral_frame.moment_lines`)
   takes Ta by IS 1893 7.6.2(c), a note gives the bare-frame 7.6.2(a) Ta and its V_B ratio (Ex1 X, Ex3 X: V_B
   unchanged, both on the plateau).
@@ -86,8 +91,64 @@ and the 500 × 600 × 40 plate of CFS Ex3 are kept (owner decision). New report 
   headline against deflection, slenderness from compression rows only, headline.json and the report in the Ex7
   fixture, member headers, soil and Type III notes (V_B × 1.10 hand check at Ta 0.6 s), the Ta notes (0.085 h^0.75 hand
   check), map readings, diaphragm sources, scope, portal W, citations and the rendered reports.
-- Whole suite: see the gold section below for the counts.
+- Whole suite: 370 passed (origin/main: 353).
 
 ## Gold re-run (15 CFS golds, /home/claude/gold/jobs_cfs)
 
-GOLD_TABLE_PLACEHOLDER
+Snapshot first: before any change the outputs of the 15 CFS golds (run_summary.json, design/, report.html, STATUS.md,
+viewer, the lateral sub-run's design/, lateral_result.json and report.html) and the md5 of every `cfg.py` were copied to
+`/home/claude/gold/baseline_2026-10-23_cfs/` (produced by 81e8bbe, the tree of origin/main). All 15 were then re-run in
+place with the gold harness, each under `/home/claude/bin/heavy`, at 2bbbace and again at the final engine commit 86f23d6
+(every run rc 0). The comparison script compares at six decimals: every cold-formed member (section, plies, every check
+row's value / limit / ratio / result, member D/C), the cold-formed connections, the diaphragm rows, the hot-rolled frame
+summary (system, R, seismic summary, members, connections, drift, Section 12 counts, status), the frame's own calc
+package (member checks, connections, drift, Section 12 checks) and kg/m². Report-only keys added by this wave (`KL_r`,
+`headline`, `plate_design`, the frame headline) are listed, not compared.
+
+| Job | Status before → after | Worst CFS member D/C (mixed) before → after | Headline: worst CFS strength ratio (member, check) | Slenderness KL/r / 200 (ratio, member) | Frame headline: strength / KL/r (limit) | kg/m² before → after | Design vs snapshot |
+|---|---|---|---|---|---|---|---|
+| Ex1 | COMPLETE → COMPLETE | 0.976 → 0.976 | 0.976 (girt-Z200X65X20X2.0-G350, 6.1/6.2/6.3 bending, span (single, suction)) | — (no compression members) | 0.687 / 152.1 (180) | girt 4.4; purlin 5.4 (unchanged) | identical |
+| Ex2 | COMPLETE → COMPLETE | 0.796 → 0.796 | 0.796 (purlin-C300X80X25X3.15-G350, 6.1/6.2/6.3 bending (gravity, top flange in compression)) | — (no compression members) | 0.928 / 133.4 (180) | girt 3.0; purlin 10.0 (unchanged) | identical |
+| Ex3 | COMPLETE → COMPLETE | 0.910 → 0.910 | 0.910 (purlin-Z150X60X20X2.0-G350, 6.1/6.2/6.3 bending, span (single, uplift)) | 143.0 (0.715, mezzanine-post-2xCLR150X50X25X4) | — (all-CFS portal) | girt 2.8; joist 11.4; purlin 3.5 (unchanged) | identical |
+| Ex4 | COMPLETE → COMPLETE | 0.826 → 0.826 | 0.826 (joist-C200X65X20X2.5-G350, 6.1/6.2/6.3 bending) | 67.2 (0.336, stud-S1-C150X60X20X1.2-G350) | 0.760 / 158.7 (180) | girt 4.3; joist 17.2; purlin 5.4; stud 7.1 (unchanged) | identical |
+| Ex5 | COMPLETE → COMPLETE | 0.968 → 0.968 | 0.776 (joist-C200X65X20X2.5-G350, 6.5 web crippling (end reaction)) | 74.8 (0.374, stud-S1-C100X50X15X1.6-G350) | 0.666 / 213.4 (250) | joist 17.2; purlin 11.2; stud 6.8 (unchanged) | identical |
+| Ex6 | COMPLETE → COMPLETE | 0.857 → 0.857 | 0.822 (joist-C200X65X20X2.5-G350, 6.1/6.2/6.3 bending) | 89.8 (0.449, stud-S1-C100X50X15X1.6-G350) | 0.840 / 168.9 (180) | joist 17.2; stud 6.8 (unchanged) | identical |
+| Ex7 | COMPLETE → COMPLETE | 0.789 → 0.789 | 0.789 (stud-S4-C100X50X15X1.0-G350, 6.5 web crippling at track (end reaction)) | 74.1 (0.370, stud-S1-C100X50X15X1.0-G350) | 0.739 / 133.1 (180) | joist 11.6; stud 4.4 (unchanged) | CFS identical; frame numbers vary run to run (note 3) |
+| Ex8 | COMPLETE → COMPLETE | 0.974 → 0.974 | 0.974 (joist-C250X70X20X2.5-G350, 6.5 web crippling (end reaction)) | 74.1 (0.370, stud-S1-C100X50X15X1.0-G350) | 0.888 / 155.7 (180) | joist 20.2; stud 4.4 (unchanged) | identical |
+| Ex9 | COMPLETE → COMPLETE | 0.972 → 0.972 | 0.972 (joist-C200X65X20X2.0-G350, 6.5 web crippling (end reaction)) | 79.8 (0.399, stud-S1-C100X50X15X1.6-G350) | 0.938 / 143.7 (180) | joist 13.9; stud 6.8 (unchanged) | identical |
+| Ex10 | COMPLETE → COMPLETE | 0.862 → 0.862 | 0.844 (stud-S5-C100X50X15X1.0-G350, 6.5 web crippling at track (end reaction)) | 74.1 (0.370, stud-S1-C100X50X15X1.0-G350) | 0.857 / 133.1 (180) | joist 11.6; stud 4.4 (unchanged) | CFS identical; frame numbers vary run to run (note 3) |
+| Ex11 | COMPLETE → COMPLETE | 0.940 → 0.940 | 0.940 (joist-C250X70X20X2.5-G350, 6.5 web crippling (end reaction)) | 74.1 (0.370, stud-S1-C100X50X15X1.0-G350) | 0.979 / 146.6 (180) | joist 20.2; stud 4.4 (unchanged) | identical |
+| Ex12 | COMPLETE → COMPLETE | 0.862 → 0.862 | 0.836 (joist-C150X60X20X2.0-G350, 6.5 web crippling (end reaction)) | 81.5 (0.407, stud-S1-C100X50X15X1.0-G350) | 0.921 / 194.2 (300) | joist 11.6; stud 4.4 (unchanged) | CFS identical; frame numbers vary run to run (note 3) |
+| Ex13 | COMPLETE → COMPLETE | 0.959 → 0.959 | 0.925 (joist-C200X65X20X2.5-G350, 6.1/6.2/6.3 bending) | 81.5 (0.407, stud-S1-C100X50X15X1.0-G350) | 0.890 / 135.9 (180) | joist 17.2; stud 4.4 (unchanged) | identical |
+| Ex14 | COMPLETE → COMPLETE | 0.912 → 0.912 | 0.912 (joist-C250X70X20X2.5-G350, 6.5 web crippling (end reaction)) | 74.8 (0.374, stud-S3-C100X50X15X1.6-G350) | 0.922 / 131.0 (180) | joist 20.2; stud 6.8 (unchanged) | identical |
+| Ex15 | COMPLETE → COMPLETE | 0.945 → 0.945 | 0.945 (joist-C250X70X20X2.5-G350, 6.5 web crippling (end reaction)) | 74.8 (0.374, stud-S1-C100X50X15X1.6-G350) | 0.931 / 132.2 (180) | joist 20.2; purlin 16.3; stud 6.8 (unchanged) | identical |
+
+1. **Every cold-formed member, connection and status is identical on all 15 jobs** (sections, every check ratio, kg/m²,
+   status COMPLETE with 0 open items). The headline differs from the old single member D/C only where a deflection
+   ratio was the larger: Ex5 0.968 → 0.776, Ex6 0.857 → 0.822, Ex10 0.862 → 0.844, Ex12 0.862 → 0.836,
+   Ex13 0.959 → 0.925 (the deflection ratio is printed beside it).
+2. Combination labels on ties and the numbering of the frame's brace elements are not compared: where two combinations
+   give the same ratio the frame report prints whichever it visited first, and the Section 12 checks of the braces land
+   on permuted element tags (same multiset of ratios).
+3. **Run-to-run variation of the hot-rolled frame (Ex7, Ex10, Ex12), not from this branch.** Two runs of the same code
+   give two states: Ex7 diaphragm unit shears ±0.3 %, two frame connections 0.1458 / 0.1457, drift ±0.1 % (the second
+   run of the same code returned to the snapshot values); Ex10 one non-governing brace strength ratio 0.206 / 0.264
+   (its KL/r 0.739 governs); Ex12 Y drifts up to +2 % (≤ 0.00022 against 0.004) and 1053 / 1057 Section 12 rows. No
+   governing ratio, cold-formed result or status moves. Probable cause (for the engine owner):
+   `hr_vendor_runner._callables` iterates Python sets of braced bays and moment lines (`braces()` returns the set order,
+   `col_strong()` takes the first match), and string hashing changes the set order from one process to the next.
+   The first wave saw the same on Ex7 (REGRESSION_2026-10.md).
+4. Ex3: the plate comparison (400 × 500 × 32 at 1.16, plate bending on the uplift side) uses the same reactions; the
+   frame, members and the adopted plate's 0.675 are unchanged.
+
+Gold `cfg.py` changes (report-only text / inputs, md5 before in `baseline_2026-10-23_cfs/cfg_md5.txt`): Ex3
+(`compare_plates`, `portal.base_reason`), Ex2 (the purlin deflection label). Harness: `run_job.py` (CFS branch) adds
+`headline`, `worst_strength`, `worst_slenderness`, `frame_headline` to run_summary.json (the previous file is
+`baseline_2026-10-23_cfs/run_job.py.before_cfs_second_wave`).
+
+Tests: `python -m pytest tests -q -p no:cacheprovider` -- 370 passed (origin/main: 353 passed; the 17 new tests make
+the difference).
+
+Publish folder: `/home/claude/cfs_publish2/cfs/` (the 15 reports, viewers and linked frame reports, every local link
+resolving; `index.json` with the titles of the first wave, the report h1 as `report_title`, a meta line led by the
+strength headline with KL/r beside it, and `headline` / `frame_headline` records for the site build).
