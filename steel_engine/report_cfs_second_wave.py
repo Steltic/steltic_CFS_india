@@ -547,6 +547,10 @@ def scope_html(cfg, pkg, kind):
         items.append("the cold-formed connections and screwed fixings (none declared; chapter 7)")
     if kind != "portal_cfs":
         items.append("the floor and roof diaphragm capacities, which are declared values (chapter 6)")
+    if kind == "hybrid":
+        items.append("load-bearing LGSF walls braced by straps or sheathing as the lateral system: here the hot-rolled "
+                     "frame carries all wind and earthquake load and the cold-formed studs and joists carry gravity and "
+                     "wind only")
     items.append("foundations, pedestals and anchor embedment beyond the values declared")
     return ("<p class='rs'><b>Scope:</b> this report designs the cold-formed members%s to IS 801:1975 and %s. Outside this "
             "design (the design engineer's items): %s.</p>"
