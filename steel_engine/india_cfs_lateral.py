@@ -531,7 +531,9 @@ def run_lateral(cfg, job_dir, name=None, timeout_s=3600, rag_dir=None):
     spec_path = os.path.join(job_dir, "lateral_frame_spec.json")
     json.dump(spec, open(spec_path, "w"), indent=1, default=str)
     cmd = [sys.executable, RUNNER, spec_path, job_dir, name]
-    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+    # 2026-10 third wave (P3): the frame sub-run hashes strings with a fixed seed (the parent's PYTHONHASHSEED when it
+    # sets one, else 0), so whatever the vendored hot-rolled engine still reads from a set repeats from run to run
+    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", PYTHONHASHSEED=os.environ.get("PYTHONHASHSEED") or "0")
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s, env=env)
     log = os.path.join(job_dir, "lateral_run.log")
     with open(log, "w") as f:

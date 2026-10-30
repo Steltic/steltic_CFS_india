@@ -198,6 +198,8 @@ def design_and_report(name, cfg, outdir=None, do_report=True):
             "consistency": lat.get("consistency"), "ponding": lat.get("ponding"),
             # 2026-10 second wave (C3): the frame report's headline (worst strength ratio, slenderness beside it)
             "headline": RS.tag_frame_headline(lat.get("headline")), "headline_error": lat.get("headline_error"),
+            # 2026-10 third wave (P3): the stated strong-axis rule and the columns standing in frames of both directions
+            "column_orientation": lat.get("column_orientation"),
             "hr_report_items_basis": "numerical self-consistency check printed at the end of the frame report",
             "demand_level": "LSD", "capacity_basis": "IS800_LSD",
             "note": "hot-rolled IS 800 Section 12 frame designed with the Steltic hot-rolled IS 800 engine (IS 800 Table 4 "

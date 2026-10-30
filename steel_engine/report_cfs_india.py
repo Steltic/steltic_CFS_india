@@ -17,6 +17,7 @@ import re
 import india_cfs_env  # noqa: F401
 import india_cfs_basis as B
 import report_cfs_second_wave as RS
+import report_cfs_third_wave as RS3
 
 UNITS = {"force": "kN", "moment": "kN-m", "length": "m", "small_length": "mm", "pressure": "kN/m2", "line_load": "kN/m",
          "stress": "MPa", "engine": "N, mm, MPa (IS 801 kgf/cm2 inside is801_members)"}
@@ -490,6 +491,8 @@ def build_report_cfs_india(name, cfg, pkg, root):
         out.append("<p><b>%s</b></p>" % _e(RS.frame_headline_text(lat)))
     out.append(_t(["member group", "role", "section", "n", "strength ratio", "governing combination", "KL/r / limit (ratio)",
                    "other limits"], RS.lateral_member_rows(pkg, portal)))
+    if not portal:
+        out.append(RS3.column_orientation_html(lat))                            # 2026-10 third wave (P3)
     conn_rows = []
     for c in lat.get("connections") or []:
         dc = c.get("DC")
