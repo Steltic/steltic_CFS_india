@@ -170,8 +170,8 @@ and the new cfg keys are documented in `contract/AGENT_START.md`.
 | Ex13 | studs 1.0 → 1.6 (14.4 mm > H/300) | 0.925 → 0.925 | stud 4.4 → 6.8 | identical |
 
 Notes:
-- **Repeatability.** The two P3 passes are byte-identical on all 15 jobs (above). The final engine's second pass result
-  is recorded in /home/claude/briefs/CFS_RESULT4.md.
+- **Repeatability.** The two passes at the final engine 7817df4 are byte-identical on all 15 jobs: 9–81 output files
+  per job, `run_summary.json` excepted. So are the two P3 passes at df71fc8.
 - **Public text.** A scan of the 15 reports for leaks (paths, module names, JSON keys, EOR, owner ruling,
   "(Part 1):1987", "(was None)") is clean.
 - **Gold cfg changes (sandbox copy, for the lead to adopt):**
