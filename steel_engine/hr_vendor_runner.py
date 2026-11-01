@@ -152,13 +152,13 @@ def _stable_gold_col_strong(cfg, spec):
     return cfg
 
 
-def column_orientation(spec, cfg):
+def column_orientation(spec, hr_cfg):
     """CFS third wave (P3): the stated rule and the columns it decides -- every column claimed by frames of BOTH
     directions (braced bays at any storey, EBF bays, moment lines) with the strong axis the model gave it.  Written to
     lateral_result.json and printed in the cold-formed report."""
     NX, NY = int(spec["NX"]), int(spec["NY"])
     NF = len(spec["heights_m"])
-    g = cfg.get("_gold")
+    g = hr_cfg.get("_gold")
     builder = isinstance(g, dict) and callable(g.get("col_strong"))
     claims = {}
 
@@ -194,7 +194,7 @@ def column_orientation(spec, cfg):
         if len(claims[node]) < 2:
             continue
         i, j = node
-        sd = g["col_strong"](i, j) if builder else cfg["col_strong"](i, j, NX, NY)
+        sd = g["col_strong"](i, j) if builder else hr_cfg["col_strong"](i, j, NX, NY)
         rows.append({"grid": [i, j], "strong_axis": str(sd or "X").upper(),
                      "frames_X": claims[node].get("X"), "frames_Y": claims[node].get("Y")})
     return {"rule": COL_STRONG_RULE, "builder": "job frame builder" if builder else "regular-grid builder",

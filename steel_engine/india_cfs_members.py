@@ -395,6 +395,46 @@ def _cpi(cfg, spec, bg):
     return c["Cpi"], "%s: opening ratio %.3f -> Cpi +-%.1f" % (c["cite"], r, c["Cpi"])
 
 
+# 2026-10 third wave (P9): an internal-pressure design case beyond the opening ratio -- a dominant opening (a door or
+# roller shutter that is open, or fails, in a cyclone).  IS 875 (Part 3):2015 7.3.2.2: a building with one open side or
+# an opening exceeding 20 percent of the wall area is examined as a building with large openings (Cpi +-0.7); Fig. 2
+# gives the one-side-open values (+0.8 with the wind into the opening; -0.5 / -0.7 along it; -0.4 / -0.3 with the
+# opening leeward).  cfg['wind_internal_pressure'] = {case, Cpi_pos, Cpi_neg, opening, basis} is enveloped with the
+# opening-ratio Cpi (never reduces it) for every cold-formed member, and india_cfs_lateral applies it to the frame's
+# member wind patterns.
+DOMINANT_OPENING_CITE = ("IS 875 (Part 3):2015 7.3.2.2 (one open side, or an opening exceeding 20 percent of the wall "
+                         "area: as for large openings) and Fig. 2 (buildings with one side openings)")
+
+
+def internal_pressure_case(cfg):
+    """The declared internal-pressure case {Cpi_pos > 0, Cpi_neg < 0, ...} or None (validated)."""
+    ip = (cfg or {}).get("wind_internal_pressure")
+    if not ip:
+        return None
+    if ((cfg or {}).get("opening_protection") or {}).get("required"):
+        raise MemberWindError("wind_internal_pressure (a dominant-opening case) and opening_protection.required (no "
+                              "dominant opening can form) contradict each other: declare one")
+    if not isinstance(ip, dict) or ip.get("Cpi_pos") is None or ip.get("Cpi_neg") is None:
+        raise MemberWindError("wind_internal_pressure needs Cpi_pos (> 0) and Cpi_neg (< 0) with its basis")
+    cp, cn = float(ip["Cpi_pos"]), float(ip["Cpi_neg"])
+    if cp <= 0.0 or cn >= 0.0:
+        raise MemberWindError("wind_internal_pressure: Cpi_pos must be > 0 and Cpi_neg < 0 (got %s / %s)" % (cp, cn))
+    return dict(ip, Cpi_pos=cp, Cpi_neg=cn)
+
+
+def _cpi_pair(cfg, spec, bg):
+    """(internal pressure magnitude, internal suction magnitude, basis): the opening-ratio / declared Cpi, enveloped with
+    the declared internal-pressure case (dominant opening) when the job has one."""
+    cpi, basis = _cpi(cfg, spec, bg)
+    ip = internal_pressure_case(cfg)
+    if not ip:
+        return cpi, cpi, basis
+    pos, neg = max(cpi, ip["Cpi_pos"]), max(cpi, -ip["Cpi_neg"])
+    return pos, neg, ("%s; enveloped with the %s case Cpi %+.1f / %+.1f (%s) -> Cpi %+.1f / %+.1f"
+                      % (basis, ip.get("case") or "declared internal pressure", ip["Cpi_pos"], ip["Cpi_neg"],
+                         ip.get("cite") or DOMINANT_OPENING_CITE, pos, -neg))
+
+
 def member_pd(cfg, element_area_m2, z_m, face, zone="all", spec=None):
     """C02: IS 875-3 net design pressures on ONE cladding member (stud / purlin / girt):
         pd = max(Kd Ka Kc pz, 0.7 pz), Ka = Table 4 for the ELEMENT tributary area (spacing x span, 7.2.2.1),
@@ -444,15 +484,18 @@ def member_pd(cfg, element_area_m2, z_m, face, zone="all", spec=None):
         cps.append(float(spec["Cpe_leeward"]))
     if spec.get("Cpe_local") is not None:
         loc.append(float(spec["Cpe_local"]))
-    cpi, cpi_basis = _cpi(cfg, spec, bg)
+    cpi_p, cpi_n, cpi_basis = _cpi_pair(cfg, spec, bg)            # internal pressure / internal suction magnitudes
     cpe_pos, cpe_neg = max(cps), min(cps)
     out = {"face": face, "zone": zone, "A_m2": float(element_area_m2), "z_m": float(z_m), "pz_kNm2": pz, "pz_basis": pzrec,
-           "Ka": Ka, "Ka_cite": ka.get("cite"), "Kc": Kc, "Cpe_max": cpe_pos, "Cpe_min": cpe_neg, "Cpi": cpi, "Cpi_basis": cpi_basis,
-           "h_over_w": hw, "l_over_w": lw, "pitch_deg": bg["pitch_deg"]}
+           "Ka": Ka, "Ka_cite": ka.get("cite"), "Kc": Kc, "Cpe_max": cpe_pos, "Cpe_min": cpe_neg, "Cpi": max(cpi_p, cpi_n),
+           "Cpi_basis": cpi_basis, "h_over_w": hw, "l_over_w": lw, "pitch_deg": bg["pitch_deg"]}
+    if cpi_p != cpi_n:
+        out.update(Cpi_pos=cpi_p, Cpi_neg=-cpi_n)
 
     def pset(kd, cneg):
+        # inward pressure = external pressure + internal suction; outward = external suction + internal pressure
         pd = max(kd * Ka * Kc * pz, 0.7 * pz)
-        return pd, max(cpe_pos + cpi, 0.0) * pd, max(-cneg + cpi, 0.0) * pd
+        return pd, max(cpe_pos + cpi_n, 0.0) * pd, max(-cneg + cpi_p, 0.0) * pd
     pd_g, pin_g, pout_g = pset(Kd, cpe_neg)
     out.update(general={"Kd": Kd, "pd_kNm2": pd_g, "p_in_kNm2": pin_g, "p_out_kNm2": pout_g, "Cpe_min": cpe_neg})
     if loc:
@@ -591,6 +634,32 @@ def _defl_row(combo, check, defl, span, spec, cite):
             "informational": not crit}
 
 
+# 2026-10 third wave (P9): the stud deflection criterion.  IS 801 5.1 gives no limit; IS 800:2007 Table 6 has no stud
+# row.  The house basis (used by the jobs that declared one) is the Table 6 'other buildings, lateral, wind' row read
+# for the stud span between floors -- elastic cladding height/300, brittle cladding height/500 -- and 5.6.1 lets the
+# design engineer take a stricter value where the finish is vulnerable to cracking.  A stud group that declares no
+# criterion now gets this one (by its declared lining: spec['lining'] 'elastic' (default) | 'brittle').
+STUD_DEFLECTION = {
+    "elastic": (300, "IS 800:2007 Table 6, other buildings, lateral deflection under wind, elastic cladding: height/300, "
+                     "read for the stud span between floors (stated default: IS 801 5.1 sets no limit and Table 6 has no stud "
+                     "row; 5.6.1 allows a stricter value where the finish is vulnerable to cracking)"),
+    "brittle": (500, "IS 800:2007 Table 6, other buildings, lateral deflection under wind, brittle cladding: height/500, "
+                     "read for the stud span between floors (stated default: IS 801 5.1 sets no limit and Table 6 has no stud "
+                     "row)"),
+}
+
+
+def stud_deflection_criterion(st):
+    """(spec with deflection_limit_ratio + deflection_cite, source) -- the declared criterion, else STUD_DEFLECTION."""
+    if st.get("deflection_limit_ratio"):
+        return st, "declared by the job"
+    lining = str(st.get("lining") or "elastic").lower()
+    if lining not in STUD_DEFLECTION:
+        raise ValueError("cfs_members.studs.lining must be 'elastic' or 'brittle' (got %r)" % (st.get("lining"),))
+    ratio, cite = STUD_DEFLECTION[lining]
+    return dict(st, deflection_limit_ratio=ratio, deflection_cite=cite), "stated default (%s lining)" % lining
+
+
 # ---------------------------------------------------------------------------------------------------------------
 def design_studs(cfg, storey=None, spec=None, tag=None):
     """Exterior wall studs of one storey: member-level wind out of plane (C02: element Ka, governing face, local zones)
@@ -663,9 +732,12 @@ def design_studs(cfg, storey=None, spec=None, tag=None):
                     continue
                 ck = dict(ck, note=(ck.get("note") or "") + " | attachment lateral capacity not declared (sheathing.fastener_lateral_capacity_N)")
             rows.append(_row("8.1 bracing", nm, ck))
-    # deflection at working wind (information: IS 801 5.1 has no limit; the declared criterion is the EOR's)
+    # deflection at working wind: IS 801 5.1 sets no limit, so the criterion is declared -- by the job, or (2026-10 third
+    # wave, P9) the stated default STUD_DEFLECTION (IS 800:2007 Table 6 'other buildings, lateral, wind' row by lining)
     defl = 5.0 * w * L ** 4 / (384.0 * E_MPA * sec["Ix"])
-    rows.append(_defl_row("DL+1.0WL (service)", "deflection (information)", defl, L, st, "IS 801 5.1 deflection determination by conventional methods"))
+    st_d, d_src = stud_deflection_criterion(st)
+    rows.append(_defl_row("DL+1.0WL (service)", "deflection (information)", defl, L, st_d, "IS 801 5.1 deflection determination by conventional methods"))
+    rows[-1]["criterion_source"] = d_src
     rows += geometry_rows(sec)
     _stamp_restraint(rows, rtext)
     extra = {"storey": k, "height_mm": L, "restraint_basis": {"text": rtext, "sheathing_braced": braced,
@@ -1265,9 +1337,11 @@ def design_eave_strut(cfg, spec, tag=None):
                                            "KL_r": (round(float(r["compression"]["KLr"]), 1)       # second wave, report-only
                                                     if isinstance((r.get("compression") or {}).get("KLr"), (int, float)) else None)}))
     combos = [{"label": lab}]
-    return _member_record("eave_strut", spec, sec, fy, combos, rows,
-                          {"span_mm": L, "P_N": P, "P_cite": spec.get("P_cite"), "grade_cite": cite,
-                           "clauses": ["IS 801 6.1.2", "6.6.1.1", "6.6.1.2", "6.7"]}, tag=tag)
+    rec = _member_record("eave_strut", spec, sec, fy, combos, rows,
+                         {"span_mm": L, "P_N": P, "P_cite": spec.get("P_cite"), "grade_cite": cite,
+                          "clauses": ["IS 801 6.1.2", "6.6.1.1", "6.6.1.2", "6.7"]}, tag=tag)
+    rec["id"] = rec["id"].replace("eave_strut-", "eave-strut-", 1)     # 2026-10 third wave: printed id in words
+    return rec
 
 
 def design_header(cfg, spec, tag=None):
