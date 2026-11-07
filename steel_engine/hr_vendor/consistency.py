@@ -20,7 +20,7 @@ For every member AND connection it checks:
 check(name) prints a PASS/FAIL summary and returns the list of issue strings ([] == consistent).
 Never raises -- a malformed package is itself reported as an issue.
 """
-import os, json, re
+import os, json, re, math
 
 TOL = 0.04   # 4% relative tolerance on recomputed ratios
 
@@ -349,6 +349,70 @@ def _geometry_issues(cfg):
 
 
 
+# ---- record readers (engine checks 2, 2026-11-06): the rules below that ask whether a detail was DESIGNED, or a
+# distribution / evaluation RECORDED, read the records they mean -- never the whole package text, where any record key,
+# label or basis sentence (member_wind_wall_scan.stepped_facade, a wind post's tributary_width_mm, the 7.6.4 record's
+# echo of the declared 'semi-rigid', a stub's label 'camber') would stand in for the detail and defeat the rule
+_STEP_TRANSFER_RX = re.compile(r"split[-_ ]?level|inter[-_ ]?diaphragm|(?<![a-z])(?:steps?|offset)(?![a-z])")
+
+
+def _computed(r):
+    """A computed check record: a numeric D/C, or a numeric value against a numeric limit."""
+    return isinstance(r, dict) and (_is_numeric(r.get("dc")) or _is_numeric(r.get("DC"))
+                                    or (_is_numeric(r.get("value")) and _is_numeric(r.get("limit"))))
+
+
+def _designed_labels(pkg, fields=False):
+    """The labels of the DESIGNED records of a package, lower case: each connection's id / type / name /
+    governing_check when it carries a D/C or check rows, and each computed check record anywhere in capacity_design
+    (its key, id, name, check and limit_state; fields=True adds the names of its numeric fields, so a computed check
+    stored with descriptive keys -- Ic_provided: 1350 -- is seen).  Free text, notes, cites and the labels of records
+    without a number (stubs, declarations) are not designed records."""
+    out = []
+    if not isinstance(pkg, dict):
+        return out
+    for c in pkg.get("connections") or []:
+        if isinstance(c, dict) and (_is_numeric(c.get("DC")) or c.get("checks")):
+            out += [str(c.get(k) or "") for k in ("id", "type", "name", "governing_check")]
+
+    def walk(o, key):
+        if isinstance(o, dict):
+            if _computed(o):
+                out.extend(str(x) for x in (key, o.get("id"), o.get("name"), o.get("check"), o.get("limit_state")) if x)
+                if fields:
+                    out.extend(str(k) for k, v in o.items() if _is_numeric(v))
+            for k, v in o.items():
+                walk(v, k)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v, key)
+    walk(pkg.get("capacity_design"), None)
+    return [x.lower() for x in out if x]
+
+
+def _step_transfer_designed(pkg):
+    """drift_exempt_stories: a designed step / split-level transfer detail -- a designed connection or capacity-design
+    check labelled step, offset, split-level or inter-diaphragm."""
+    return any(_STEP_TRANSFER_RX.search(l) for l in _designed_labels(pkg))
+
+
+def _diaphragm_distribution_recorded(pkg):
+    """A flexible / semi-rigid diaphragm's lateral-force distribution recorded by the analysis: the IS 1893 7.6.4
+    record's tributary line shears, its rigid-vs-tributary comparison or its flexible-diaphragm run, a Table 5(ii)
+    flexible-diaphragm run (engine or EOR-documented) in seismic_analysis, or the collectors' flexible levels."""
+    if not isinstance(pkg, dict):
+        return False
+    d = pkg.get("diaphragm_7_6_4")
+    if isinstance(d, dict) and not d.get("error") and any(d.get(k) for k in ("line_shears", "rigid_vs_tributary",
+                                                                            "flexible_run")):
+        return True
+    sa = pkg.get("seismic_analysis")
+    if isinstance(sa, dict) and (sa.get("flexible_diaphragm_run") is True or sa.get("flexible_diaphragm_eor")):
+        return True
+    col = pkg.get("collectors")
+    return bool(isinstance(col, dict) and col.get("flexible_levels"))
+
+
 def _design_basis_issues(cfg, name=None, pkg=None):
     """R1/R2/R8/R12/R14/R16 design-basis gates (SDC-aware so SDC B/C is not over-flagged)."""
     out=[]
@@ -457,15 +521,14 @@ def _design_basis_issues(cfg, name=None, pkg=None):
                            "(12.3.3.1): stiffen the story or document why the classification does not govern")
     _dia = str(cfg.get("diaphragm","rigid")).lower()
     if _dia in ("flexible","semi-rigid") and isinstance(pkg,dict):
-        _blob2=_cd_blob(pkg)+" "+json.dumps(pkg).lower()
-        if "tributary" not in _blob2:
+        # engine checks 2: the capacity design or the recorded distribution, not the whole package text
+        if not (_diaphragm_distribution_recorded(pkg) or any("tributary" in l for l in _designed_labels(pkg, fields=True))):
             out.append("cfg['diaphragm']='%s' declared but calc_package never distributes lateral force by "
                        "TRIBUTARY AREA -- for a flexible diaphragm the braced-line shears, deck shear (plf), "
                        "chords and collectors must be designed from the tributary model (IS 875/1893 12.3.1)"%_dia)
     _dex = cfg.get("drift_exempt_stories") or {}
     if _dex and isinstance(pkg,dict):
-        _blob3=json.dumps(pkg).lower()
-        if not any(w in _blob3 for w in ("step","split-level","inter-diaphragm","offset")):
+        if not _step_transfer_designed(pkg):            # engine checks 2: a designed detail, not any 'step' in the text
             out.append("drift_exempt_stories declared (%s) but calc_package has no step/split-level transfer "
                        "detail -- the exempted inter-diaphragm racking must be a DESIGNED detail (shear "
                        "transfer + the shared columns checked across the offset)"%sorted(_dex))
@@ -489,20 +552,6 @@ _SYS_REQUIRED = {
              ("panel-zone shear / doubler", ["panel","doubler"])],
     "dual": [("SMF independently resists >=25% of V at every level", ["25","independent","resist"])],
 }
-
-def _cd_blob(pkg):
-    """All text in capacity_design -- dict KEYS + string values + numbers -- so a computed check stored with
-    descriptive keys (Ic_provided: 1350) is detected, not just free-text notes."""
-    cd=pkg.get("capacity_design") if isinstance(pkg,dict) else None
-    parts=[]
-    def walk(o):
-        if isinstance(o,dict):
-            for k,v in o.items(): parts.append(str(k)); walk(v)
-        elif isinstance(o,list):
-            for v in o: walk(v)
-        else: parts.append(str(o))
-    walk(cd if cd is not None else {})
-    return " ".join(parts).lower()
 
 def _is_numeric(x):
     return isinstance(x, (int, float)) and not isinstance(x, bool)
@@ -544,7 +593,7 @@ def _named_not_computed_issues(pkg):
 def _system_checks_issues(cfg, pkg):
     out=[]; sysname=str(cfg.get("system") or "").lower()
     if not sysname or not isinstance(pkg,dict): return out
-    blob=_cd_blob(pkg)
+    blob=" ".join(_designed_labels(pkg, fields=True))   # engine checks 2: computed records, not notes / stub labels
     for key,reqs in _SYS_REQUIRED.items():
         if key in sysname:
             for label,kws in reqs:
@@ -576,8 +625,7 @@ def _transfer_issues(cfg, name, pkg):
     except Exception:
         return out
     if pir.get("setback") and isinstance(pkg,dict):
-        txt=[]; _gather_text([pkg.get("capacity_design"), pkg.get("connections")],txt)
-        blob=" ".join(t for t in txt if isinstance(t,str)).lower()
+        blob=" ".join(_designed_labels(pkg))           # engine checks 2: a designed transfer / backstay record
         if "transfer" not in blob and "backstay" not in blob:
             out.append("footprint SETBACK detected -- design the TRANSFER/backstay diaphragm chords/collectors and supporting members for Omega_0 (7-22 12.3.3.4, discontinuous-element support) and report the backstay force")
     return out
@@ -585,7 +633,7 @@ def _transfer_issues(cfg, name, pkg):
 def _nonparallel_issues(cfg, pkg):
     out=[]
     if cfg.get("skew") and isinstance(pkg,dict):
-        if "biaxial" not in _cd_blob(pkg):
+        if not any("biaxial" in l for l in _designed_labels(pkg, fields=True)):   # engine checks 2: a computed record
             out.append("nonparallel/skewed frame -- resolve stiffness into BOTH principal directions and apply BIAXIAL SCWB/interaction at the skewed columns (not evident in capacity_design)")
     return out
 
@@ -597,7 +645,12 @@ def _consultancy_issues(cfg, pkg):
     out = []
     if not isinstance(cfg, dict) or not isinstance(pkg, dict):
         return out
-    blob = json.dumps(pkg).lower()
+    # engine checks 2 (2026-11-06): each guard reads the records it means (the ponding screen, the composite worksheet,
+    # the 7.11.3 separation, the snow drift summary) and the designed records' labels -- not the whole package text,
+    # whose keys, stub labels and basis sentences ('camber' in the worksheet stub, 'drift' in every storey-drift row,
+    # 'scope' in the composite note) cleared them whatever was designed
+    labels = _designed_labels(pkg)
+    lab = lambda *ws: any(w in l for l in labels for w in ws)
     arch = (str(cfg.get("arch", "")) + " " + str(cfg.get("system", ""))).lower()
     mem = pkg.get("members") or []
     # A3 ponding: long-span flat roof beams and no ponding statement
@@ -606,12 +659,20 @@ def _consultancy_issues(cfg, pkg):
         if inp.get("length_mm") is not None:
             return float(inp.get("length_mm") or 0) / 1000.0
         return float(inp.get("length_in") or 0) * 0.0254
-    roof_long = any(isinstance(m, dict) and (m.get("inputs") or {}).get("role") == "roof"
-                    and _len_m(m) >= 12.0 for m in mem)
-    if roof_long and "ponding" not in blob:
-        out.append("long-span (>= 12 m) roof framing and NO ponding evaluation in calc_package -- "
-                   "check ponding / impounded rain (roof slope + secondary drainage head; IS 875 (Part 4) "
-                   "for snow-water) and record it")
+    # review N1 (2026-11-07): the roof's real span, not one element -- a PEB rafter is split into short tapered
+    # pieces (IN_Ex1: 9 m) and a flat roof's beam into pieces at the secondary beams
+    roof_el = [_len_m(m) for m in mem if isinstance(m, dict) and (m.get("inputs") or {}).get("role") == "roof"]
+    # the slope ruling (2026-11-07): a long span flatter than 1 in 20, or of unknown slope (PONDING_SLOPE_BASIS)
+    flat_long = [r for r in _roofs_for_ponding(cfg, pkg, roof_el)
+                 if r[0] >= 12.0 and (r[1] is None or r[1] < PONDING_SLOPE_LIMIT - 1e-9)]
+    if flat_long and not (isinstance(pkg.get("ponding"), dict) or lab("ponding")):
+        sp, sl, bs, src = max(flat_long, key=lambda t: t[0])
+        why = "%s %.1f m, slope %s (%s)" % (bs, sp, ("1 in %.0f" % (1.0 / sl)) if sl else ("flat" if sl == 0 else
+                                                                                          "unknown"), src)
+        out.append("long-span (>= 12 m) roof framing flatter than 1 in 20 or of unknown slope (%s) and NO ponding "
+                   "evaluation in calc_package -- check ponding / impounded rain (roof slope + secondary drainage "
+                   "head; IS 875 (Part 4) for snow-water) and record it (cfg['ponding'] = {span_mm, delta_mm, "
+                   "roof_slope}: the IS 875 (Part 4) 4.4 screen in calc_package 'ponding'); %s" % (why, PONDING_SLOPE_BASIS))
     # A6 footfall vibration: long floor spans or vibration-sensitive occupancy (H31: cfg['roof_levels'] are roofs,
     # not floors; cleared only by a structured cfg/pkg['vibration_screen'] {basis, result, cite}, never by a keyword)
     floor_long = _has_floor_levels(cfg) and any(
@@ -628,36 +689,44 @@ def _consultancy_issues(cfg, pkg):
     fs = (str(cfg.get("floor_system", "")).lower() + " " + arch + " "
           + str(cfg.get("notes", "")).lower())   # notes too: agents park the brief's composite line there
     if "composite" in fs:
-        need = [("stud", "stud strength/schedule (I8.2a)"),
-                ("camber", "camber decision (even 'no camber', with the wet deflection shown)"),
-                (("wet", "unshored", "construction stage"), "unshored wet-concrete stage check")]
-        missing = []
-        for keys, what in need:
-            keys = (keys,) if isinstance(keys, str) else keys
-            if not any(k in blob for k in keys):
-                missing.append(what)
-        stubs_ok = False
         cd = pkg.get("composite_design") if isinstance(pkg, dict) else None
-        if isinstance(cd, dict):
-            ws = cd.get("chI_worksheet") or {}
-            slots = ws.get("slots") if isinstance(ws, dict) else None
-            if isinstance(slots, list) and slots and all(s.get("found") is False for s in slots):
-                stubs_ok = True  # H6: honest found:false stubs — do not invent
-        scoped = stubs_ok or ("composite" in blob and any(k in blob for k in
-                  ("lower bound", "lower-bound model", "scope", "excluded", "not relied", "delegated")))
+        ws = (cd.get("chI_worksheet") or {}) if isinstance(cd, dict) else {}
+        slots = ws.get("slots") if isinstance(ws, dict) else None
+        slots = [x for x in (slots or []) if isinstance(x, dict)]
+        sl = {x.get("component"): x for x in slots}
+        done = lambda c: bool((sl.get(c) or {}).get("found") or (sl.get(c) or {}).get("not_required"))
+        need = [(done("is11384_shear_connectors") or lab("stud"), "stud strength/schedule (I8.2a)"),
+                (done("construction_stage") or lab("camber"),
+                 "camber decision (even 'no camber', with the wet deflection shown)"),
+                (done("construction_stage") or lab("wet", "unshored", "construction stage", "construction_stage"),
+                 "unshored wet-concrete stage check")]
+        missing = [what for ok_, what in need if not ok_]
+        stubs_ok = bool(slots) and all(x.get("found") is False for x in slots)   # H6: honest found:false stubs
+        # review N2 (2026-11-07): a declared composite_scope clears the guard only with the worksheet the engine
+        # builds from it (its slots in the package) -- a declaration whose worksheet failed to build is not a record
+        scope = str((ws.get("scope") if isinstance(ws, dict) else "") or cfg.get("composite_scope") or "").strip()
+        scoped = stubs_ok or (bool(slots) and bool(scope))   # bare_steel / delegated (COMPOSITE_INDIA.md)
         if missing and not scoped:
             out.append("COMPOSITE floor system declared and the package lacks: " + "; ".join(missing) +
                        " -- composite beams in India fall under IS 11384 (not in the corpus -> found:false): "
                        "record the scope (bare-steel design per IS 800 8.2 + construction stage, or delegated)")
     # A8 seismic joint / pounding: multi-wing keywords and no joint decision
-    if any(k in arch for k in ("twin", "two tower", "wings", "wing ")) and \
-            not any(k in blob for k in ("seismic joint", "pounding", "joint width", "no seismic joint")):
+    dcomp = pkg.get("deformation_compatibility") if isinstance(pkg.get("deformation_compatibility"), dict) else {}
+    # review N3 (2026-11-07): the 7.11.3 separation record, or a check tagged as the seismic joint -- not any designed
+    # label with 'separation' or 'pounding' in it
+    joint = bool(dcomp.get("separation")             # the 7.11.3 separation of cfg['adjacent_units']
+                 or lab("seismic joint", "seismic_joint", "seismic-joint", "7.11.3"))
+    if any(k in arch for k in ("twin", "two tower", "wings", "wing ")) and not joint:
         out.append("multi-wing/tower configuration and NO seismic-joint decision recorded -- either "
                    "size the joint per IS 1893 7.11.3 (R x (D1 + D2), or (R1 D1 + R2 D2)/2 at equal floor "
-                   "levels, Amd 1) or record why the wings are intentionally connected")
+                   "levels, Amd 1: cfg['adjacent_units']) or design the connection that joins them (a designed "
+                   "connection / check labelled seismic joint)")
     # B6 snow drift at steps/parapets
     stepish = any(k in arch for k in ("step", "setback", "parapet", "penthouse", "tier", "wedding"))
-    if float(cfg.get("snow", 0) or 0) > 0 and stepish and "drift" not in blob.replace("drift_", ""):
+    ss = ((pkg.get("load_plan") or {}).get("snow_summary") or {}) if isinstance(pkg.get("load_plan"), dict) else {}
+    sdrift = bool((isinstance(ss, dict) and (ss.get("drift") or ss.get("drift_nodal_kN")))
+                  or any("snow" in l and "drift" in l for l in labels))
+    if float(cfg.get("snow", 0) or 0) > 0 and stepish and not sdrift:
         out.append("snow present with roof steps/parapets/setbacks and no DRIFT surcharge in the "
                    "package (IS 875 (Part 4) drift / unbalanced cases) -- add it to the step-adjacent members")
     # B8 delegated-design register (H31): triggered by agent-authored text only (cfg notes / arch / floor_system /
@@ -670,6 +739,70 @@ def _consultancy_issues(cfg, pkg):
             out.append("delegated-design components referenced (joists/deck/BRBs/stairs/cladding) but %s -- "
                        "declare cfg['delegated_design'] = [{'item', 'criteria', 'interface_forces'}, ...] listing "
                        "each delegated item, the design criteria handed off, and the interface forces" % bad)
+    return out
+
+
+PONDING_SLOPE_LIMIT = 1.0 / 20.0
+PONDING_SLOPE_BASIS = (
+    "engineering basis (Steltic ruling, 2026-11-07): IS 875 (Part 4):2021 4.4 asks for the ponding investigation on "
+    "'flat roofs (or with a small slope)' and gives no number; the engine's 4.4 screen (mid-span deflection < the fall "
+    "over the half span) has a fall of span/40 at 1 in 20, which a roof meeting IS 800 Table 6 (span/180 for a rafter "
+    "under profiled metal sheeting) passes with a margin of 180/40 = 4.5 -- so the guard asks for the screen on long "
+    "spans flatter than 1 in 20, or of unknown slope (not an IS criterion)")
+
+
+def _declared_roof_slope(cfg):
+    """(slope as rise / run, source) declared outside the roof planes: the ponding input's roof_slope, else
+    cfg['roof_pitch_deg']; (None, None) when neither is declared."""
+    if not isinstance(cfg, dict):
+        return None, None
+    try:
+        sl = (cfg.get("ponding") or {}).get("roof_slope") if isinstance(cfg.get("ponding"), dict) else None
+        if sl is not None:
+            return abs(float(sl)), "cfg['ponding'].roof_slope"
+        if cfg.get("roof_pitch_deg") is not None:
+            return abs(math.tan(math.radians(float(cfg["roof_pitch_deg"])))), "cfg['roof_pitch_deg']"
+    except (TypeError, ValueError):
+        pass
+    return None, None
+
+
+def _roofs_for_ponding(cfg, pkg, roof_el_m=()):
+    """[(span m, slope or None, basis, slope source)] of the roof framing for the ponding guard (reviews N1 and the slope ruling,
+    2026-11-07).  Each roof plane: its eave-to-eave span (a portal's frame span; cfg['roof_planes'], always mm) and its
+    flatter slope.  The roof outside the planes (a flat roof, a lean-to): the longest roof element and, on an N-mm job
+    without planes, the longest grid bay (the span of the roof beams between the column lines), with the declared
+    slope (_declared_roof_slope) or None."""
+    cfg = cfg if isinstance(cfg, dict) else {}
+    out = []
+    try:
+        import roof_geometry as RG
+    except Exception:
+        RG = None
+    if RG is not None:
+        try:
+            for pl in RG.planes(cfg):
+                rise = float(pl["rz"]) - float(pl["ez"])
+                runs = [float(pl["ridge"]) - float(pl["lo"]), float(pl["hi"]) - float(pl["ridge"])]
+                out.append(((float(pl["hi"]) - float(pl["lo"])) / 1000.0, min(rise / r for r in runs if r > 0),
+                            "roof plane %d span eave to eave" % pl["idx"], "the roof plane"))
+        except Exception:
+            pass
+    slope, src = _declared_roof_slope(cfg)
+    flat = max(roof_el_m) if roof_el_m else 0.0
+    basis = "a roof member"
+    mm = (isinstance(pkg, dict) and pkg.get("unit_system") == "N-mm") or \
+        str(cfg.get("units") or "").lower() in ("n-mm", "si", "mm")
+    if RG is not None and not out and roof_el_m and mm and cfg.get("NX") and cfg.get("NY"):
+        try:
+            xs, ys = RG.grid_lines(cfg)
+            bays = [b - a for a, b in zip(xs, xs[1:])] + [b - a for a, b in zip(ys, ys[1:])]
+            if bays and max(bays) / 1000.0 > flat:
+                flat, basis = max(bays) / 1000.0, "longest grid bay (roof beam span)"
+        except Exception:
+            pass
+    if flat > 0.0:
+        out.append((flat, slope, basis, src or "not declared"))
     return out
 
 
@@ -1025,6 +1158,19 @@ def literal_dc_issues(pkg):
     return out
 
 
+def member_wind_side_wall_issues(pkg):
+    """Lead ruling on open point 1 (2026-11-06): every member-wind pattern loads its two side walls (IS 875-3 Table
+    5, static_model.side_wall_pressure); a pattern whose side walls could not be loaded is a FAIL, never silent."""
+    out = []
+    pats = ((pkg or {}).get("member_wind_wall_scan") or {}).get("patterns") or {}
+    for name, v in sorted(pats.items(), key=lambda kv: str(kv[0])):
+        sw = (v or {}).get("side_walls") or {}
+        if sw and sw.get("applied") is False:
+            out.append("member-wind pattern %s: the side walls are not loaded (%s) -- IS 875-3 Table 5 side-wall Cpe "
+                       "is required (declare wall_side_kNm2)" % (name, sw.get("reason")))
+    return out
+
+
 def zero_demand_issues(pkg):
     out = []
     for m in (pkg or {}).get("members") or []:
@@ -1051,14 +1197,16 @@ def _india_design_basis_issues(cfg, pkg):
         out.append("drift_limit=%.4f exceeds IS 1893 7.11.1.1 (0.004 h) -- not permitted" % float(dl))
     _dia = str(cfg.get("diaphragm", "rigid")).lower()
     if _dia in ("flexible", "semi-rigid") and isinstance(pkg, dict):
-        blob = json.dumps(pkg).lower()
-        if "tributary" not in blob and "semi_rigid" not in blob and "semi-rigid" not in blob:
+        # engine checks 2: the recorded distribution -- the whole package text held 'tributary' in every member-wind
+        # job (the wall scan's basis, a wind post's tributary width) and 'semi-rigid' in the 7.6.4 record's echo
+        if not _diaphragm_distribution_recorded(pkg):
             out.append("cfg['diaphragm']='%s' but no tributary / semi-rigid diaphragm distribution is recorded "
                        "(IS 1893 7.6.4)" % _dia)
     _dex = cfg.get("drift_exempt_stories") or {}
     if _dex and isinstance(pkg, dict):
-        blob3 = json.dumps(pkg).lower()
-        if not any(w in blob3 for w in ("step", "split-level", "inter-diaphragm", "offset")):
+        # engine checks 2: a designed connection / capacity-design check, not any 'step' in the package text (the
+        # member-wind record member_wind_wall_scan.stepped_facade is in every member-wind package)
+        if not _step_transfer_designed(pkg):
             out.append("drift_exempt_stories declared (%s) but no step/split-level transfer detail is designed"
                        % sorted(_dex))
     try:
@@ -1084,6 +1232,7 @@ def india_issues(cfg, pkg, job_dir):
     except Exception as ex:
         out.append("seismic gates unavailable: %s" % ex)
     out += zero_demand_issues(pkg)
+    out += member_wind_side_wall_issues(pkg)
     out += absent_component_issues(cfg, pkg)
     out += literal_dc_issues(pkg)
     out += script_grep_issues(job_dir)

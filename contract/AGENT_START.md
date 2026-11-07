@@ -317,6 +317,36 @@ computed thin `C…-G350` / `Z…-G350` sections (see CFS members below);
   cold-formed member strength ratio, with the KL/r of the compression members against IS 801 6.6.3 (200) beside it;
   the moment-frame directions (`lateral_frame.moment_lines`, or the portal plane) whose Ta is 7.6.2(c) get a note with
   the 7.6.2(a) bare-frame Ta.
+* **2026-10 third wave (CFS P9) keys.**
+  * `cfs_members.studs[*].lining` = `"elastic"` (default) | `"brittle"`: a stud group without `deflection_limit_ratio`
+    gets the stated default criterion -- IS 800:2007 Table 6 "other buildings, lateral, wind" read for the stud span,
+    height/300 (elastic) or height/500 (brittle); IS 801 5.1 sets no limit.
+  * `wind_internal_pressure` = `{"case", "Cpi_pos" (> 0), "Cpi_neg" (< 0), "opening", "basis", "cite"}`: a declared
+    internal-pressure case (a dominant opening: IS 875 (Part 3):2015 7.3.2.2 with Fig. 2) enveloped with the
+    opening-ratio Cpi for every purlin, girt and stud and applied to the frame's member-wind patterns.
+  * `opening_protection` = `{"required": true, "items", "basis", "Cpi_basis", "cite"}`: the openings are protected
+    (e.g. impact-rated doors, shutters and glazing on the cyclone coast), so no dominant opening forms; printed as a
+    design requirement for the design engineer and owner. It contradicts a declared `wind_internal_pressure` (refused).
+  * `lean_to` = `{name, width_m, depth_m, roof_z_m, front_wall_height_m, upper_roof_z_m, upper_roof_length_m,
+    upper_roof_pitch_deg, mu_s (only for an upper roof steeper than 15 deg), D_roof_kNm2, wall_kNm2, joists {..},
+    door {width_m, height_m, header {..}, jambs {..}}, back_studs {..}, basis, lateral}`: a lean-to against a higher
+    wall, its roof loaded by the IS 875 (Part 4):2021 5.2.4 drift (needs `load_plan.snow_summary.s0_kPa`). Each member
+    group takes `section` (+ `n_ply`) or `auto_select`, `spacing_mm`, `bearing_mm`, `L_unbraced_mm`,
+    `deflection_limit_ratio` + `deflection_cite`.
+  * `roof_platforms` = `[{name, frames [i1, i2], eave_line (j), span_m, posts_from_column_m [..], beam_trib_m,
+    deck_kNm2, units [{P_kN, a_m}] (per beam), unit_cite, height_above_roof_m, snow_on_platform, beams {..,
+    deck_restrains_top}, posts {.., height_mm}, frame_note}]`: an equipment platform on the roof -- its beams and posts
+    (IS 801), the IS 875 (Part 4) 5.2.6 drift around it, and its dead load on the hot-rolled frame as knee loads (with
+    the moment of the post offsets) in the frame run's `nodal_dead_loads`.
+  * `cfs_connections_spec.purlin_cleat` = `{"bolts" {n, d_mm, class, edge_mm, pitch_mm}, "cleat" {t_mm, fy_MPa,
+    width_mm, bolt_height_mm, weld_mm}, "roof_pitch_deg", "downslope": "cleat" | "sag rods", "note"}`: purlin-to-rafter
+    cleats designed for every purlin group (IS 801 7.5 bolts in the purlin web; IS 800:2007 Section 11 plate and
+    welds).
+  * All-CFS portal: `cfs_members.eave_struts[*].P_from` = `"longitudinal_bracing"` derives the strut force from the
+    portal's longitudinal bracing (governing force / 2 side walls).
+  * Frame sub-run: braced bays are numbered in sorted order and a column standing in frames of both directions is
+    oriented by the stated rule (moment line first, then the first braced bay listed); `lateral_frame.default_strong`
+    sets the default axis.
 * Floor deflection criterion: IS 800 Table 6 "other buildings, floor": span/300 (elements not susceptible to cracking) or
   span/360 (susceptible) — span/240 is the industrial row, not a floor of an ordinary building.
 

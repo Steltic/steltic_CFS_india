@@ -17,6 +17,7 @@ import re
 import india_cfs_env  # noqa: F401
 import india_cfs_basis as B
 import report_cfs_second_wave as RS
+import report_cfs_third_wave as RS3
 
 UNITS = {"force": "kN", "moment": "kN-m", "length": "m", "small_length": "mm", "pressure": "kN/m2", "line_load": "kN/m",
          "stress": "MPa", "engine": "N, mm, MPa (IS 801 kgf/cm2 inside is801_members)"}
@@ -276,13 +277,15 @@ def _wind_member_text(m):
     if not mp:
         return None
     sel = [mp.get("general") or {}, mp.get("edge") or {}]
-    out = ("member wind (IS 875-3 7.3): element area %s m2 at z = %s m, pz %s kN/m2, Ka %s, Cpe %s / %s, Cpi +-%s (%s) -> "
+    cpi_txt = ("+-%s" % _num(mp.get("Cpi"), 2)) if mp.get("Cpi_pos") is None else \
+        ("%+.2f / %+.2f" % (float(mp["Cpi_pos"]), float(mp["Cpi_neg"])))          # 2026-10 third wave (P9)
+    out = ("member wind (IS 875-3 7.3): element area %s m2 at z = %s m, pz %s kN/m2, Ka %s, Cpe %s / %s, Cpi %s (%s) -> "
            "pressure %s kN/m2, %s %s kN/m2"
            % (_num(mp.get("A_m2"), 2), _num(mp.get("z_m"), 2), _num(mp.get("pz_kNm2"), 3), _num(mp.get("Ka"), 3),
               _num(mp.get("Cpe_max"), 2), _num(min([x.get("Cpe_min", 0) for x in sel if x.get("Cpe_min") is not None]
                                                     + [x.get("Cpe_local", 0) for x in sel if x.get("Cpe_local") is not None]
                                                     or [mp.get("Cpe_min") or 0.0]), 2),
-              _num(mp.get("Cpi"), 2), clean(mp.get("Cpi_basis")), _num(mp.get("p_in_kNm2"), 3),
+              cpi_txt, clean(mp.get("Cpi_basis")), _num(mp.get("p_in_kNm2"), 3),
               "suction" if m.get("role") in ("girt", "stud") else "uplift / suction", _num(mp.get("p_out_kNm2"), 3)))
     if w.get("p_design_kNm2") is not None:
         out += "; design pressure %s kN/m2" % _num(w["p_design_kNm2"], 3)
@@ -301,11 +304,15 @@ def _member_header(m):
     ln = m.get("length_mm") or m.get("span_mm") or m.get("height_mm")
     role = str(m.get("role") or "")
     word = "height" if role in ("stud", "column", "mezzanine post") else (
-        "span" if role in ("joist", "purlin", "girt", "header", "eave_strut", "mezzanine beam") else "length")
+        "span" if role in ("joist", "purlin", "girt", "header", "eave_strut", "mezzanine beam", "lean-to roof joist",
+                           "door header", "platform beam") else "length")
+    if role in ("door jamb", "back-wall stud", "platform post"):                 # 2026-10 third wave (P9)
+        word = "height"
     lt = ("%s %s mm, " % (word, _num(ln, 0))) if ln else ""
     # 2026-10 second wave (C3): the strength ratio first, deflection / KL/r / limits beside it (not one mixed D/C)
     return ("%s -- %s (%s), Fy %s MPa, %s%s%s (%s)"
-            % (m["id"], m.get("designator"), m.get("role"), _num(m.get("Fy_MPa"), 0), sp, lt, RS.member_ratio_text(m), _ok(m.get("ok"))))
+            % (m["id"], m.get("designator"), str(m.get("role") or "").replace("_", " "), _num(m.get("Fy_MPa"), 0), sp, lt,
+               RS.member_ratio_text(m), _ok(m.get("ok"))))
 
 
 def durability_text(cfg, pkg):
@@ -406,6 +413,7 @@ def build_report_cfs_india(name, cfg, pkg, root):
         ("units", "kN, kN-m, m, mm, kN/m2, MPa (engine: N, mm, MPa)"),
     ]))
     out.append(RS.scope_html(cfg, pkg, kind))                                   # 2026-10 second wave (C3)
+    out.append(RS3.opening_protection_html(cfg, "scope"))                       # 2026-10 third wave (P9)
     # ---- 2 loads ----
     out.append("<h2>2. Loads (IS 875 Parts 1-5, IS 1893)</h2>")
     ld = cfg.get("loads") or {}
@@ -443,6 +451,9 @@ def build_report_cfs_india(name, cfg, pkg, root):
     elif ws.get("storeys") or ws.get("Cpe_X"):
         out.append("<p>Wall Cpe (IS 875 (Part 3):2015 Table 5, 7.3.3.1): X %s; Y %s. Wind base shear X %s kN, Y %s kN.</p>"
                    % (_e(_cpe_text(ws.get("Cpe_X"))), _e(_cpe_text(ws.get("Cpe_Y"))), _f(ws.get("VB_x_kN"), 1), _f(ws.get("VB_y_kN"), 1)))
+    out.append(RS3.internal_pressure_html(cfg, pkg))                          # 2026-10 third wave (P9)
+    out.append(RS3.opening_protection_html(cfg, "wind"))
+    out.append(RS3.snow_drift_html(pkg))
     if lat.get("statement"):
         out.append("<p><b>%s</b></p>" % _e(clean(lat["statement"])))
     if ss:
@@ -490,6 +501,9 @@ def build_report_cfs_india(name, cfg, pkg, root):
         out.append("<p><b>%s</b></p>" % _e(RS.frame_headline_text(lat)))
     out.append(_t(["member group", "role", "section", "n", "strength ratio", "governing combination", "KL/r / limit (ratio)",
                    "other limits"], RS.lateral_member_rows(pkg, portal)))
+    if not portal:
+        out.append(RS3.column_orientation_html(lat))                            # 2026-10 third wave (P3)
+        out.append(RS3.platform_frame_html(pkg))                                # 2026-10 third wave (P9)
     conn_rows = []
     for c in lat.get("connections") or []:
         dc = c.get("DC")
@@ -637,6 +651,9 @@ def build_report_cfs_india(name, cfg, pkg, root):
         for c in cn:                                                # 2026-10 second wave (C2): the base plate as a result
             if c.get("plate_design"):
                 out.append(RS.base_plate_html(c))
+        for c in cn:                                                # 2026-10 third wave (P9): purlin cleats
+            out.append(RS3.cleat_html(c))
+        out.append(RS3.screw_scope_html())
     else:
         out.append("<p>No cold-formed connections are declared for this job: stud-to-track, joist-to-beam clip, purlin cleat "
                    "and board fasteners are the design engineer's details. IS 801:1975 has no screw provisions (7.2 welds, "

@@ -37,19 +37,46 @@ for _p in (HERE, os.path.realpath(HERE)):
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
 
 
+COL_STRONG_RULE = (
+    "Strong axis of a lateral-frame column: in the plane of the moment-frame line it stands on (a column on moment "
+    "lines in both directions faces the X line); otherwise in the plane of the first braced bay that contains it, in "
+    "the order the bays are listed in the bracing schedule (lowest storey first), so a column shared by an X-braced "
+    "and a Y-braced bay (the corner of two braced walls) faces the bay listed first; any other column faces the "
+    "declared default direction (X unless the design engineer declares Y).  The beam-to-column joints of the braced "
+    "bays are simple connections, so a shared column carries the axial forces of both braced bays and is checked for "
+    "buckling about both axes whichever way it faces; its orientation changes only its own small flexural stiffness "
+    "in each direction.")
+
+
+def _ordered_unique(items):
+    """Declared order, duplicates dropped (a list, never a set: iteration must not depend on string hashing)."""
+    out, seen = [], set()
+    for it in items:
+        if it not in seen:
+            seen.add(it)
+            out.append(it)
+    return out
+
+
 def _callables(spec):
+    # CFS third wave (handoff P3): everything below iterates LISTS in a fixed order.  The braced bays and moment lines
+    # used to be Python sets of ("X", i, j) tuples, whose iteration order follows the per-process string hash seed:
+    # the brace element numbering, and the strong axis of a column shared by an X- and a Y-braced bay, changed from
+    # one run to the next (CFS Ex7, Ex10, Ex12: drift +-2 %, Section 12 row count, a non-governing brace ratio).
     NX, NY = spec["NX"], spec["NY"]
     NF = len(spec["heights_m"])
     braced = spec.get("braced_bays") or []
-    bset = {(b[0], int(b[1]), int(b[2])) for b in braced}
+    blist = _ordered_unique((str(b[0]), int(b[1]), int(b[2])) for b in braced)      # bracing schedule order
+    bsorted = sorted(blist)                                                          # element order (X before Y, i, j)
     moment_lines = spec.get("moment_lines") or []          # [("X", j), ("Y", i)] frame lines with rigid beam-column joints
-    mset = {(m[0], int(m[1])) for m in moment_lines}
+    mlist = sorted(_ordered_unique((str(m[0]), int(m[1])) for m in moment_lines))   # X lines before Y lines
+    mset = set(mlist)                                       # membership only
     col_groups = spec.get("col_sec") or {}                  # {"perimeter": {"1-2": sec, "3-4": sec}, "interior": {...}}
     beam_groups = spec.get("beam_sec") or {}                # {"floor": sec, "roof": sec, "floor_X": ..}
-    lateral_cols = set()
-    for (d, i, j) in bset:
+    lateral_cols = set()                                    # membership only
+    for (d, i, j) in blist:
         lateral_cols.add((i, j)); lateral_cols.add((i + 1, j) if d == "X" else (i, j + 1))
-    for (d, k) in mset:
+    for (d, k) in mlist:
         for q in range((NX if d == "X" else NY) + 1):
             lateral_cols.add((q, k) if d == "X" else (k, q))
 
@@ -62,7 +89,7 @@ def _callables(spec):
         return None
 
     def braces(k, nx, ny):
-        return [(d, i, j) for (d, i, j) in bset]
+        return list(bsorted)
 
     def col_sec(i, j, k, perim):
         lat = (i, j) in lateral_cols
@@ -77,16 +104,16 @@ def _callables(spec):
         return v or spec["beam"]
 
     def col_strong(i, j, nx, ny):
-        # strong axis in the plane of the frame the column belongs to (moment line first, then braced bay)
-        for (d, k) in mset:
+        # COL_STRONG_RULE: moment line first (X lines before Y lines), then the first braced bay in schedule order
+        for (d, k) in mlist:
             if (d == "X" and j == k) or (d == "Y" and i == k):
                 return d
-        for (d, bi, bj) in bset:
+        for (d, bi, bj) in blist:
             if d == "X" and j == bj and i in (bi, bi + 1):
                 return "X"
             if d == "Y" and i == bi and j in (bj, bj + 1):
                 return "Y"
-        return spec.get("default_strong", "X")
+        return spec.get("default_strong") or "X"
 
     def releases(i, j, k, dirn):
         if (dirn, j if dirn == "X" else i) in mset:
@@ -94,6 +121,84 @@ def _callables(spec):
         return ("both", "none")                           # simple shear connection (gusset + shear tab elsewhere)
 
     return braces, col_sec, beam_sec, col_strong, releases
+
+
+def _gold_moment_lines(spec):
+    g = spec.get("gold") or {}
+    return sorted(_ordered_unique((str(m[0]), int(m[1])) for m in (g.get("moment_lines") or spec.get("moment_lines") or [])))
+
+
+def _stable_gold_col_strong(cfg, spec):
+    """CFS third wave (P3): the shared HR frame builder (hr_vendor/frame_build.py, read-only here) picks a column's
+    strong axis from a SET of moment lines, so a column on an X and a Y moment line could face either way from one run
+    to the next.  On that one case the builder's choice is replaced by COL_STRONG_RULE (the X line); every other column
+    keeps the builder's own rule, which already follows the declared order of the braced bays."""
+    g = cfg.get("_gold")
+    if not isinstance(g, dict) or not callable(g.get("col_strong")):
+        return cfg
+    ml = _gold_moment_lines(spec)
+    xs = {k for (d, k) in ml if d == "X"}
+    ys = {k for (d, k) in ml if d == "Y"}
+    if not xs or not ys:
+        return cfg                                          # no column can stand on moment lines of both directions
+    inner = g["col_strong"]
+
+    def col_strong(i, j):
+        if j in xs and i in ys:
+            return "X"
+        return inner(i, j)
+    col_strong.cfs_stable = True
+    g["col_strong"] = col_strong
+    return cfg
+
+
+def column_orientation(spec, hr_cfg):
+    """CFS third wave (P3): the stated rule and the columns it decides -- every column claimed by frames of BOTH
+    directions (braced bays at any storey, EBF bays, moment lines) with the strong axis the model gave it.  Written to
+    lateral_result.json and printed in the cold-formed report."""
+    NX, NY = int(spec["NX"]), int(spec["NY"])
+    NF = len(spec["heights_m"])
+    g = hr_cfg.get("_gold")
+    builder = isinstance(g, dict) and callable(g.get("col_strong"))
+    claims = {}
+
+    def claim(node, d, what):
+        claims.setdefault(node, {}).setdefault(d, [])
+        if what not in claims[node][d]:
+            claims[node][d].append(what)
+
+    def bay_words(kind, d, i, j):
+        if d == "X":
+            return "%s bay, x-lines %d-%d on y-line %d" % (kind, i, i + 1, j)
+        return "%s bay, y-lines %d-%d on x-line %d" % (kind, j, j + 1, i)
+    if builder:
+        for k in range(1, NF + 1):
+            for fn, kind in (("xbays", "braced"), ("ebf_bays", "eccentrically braced")):
+                if callable(g.get(fn)):
+                    for (d, i, j) in g[fn](k):
+                        for n in ((i, j), ((i + 1, j) if d == "X" else (i, j + 1))):
+                            claim(n, d, bay_words(kind, d, i, j))
+        mls = _gold_moment_lines(spec)
+    else:
+        for b in spec.get("braced_bays") or []:
+            d, i, j = str(b[0]), int(b[1]), int(b[2])
+            for n in ((i, j), ((i + 1, j) if d == "X" else (i, j + 1))):
+                claim(n, d, bay_words("braced", d, i, j))
+        mls = sorted(_ordered_unique((str(m[0]), int(m[1])) for m in (spec.get("moment_lines") or [])))
+    for (d, kk) in mls:
+        for q in range((NX if d == "X" else NY) + 1):
+            claim((q, kk) if d == "X" else (kk, q), d,
+                  "moment frame on %s-line %d" % ("y" if d == "X" else "x", kk))
+    rows = []
+    for node in sorted(claims):
+        if len(claims[node]) < 2:
+            continue
+        i, j = node
+        sd = g["col_strong"](i, j) if builder else hr_cfg["col_strong"](i, j, NX, NY)
+        rows.append({"grid": [i, j], "strong_axis": str(sd or "X").upper(),
+                     "frames_X": claims[node].get("X"), "frames_Y": claims[node].get("Y")})
+    return {"rule": COL_STRONG_RULE, "builder": "job frame builder" if builder else "regular-grid builder",
+            "default": str(spec.get("default_strong") or "X"), "shared_columns": rows, "n_shared": len(rows)}
 
 
 def build_cfg(spec, esm=True, saved_plan=None):
@@ -182,6 +287,7 @@ def build_cfg(spec, esm=True, saved_plan=None):
         sp_ = importlib.util.spec_from_file_location("cfs_job_frame_build", cbm)   # steel_engine must NOT enter sys.path here)
         mod = importlib.util.module_from_spec(sp_); sp_.loader.exec_module(mod)
         mod.attach(cfg, spec)
+        _stable_gold_col_strong(cfg, spec)                  # CFS third wave (P3): no hash-order pick on the builder path
     if not esm:
         if saved_plan:
             cfg["load_plan"] = saved_plan
@@ -337,6 +443,10 @@ def main(spec_path, jobs_root, name):
         out = P.design_and_report(name, cfg, do_report=True)
         res = _summary(cfg, out, root)
         res["esm"] = {k: v for k, v in esm.items() if k != "seismic_summary"}
+        try:
+            res["column_orientation"] = column_orientation(spec, cfg)
+        except Exception as ex:                           # pragma: no cover - reported, never silent
+            res["column_orientation"] = {"error": "%s: %s" % (type(ex).__name__, ex)}
     except Exception as ex:
         res = {"root": root, "error": "%s: %s" % (type(ex).__name__, ex), "traceback": traceback.format_exc()}
     json.dump(res, open(os.path.join(root, "lateral_result.json"), "w"), indent=1, default=str)

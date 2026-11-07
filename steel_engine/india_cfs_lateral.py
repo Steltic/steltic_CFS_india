@@ -30,6 +30,7 @@ import sys
 import india_cfs_env  # noqa: F401  (hr_vendor on sys.path)
 import india_wind_tables as WT
 import india_seismic as IS
+import india_cfs_members as CM    # 2026-10 third wave (P9): the declared internal-pressure case
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 RUNNER = os.path.join(HERE, "hr_vendor_runner.py")
@@ -288,6 +289,59 @@ def lowrise_member_wind_plan(cfg, ws, plan):
     return mw["patterns"], basis
 
 
+_PAT_KEYS = ("roof_windward_kNm2", "roof_leeward_kNm2", "wall_windward_kNm2", "wall_leeward_kNm2")
+
+
+def _pattern_pd(p):
+    """pd (kN/m2) of a (Cpe - Cpi) pd pattern, from its roof record and Cpi (the roof term with the largest |Cpe - Cpi|)."""
+    roof, s = p.get("roof") or {}, p.get("Cpi")
+    keys = (("roof_windward_kNm2", "EF"), ("roof_leeward_kNm2", "GH")) if p.get("direction") == "across_ridge" else \
+        (("roof_windward_kNm2", "EG"), ("roof_leeward_kNm2", "FH"))
+    best = None
+    for vk, ck in keys:
+        if roof.get(ck) is None or p.get(vk) is None or s is None:
+            continue
+        den = float(roof[ck]) - float(s)
+        if abs(den) > 1e-6 and (best is None or abs(den) > abs(best[1])):
+            best = (float(p[vk]) / den, den)
+    return best[0] if best else None
+
+
+def apply_internal_pressure(member_wind, ip, pd_kNm2=None):
+    """2026-10 third wave (P9): the frame's member wind patterns with the declared internal-pressure case (dominant
+    opening, IS 875-3 7.3.2.2 / Fig. 2): every '+' pattern takes Cpi_pos, every '-' pattern Cpi_neg, enveloped with the
+    pattern's own Cpi (never reduced).  A pressure (Cpe - Cpi) pd becomes (Cpe - Cpi') pd = value + (Cpi - Cpi') pd.
+    Returns (member_wind of the same shape, record)."""
+    if not member_wind or not ip:
+        return member_wind, None
+    pats = member_wind.get("patterns") if isinstance(member_wind, dict) else member_wind
+    out, changed = [], []
+    for p in pats or []:
+        q = dict(p)
+        s = p.get("Cpi")
+        if s is None:
+            raise LateralSystemError("member wind pattern %s carries no Cpi: the internal-pressure case cannot be applied"
+                                     % p.get("name"))
+        s = float(s)
+        new = max(s, float(ip["Cpi_pos"])) if s > 0 else min(s, float(ip["Cpi_neg"]))
+        if new != s:
+            pd = float(pd_kNm2) if pd_kNm2 is not None else _pattern_pd(p)
+            if pd is None:
+                raise LateralSystemError("member wind pattern %s: pd not recoverable for the internal-pressure case" % p.get("name"))
+            for k in _PAT_KEYS:
+                if q.get(k) is not None:
+                    q[k] = float(q[k]) + (s - new) * pd
+            q["Cpi"] = new
+            q["Cpi_note"] = "internal-pressure case %s: Cpi %+.2f -> %+.2f" % (ip.get("case") or "declared", s, new)
+            changed.append({"name": p.get("name"), "Cpi_from": s, "Cpi_to": new, "pd_kNm2": pd})
+        out.append(q)
+    rec = {"case": ip.get("case"), "Cpi_pos": float(ip["Cpi_pos"]), "Cpi_neg": float(ip["Cpi_neg"]), "patterns": changed,
+           "opening": ip.get("opening"), "basis": ip.get("basis"), "cite": ip.get("cite")}
+    if isinstance(member_wind, dict):
+        return dict(member_wind, patterns=out, Cpi_internal_pressure_case=rec), rec
+    return out, rec
+
+
 def merge_declared_wind(plan, forces):
     """C05: a declared load_plan.story_forces W_X / W_Y (e.g. a mixed-height building worked by hand from IS 875-3) is
     KEPT, not overwritten by the envelope storey forces -- it needs a cite (story_forces_cite or wind_story_forces_cite)
@@ -434,6 +488,18 @@ def delegated_register(cfg):
     return reg or None
 
 
+def platform_hr_extra(cfg, extra):
+    """2026-10 third wave (P9): the roof platforms' permanent loads on the frame (india_cfs_secondary.platform_frame_loads)
+    are added to the HR cfg's nodal_dead_loads (seismic weight included, IS 1893 7.3.1)."""
+    if not cfg.get("roof_platforms"):
+        return extra
+    import india_cfs_secondary as SEC
+    out = dict(extra)
+    out["nodal_dead_loads"] = list(out.get("nodal_dead_loads") or []) + [
+        {k: v for k, v in r.items() if k not in ("ijk", "NY")} for r in SEC.platform_frame_loads(cfg)]
+    return out
+
+
 def build_hr_spec(cfg, name):
     """Declarative HR-frame spec (JSON) from the CFS cfg."""
     lf = cfg["lateral_frame"]; site = cfg["site"]; geo = cfg["geometry"]; ld = cfg["loads"]
@@ -467,6 +533,12 @@ def build_hr_spec(cfg, name):
     mwp = lowrise_member_wind_plan(cfg, ws, plan)
     if mwp is not None:
         plan["member_wind"], plan["wind_summary"]["member_wind_basis"] = mwp
+    ip = CM.internal_pressure_case(cfg)                     # 2026-10 third wave (P9): dominant opening on the frame too
+    if ip and plan.get("member_wind"):
+        _mwd = plan["member_wind"]
+        plan["member_wind"], ip_rec = apply_internal_pressure(
+            _mwd, ip, _mwd.get("pd_kNm2") if isinstance(_mwd, dict) else None)
+        plan["wind_summary"]["internal_pressure_case"] = ip_rec
     plan["story_forces"], ws["story_forces_source"] = merge_declared_wind(plan, forces)
     plan["wind_summary"].update(story_forces_source=ws["story_forces_source"])
     plan["story_forces_units"] = "N"
@@ -510,7 +582,7 @@ def build_hr_spec(cfg, name):
         # breakout / pedestal item) for the concrete_breakout record of the bases
         "diaphragm_type": lf.get("diaphragm_type"), "delegated_design": delegated_register(cfg),
         "ponding": ponding_input(cfg),                      # 2026-10 first wave: IS 875-4 4.4 screen input (long roof beams)
-        "hr_cfg_extra": lf.get("hr_cfg_extra") or {},       # declared HR cfg keys passed through verbatim (e.g. is18168_table2,
+        "hr_cfg_extra": platform_hr_extra(cfg, lf.get("hr_cfg_extra") or {}),   # declared HR cfg keys passed verbatim (e.g. is18168_table2,
                                                             # grade_by_section, custom_sections, column_imposed_load_reduction)
         "notes": "%s: hot-rolled %s lateral frame (R %s) of a CFS building; CFS members gravity / wind only (D3)"
                  % (name, sysn, R),
@@ -531,7 +603,9 @@ def run_lateral(cfg, job_dir, name=None, timeout_s=3600, rag_dir=None):
     spec_path = os.path.join(job_dir, "lateral_frame_spec.json")
     json.dump(spec, open(spec_path, "w"), indent=1, default=str)
     cmd = [sys.executable, RUNNER, spec_path, job_dir, name]
-    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+    # 2026-10 third wave (P3): the frame sub-run hashes strings with a fixed seed (the parent's PYTHONHASHSEED when it
+    # sets one, else 0), so whatever the vendored hot-rolled engine still reads from a set repeats from run to run
+    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", PYTHONHASHSEED=os.environ.get("PYTHONHASHSEED") or "0")
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s, env=env)
     log = os.path.join(job_dir, "lateral_run.log")
     with open(log, "w") as f:

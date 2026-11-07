@@ -25,6 +25,7 @@ import india_cfs_basis as B
 import india_cfs_gates as G
 import india_cfs_lateral as L
 import india_cfs_members as CM
+import india_cfs_secondary as SEC     # 2026-10 third wave (P9): lean-to, roof platforms, purlin cleats, eave struts
 import report_cfs_india as R
 import report_cfs_second_wave as RS
 import consistency as CC
@@ -172,6 +173,9 @@ def design_and_report(name, cfg, outdir=None, do_report=True):
         # secondary members (purlins / girts / mezzanine joists): C02 -- member-level IS 875-3 pressures are derived in
         # india_cfs_members.member_pd (element Ka, governing Cpe, local strips, Cpi), not copied from the frame patterns
         cm = cfg.get("cfs_members") or {}
+        _es = SEC.portal_eave_struts(cfg, pkg["cfs_connections"])        # 2026-10 third wave (P9): derived strut force
+        if _es is not None:
+            cm = dict(cm, eave_struts=_es)
         if cm.get("joists") and cfg.get("mezzanine"):
             cfg["loads"]["D_floor"] = cfg["mezzanine"]["D_kNm2"]; cfg["loads"]["L_floor"] = cfg["mezzanine"]["L_kNm2"]
         pkg["cfs_members"] += CM.design_all(dict(cfg, cfs_members={k: v for k, v in cm.items() if k in ("Fy_MPa", "grade_cite", "purlins", "girts", "joists",
@@ -198,6 +202,8 @@ def design_and_report(name, cfg, outdir=None, do_report=True):
             "consistency": lat.get("consistency"), "ponding": lat.get("ponding"),
             # 2026-10 second wave (C3): the frame report's headline (worst strength ratio, slenderness beside it)
             "headline": RS.tag_frame_headline(lat.get("headline")), "headline_error": lat.get("headline_error"),
+            # 2026-10 third wave (P3): the stated strong-axis rule and the columns standing in frames of both directions
+            "column_orientation": lat.get("column_orientation"),
             "hr_report_items_basis": "numerical self-consistency check printed at the end of the frame report",
             "demand_level": "LSD", "capacity_basis": "IS800_LSD",
             "note": "hot-rolled IS 800 Section 12 frame designed with the Steltic hot-rolled IS 800 engine (IS 800 Table 4 "
@@ -207,6 +213,16 @@ def design_and_report(name, cfg, outdir=None, do_report=True):
         # ---- 4 diaphragm + declared CFS connections ----
         pkg["diaphragm"] = L.diaphragm_demands(cfg, lat)
         pkg["cfs_connections"] = list((cfg.get("cfs_connections") or []))
+    # ---- 2026-10 third wave (P9): lean-to (vestibule), roof platforms, purlin cleats ----
+    if cfg.get("lean_to"):
+        _recs, pkg["lean_to"] = SEC.design_lean_to(cfg, cfg["lean_to"])
+        pkg["cfs_members"] += _recs
+    if cfg.get("roof_platforms"):
+        _recs, pkg["roof_platforms"] = SEC.design_roof_platforms(cfg, cfg["roof_platforms"])
+        pkg["cfs_members"] += _recs
+    _pc = (cfg.get("cfs_connections_spec") or {}).get("purlin_cleat")
+    if _pc:
+        pkg["cfs_connections"] += SEC.design_purlin_cleats(cfg, pkg["cfs_members"], _pc)
     pkg["cfs_combinations"] = B.cfs_combinations(cfg.get("load_plan"), cfg)
     # 2026-10 second wave (C3): the headline is the worst cold-formed STRENGTH ratio, slenderness beside it
     pkg["headline"] = RS.headline(pkg)
