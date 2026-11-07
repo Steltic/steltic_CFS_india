@@ -181,3 +181,9 @@ Notes:
   - Ex4: the job path from `__file__` (no design change).
   - Ex1–Ex3 are otherwise the published cfgs.
 
+
+## Re-vendor from the final HR main (2026-11-07)
+
+- `steel_engine/hr_vendor/` is re-vendored from steltic_india main **f0a83dd** (PRs #29–#36: the MSME shed, the engine-check fixes, the Indian section families and the PEB golds), with `scripts/revendor_hr.py`. `check_vendored.py` reports 58 identical files.
+- All 15 CFS golds were re-run on it, each under heavy with `PYTHONHASHSEED=0`. `tools/compare3.py` against the previous final pass gives **all designs identical** at 6 decimals: the cold-formed members and connections, the diaphragms, the hot-rolled frames, the statuses and kg/m².
+- The pin test follows the new commit. Full suite: **400 passed**.

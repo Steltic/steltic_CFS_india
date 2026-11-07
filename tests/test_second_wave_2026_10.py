@@ -78,14 +78,16 @@ def test_C1_vendor_pinned_to_hr_main():
     """hr_vendor follows steltic_india main after the second wave and the PEB variations merge (c7c9cc9); the
     PEB-LEVERS hooks it brings do nothing without cfg['peb_rules'], so the CFS results are unchanged.
     Check fixes (2026-10-23): re-vendored from steltic_india fix/2026-10-check-fixes bca5377 (c7c9cc9 plus the
-    report-only public-text pass, report_public.py)."""
+    report-only public-text pass, report_public.py).  Third wave (2026-11-07): re-vendored from steltic_india main
+    f0a83dd (PRs #29-#36); the 15 CFS golds are identical at 6 decimals before and after."""
     pin = open(os.path.join(ROOT, "steel_engine", "hr_vendor", "VENDORED_FROM.md")).read()
-    assert "Commit: **bca53779d5074bf4a3b693907ba8718f8e9306ee**" in pin
+    assert "Commit: **f0a83dd9804333d62ac37621dc2850a60c72ebf7**" in pin
+    assert "bca5377" in pin                                 # the check-fixes re-sync stays recorded in the history
     assert "c7c9cc9" in pin                                 # the main re-sync stays recorded in the history
     for f in ("report_second_wave.py", "peb_levers.py", "peb_autosize.py", "report_public.py"):
         assert os.path.exists(os.path.join(ROOT, "steel_engine", "hr_vendor", f))
     import india_cfs_env
-    assert india_cfs_env.vendored_commit().startswith("bca5377")
+    assert india_cfs_env.vendored_commit().startswith("f0a83dd")
 
 
 # ================================================================================================ fixtures
