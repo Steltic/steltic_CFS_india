@@ -185,5 +185,9 @@ Notes:
 ## Re-vendor from the final HR main (2026-11-07)
 
 - `steel_engine/hr_vendor/` is re-vendored from steltic_india main **f0a83dd** (PRs #29–#36: the MSME shed, the engine-check fixes, the Indian section families and the PEB golds), with `scripts/revendor_hr.py`. `check_vendored.py` reports 58 identical files.
-- All 15 CFS golds were re-run on it, each under heavy with `PYTHONHASHSEED=0`. `tools/compare3.py` against the previous final pass gives **all designs identical** at 6 decimals: the cold-formed members and connections, the diaphragms, the hot-rolled frames, the statuses and kg/m².
+- All 15 CFS golds were re-run on it, each under heavy with `PYTHONHASHSEED=0`.
+  - **Correction:** an earlier version of this note said the designs were identical. The comparison script had compared no rows.
+  - A direct check gives 11 golds unchanged in status. **Ex6, Ex9, Ex14 and Ex15 go COMPLETE → PARTIAL**, because the HR engine's new gate (steltic_india PR #35) flags their hot-rolled frame column splices: each is declared "none" at a section change, so it is not designed.
+  - No cold-formed member ratio changes.
+  - The fix is to design those splices in the four gold cfgs (no code change). It is left for the next gold re-run.
 - The pin test follows the new commit. Full suite: **400 passed**.
