@@ -165,12 +165,15 @@ def design(name, outdir=None):
                                       floor_system=cfg.get("floor_system", "one-way"),
                                       determinate=determinate, sec_sig=sec_sig, lat_sig=lat_sig,
                                       cache_dir=outdir)
-    env = {t: dict(comp=0.0, tens=0.0, Mz=0.0, My=0.0, V=0.0, combo="") for t in reg}
+    env = {t: dict(comp=0.0, tens=0.0, Mz=0.0, My=0.0, V=0.0, combo="", Mz_end=0.0) for t in reg}
     score = {t: -1.0 for t in reg}
     for t in reg:
         se = senv.get(frozenset((reg[t][2], reg[t][3])))
         if se:
-            env[t] = dict(comp=se["comp"], tens=se["tens"], Mz=se["Mz"], My=se["My"], V=se["V"], combo=se["combo"])
+            # span-moment fix (2026-11-01): Mz / My = member moments (a column's span extreme included) for the
+            # schedule and the member demands; Mz_end = the end-moment envelope for the splice / base demand
+            env[t] = dict(comp=se["comp"], tens=se["tens"], Mz=_member_moment(se, "Mz"), My=_member_moment(se, "My"),
+                          V=se["V"], combo=se["combo"], Mz_end=se["Mz"])
         score[t] = (max(env[t]["comp"], env[t]["tens"]) if reg[t][0] in ("col", "brace") else env[t]["Mz"])
 
     # ---- member_schedule.csv (every element: DEMANDS only; SI headers when N-mm) ----
@@ -221,10 +224,10 @@ def design(name, outdir=None):
         kind, sec, n1, n2 = reg[t]; by.setdefault((kind, sec, role_of[t]), []).append(t)
     genv = {}
     for key, tags in by.items():
-        gg = dict(comp=0.0, tens=0.0, Mz=0.0, My=0.0, V=0.0)
+        gg = dict(comp=0.0, tens=0.0, Mz=0.0, My=0.0, V=0.0, Mz_end=0.0)
         for t in tags:
             e = env[t]
-            for kk in ("comp", "tens", "Mz", "My", "V"): gg[kk] = max(gg[kk], e[kk])
+            for kk in ("comp", "tens", "Mz", "My", "V", "Mz_end"): gg[kk] = max(gg[kk], e[kk])
         tg = max(tags, key=lambda t: score[t])
         gg["combo"] = env[tg]["combo"]; gg["L"] = max(length[t] for t in tags); genv[key] = gg
     with open(os.path.join(outdir, "member_demands.md"), "w") as f:
@@ -310,10 +313,10 @@ def design(name, outdir=None):
             basis = "IS 800 / IS 816 / IS 4000 connection; seismic capacity design per IS 800 §12 + IS 1893 (agent/RAG)"
         else:
             ctype = "column splice / base plate"
-            if _SI:
-                dem = {"P_N": round(e["comp"], 1), "M_kNm": round(e["Mz"]/_mdiv, 3)}
+            if _SI:      # the END-moment envelope: a column's span moment is no splice / base demand
+                dem = {"P_N": round(e["comp"], 1), "M_kNm": round(e["Mz_end"]/_mdiv, 3)}
             else:
-                dem = {"P_kip": round(e["comp"], 1), "M_kipft": round(e["Mz"]/12, 1)}
+                dem = {"P_kip": round(e["comp"], 1), "M_kipft": round(e["Mz_end"]/12, 1)}
             basis = "IS 800 base plate / splice; foundation anchorage per applicable IS (agent/RAG)"
         entry = {"id": "conn-%s-%s" % (role, sec), "type": ctype, "section": sec,
                 "demand": dem, "design_basis": basis,
@@ -648,11 +651,22 @@ def member_override(cfg, t, kind, sec, role):
         return out, used
     keys = [str(sec), "%s:%s" % (_ROLE_TO_I8.get(kind, kind), sec), "%s:%s" % (kind, sec), "%s:%s" % (role, sec),
             "e%d" % t]
+    from_mo = set()
     for k in keys:
         v = mo.get(k)
         if isinstance(v, dict):
             out.update({f: v[f] for f in _OVERRIDE_FIELDS if v.get(f) is not None})
+            from_mo |= {f for f in ("LLT_sag_mm", "LLT_hog_mm") if v.get(f) is not None}
             used.append(k)
+    if kind in ("col", "column") and from_mo and out.get("LLT_sag_mm") is not None and \
+            out.get("LLT_hog_mm") is not None and abs(float(out["LLT_sag_mm"]) - float(out["LLT_hog_mm"])) > 1e-6:
+        # review finding 12 (2026-11-06): for a column 'sagging' / 'hogging' is the sign of the element's end moment
+        # (static_model.member_records), not a physical flange, so two lengths cannot be mapped to the flanges
+        raise ValueError(
+            "cfg['member_overrides'] %s gives column e%d (%s) LLT_sag_mm = %g and LLT_hog_mm = %g. For a column the "
+            "sagging / hogging sign is the sign of the element's end moment, not a flange, so the engine cannot tell "
+            "which flange each length restrains. Declare one length for both (the larger restraint spacing of the two "
+            "flanges)." % (used, t, sec, float(out["LLT_sag_mm"]), float(out["LLT_hog_mm"])))
     return out, used
 
 
@@ -700,19 +714,105 @@ def _member_input_record(cfg, t, kind, sec, n1, n2, length, role):
         m["overrides"] = used
     if kind == "col":
         m["sway"] = bool(cfg.get("sway_frame"))
+        if m["sway"] and role == "gravity_col":
+            # IS 800 Table 18 note: "For members with sway buckling mode, the equivalent uniform moment factor
+            # Cmy = Cmz = 0.9".  cfg['sway_frame'] marks a job with moment lines; a gravity column (no moment beam and
+            # no brace on its line, pinned into the frame, its ends held by the lateral system -- a gable wind column
+            # under the end rafter held by the roof bracing) has no sway buckling mode of its own, so under a span load
+            # it takes the Table 18 uniform-loading row (span-moment fix, 2026-11-01).  Scope: the span-load path
+            # only -- its end-moment-only checks (Table 4, IS 1893 7.11.2) keep 'sway' as before (an owner ruling)
+            m["sway_span_load"] = False
+    try:
+        import truss_design as _TD
+    except ImportError:
+        _TD = None
+    if _TD is not None and _TD.is_truss_role(role):
+        # MSME (2026-10): angle truss members -- end connection geometry (6.3.3 / 6.3.4 / 6.4.1 inputs), single-angle
+        # end condition (7.5.1.2); webs / knee braces are axial-only (truss elements), chords are continuous members
+        ac, ti, trec = _TD.member_inputs(cfg, role, sec, length)
+        if ti is not None:
+            m["tension_inputs"] = ti
+        if ac is not None:
+            m["angle_connection"] = ac
+        m["truss_connection"] = trec
+        if kind == "truss" and _TD.is_angle_section(sec):
+            m["axial_only"] = True                  # a non-angle truss member: the general member check (review 2026-11)
+        if _TD.is_chord_role(role):
+            m["truss_chord"] = True
     return m
 
 
-def _top_records(recs, k=12):
-    """The governing combinations of one member (largest |N|, |Mmaj|, |Mmin|, |V|) -- concurrent tuples."""
-    if len(recs) <= k:
-        return recs
-    keep = set()
-    for idx in range(4):
-        keep |= set(sorted(recs, key=lambda l: -abs(recs[l][idx]))[: max(3, k // 4)])
-    comp = sorted(recs, key=lambda l: recs[l][0])[:3]        # most compressive
-    keep |= set(comp)
-    return {l: recs[l] for l in keep}
+def _member_moment(e, q):
+    """Member-check moment envelope of one element: the end-moment envelope e[q] ('Mz' / 'My') or a column's in-span
+    extreme e[q + '_span'], whichever is larger -- for the member schedule and the member inputs only; connection,
+    splice and base demands keep the end-moment envelope e[q] (span-moment fix, 2026-11-01)."""
+    return max(float(e.get(q) or 0.0), float(e.get(q + "_span") or 0.0))
+
+
+def none_splice_open_row(sec, reg, upper):
+    """SECT review (2026-11-07): a column splice declared 'none' means the column is continuous over its length -- it
+    holds for a column that starts at the base and is the same section all the way down.  A piece of this section
+    (upper: its element tags above the base; reg: tag -> (kind, section, node_i, node_j)) that sits on another section,
+    or on no column, has a splice at that change, which must be designed.  Returns the open row (ok None, a plain
+    reason) or None."""
+    step = []
+    for t in upper:
+        bel = [tb for tb in reg if reg[tb][0] == "col" and reg[tb][3] == reg[t][2]]
+        if not bel or any(reg[tb][1] != sec for tb in bel):
+            step.append((t, sorted({reg[tb][1] for tb in bel})))
+    if not step:
+        return None
+    t0, lows = min(step, key=lambda s_: int(reg[s_[0]][2]) // 100000)
+    return {"name": "declared 'none' at a section change on %s, level %d -- splice not designed"
+                    % (" / ".join(lows) if lows else "no column", int(reg[t0][2]) // 100000),
+            "ok": None, "value": None, "limit": None, "dc": None,
+            "clause": "IS 800:2007 12.5.2 / 10; IS 18168:2023 7.5",
+            "reason": "the splice of %s is declared 'none' (column continuous), but %d piece(s) of this column sit on %s "
+                      "(the lowest at level %d): the splice at that section change is not designed -- declare it in "
+                      "cfg['connections']['column_splice']"
+                      % (sec, len(step), " / ".join(lows) if lows else "no column below", int(reg[t0][2]) // 100000)}
+
+
+def member_check_records(recs):
+    """The combinations a member check sees: EVERY combination of the member, in the order of the records (engine
+    checks fix A, 2026-11).
+
+    Until 2026-11 the member checks saw a ranked subset (the top 3 by |N|, |Mmaj|, |Mmin| and |V|, the 3 most
+    compressive and the span-load combinations).  The ranking ignored the SIGN of the moment, and the sign decides
+    which flange is in compression and so which LTB length applies (LLT_sag_mm: the flange held by the purlins or the
+    deck; LLT_hog_mm: the flange held by the fly braces; india_is800.member_check_is800 checks each sign of each
+    combination with its own length).  On IN_Ex2 the canopy root was checked for 1.5DL+1.5LL at -235 kN-m hogging
+    while 1.2DL+1.2LL+1.2WM0 at -285 kN-m hogging was dropped (the |Mmaj| slots went to three sagging uplift cases):
+    1.000 reported, 1.211 with every combination (review PEB_REVIEW.md A).  The same ranking could drop the
+    combination whose coincident N changes the Table 2 web class (fix B) or whose free span moment of the other sign
+    governs.  Every combination is kept instead: the per-combination check is arithmetic (about 3 s of an 80 s run on
+    IN_Ex19, 1,308 elements x 141 combinations), so no subset has to be proved complete.  The order is the order of
+    the records (the combination order of the run), so ties resolve the same way on every run."""
+    return dict(recs)
+
+
+def _top_records(recs, k=None):
+    """Kept for older callers: the member-check records are every combination now (member_check_records)."""
+    return member_check_records(recs)
+
+
+def table3_gravity_input(member, records):
+    """Review 2026-11 (MSME): the IS 800 Table 3 row needs to know whether the member is in compression in ANY
+    combination without wind or earthquake -- over ALL its records, not the top-ranked subset the member check
+    receives (_top_records keeps the largest |N|, |M|, |V|; a gravity combination can drop out, which put the IN_Ex7
+    crane columns on row (iii)).  Adds t3_gravity_compression_N / t3_gravity_combo to a copy of the member record."""
+    import india_is800 as I8
+    best = (0.0, None)
+    for lab, r in (records or {}).items():
+        try:
+            P = -float(r[0])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if P > I8.P_COMP_TOL_N and not I8.is_lateral_combo(lab) and P > best[0]:
+            best = (P, lab)
+    m = dict(member)
+    m["t3_gravity_compression_N"], m["t3_gravity_combo"] = best
+    return m
 
 
 def member_checks_is800(cfg, elem):
@@ -724,9 +824,9 @@ def member_checks_is800(cfg, elem):
         return {"found": False, "ok": None, "dc": None,
                 "reason": "india_is800.member_check_is800 unavailable (HR-MEMBERS integration pending): %s" % ex}
     import static_model as SM
-    cf = SM.combo_forces_for_member_check(_top_records(elem["records"]), elem["kind"])
+    cf = SM.combo_forces_for_member_check(member_check_records(elem["records"]), elem["kind"])
     try:
-        return f(elem["member"], cf, cfg=cfg)
+        return f(table3_gravity_input(elem["member"], elem["records"]), cf, cfg=cfg)
     except Exception as ex:
         return {"found": False, "ok": None, "dc": None, "reason": "member_check_is800 failed: %s" % ex}
 
@@ -739,14 +839,18 @@ def peb_station_checks(cfg, mem, kind, recs, res_el, stations):
     span moments), station i, station j}; the three are listed under 'stations'."""
     import static_model as SM
     import india_is800 as I8
-    cf = SM.combo_forces_for_member_check(_top_records(recs), kind)
+    cf = SM.combo_forces_for_member_check(member_check_records(recs), kind)
+    mem = table3_gravity_input(mem, recs)
     out = [("element (mid-depth section)", mem["section"], res_el)]
     for end, sec_e in (("i", stations[0]), ("j", stations[1])):
         cfe = []
         for c in cf:
             m_ = c.get("Mz_%s_Nmm" % end) or 0.0
             my_ = c.get("My_%s_Nmm" % end) or 0.0
-            cfe.append(dict(c, Mz_i_Nmm=m_, Mz_j_Nmm=m_, My_i_Nmm=my_, My_j_Nmm=my_, Mz_mid_Nmm=None))
+            # the station carries its END forces only: the span moment of either axis (and a span load's free
+            # moment) belongs to the element check above (span-moment fix, 2026-11-01: My_mid / *_free cleared too)
+            cfe.append(dict(c, Mz_i_Nmm=m_, Mz_j_Nmm=m_, My_i_Nmm=my_, My_j_Nmm=my_, Mz_mid_Nmm=None,
+                            My_mid_Nmm=None, Mz_free_Nmm=None, My_free_Nmm=None, Mz_mid_hog_Nmm=None))
         m2 = dict(mem, section=sec_e, id="%s@%s" % (mem.get("id"), end))
         try:
             r_ = I8.member_check_is800(m2, cfe, cfg=cfg)
@@ -763,7 +867,20 @@ def peb_station_checks(cfg, mem, kind, recs, res_el, stations):
             gov = (nm, sec_e, r_)
     res = dict(gov[2])
     res["stations"] = [{"where": nm, "section": sec_e, "dc": r_.get("dc"), "governing_check": r_.get("governing_check"),
-                        "governing_combo": r_.get("governing_combo")} for nm, sec_e, r_ in out]
+                        "governing_combo": r_.get("governing_combo"), "interaction_dc": r_.get("interaction_dc")}
+                       for nm, sec_e, r_ in out]
+    # engine checks 2 (IN_Ex21's bottom chord): the station with the largest strength ratio, which need not be the
+    # one that governs the element's D/C (a Table 3 ratio can govern there) -- element_strength reads it
+    sw = None
+    for nm, sec_e, r_ in out:
+        s_ = r_.get("interaction_dc")
+        if r_.get("found") and isinstance(s_, (int, float)) and (sw is None or s_ > sw["interaction_dc"] + 1e-12):
+            sw = {"where": nm, "section": sec_e, "interaction_dc": float(s_),
+                  "interaction_governing_combo": r_.get("interaction_governing_combo"),
+                  "interaction_cite": r_.get("interaction_cite"), "clause": r_.get("clause"),
+                  "axial_only": r_.get("axial_only")}
+    if sw is not None:
+        res["strength_worst"] = sw
     res["station_governs"] = gov[0]
     res["flags"] = list(res.get("flags") or []) + ["PEB station checks (D-T1): governing %s" % gov[0]]
     return res
@@ -778,8 +895,10 @@ def _check_rows(res):
         # RR-BUG-5: the 9.3 row carries the interaction value and its combination; the Table 3 row its own
         dci = res.get("interaction_dc", res["dc"])
         gci = res.get("interaction_governing_combo", res.get("governing_combo"))
-        rows.append({"name": "IS 800 9.3 interaction / member resistance (%scombination %s)"
-                             % ("" if gov_t3 else "governing ", gci), "value": float(dci), "limit": 1.0,
+        what = ("IS 800 axial resistance (6 tension / 7 compression, pin-ended member)" if res.get("axial_only")
+                else "IS 800 9.3 interaction / member resistance")          # MSME (2026-10): truss webs
+        rows.append({"name": "%s (%scombination %s)"
+                             % (what, "" if gov_t3 else "governing ", gci), "value": float(dci), "limit": 1.0,
                      "dc": float(dci), "ok": bool(dci <= 1.0), "clause": res.get("clause"),
                      "cite": res.get("interaction_cite") or res.get("cite") or res.get("clause"), "source": src,
                      "governing": not gov_t3, "combo": gci})
@@ -795,6 +914,110 @@ def _check_rows(res):
                      "dc": t3.get("dc"), "ok": t3.get("ok"), "clause": t3.get("clause"), "cite": t3.get("cite"),
                      "source": src, "governing": gov_t3, "combo": gc3})
     return rows
+
+
+def group_table3_row(rows, tags, elem_results, t_gov):
+    """Review 2026-11 (MSME): the Table 3 line of a member GROUP shows the element with the largest Table 3 ratio,
+    with its own row and ratio -- not the Table 3 record of the element that governs the group's overall D/C (the
+    IN_Ex21 bottom chord printed row (iii) 0.56 from its 9.3-governing element while the elements near the knees,
+    with gravity compression, sit on row (i) at 0.78).  The group D/C is unchanged (each element's Table 3 ratio is
+    already in its own D/C)."""
+    best = None
+    for t in tags:
+        t3 = (elem_results.get(t) or {}).get("table3_slenderness")
+        if isinstance(t3, dict) and isinstance(t3.get("dc"), (int, float)):
+            if best is None or t3["dc"] > best[1]["dc"] + 1e-12:
+                best = (t, t3)
+    if best is None or best[0] == t_gov:
+        return rows
+    t, t3 = best
+    out = [r for r in rows if not str(r.get("name") or "").startswith("IS 800 Table 3")]
+    gc3 = t3.get("governing_combo")
+    out.append({"name": "IS 800 Table 3 slenderness KL/r (element e%s%s; the largest in the group)"
+                        % (t, (", combination %s" % gc3) if gc3 else ""),
+                "value": t3.get("value"), "limit": t3.get("limit"), "dc": t3.get("dc"), "ok": t3.get("ok"),
+                "clause": t3.get("clause"), "cite": t3.get("cite"), "source": "india_is800.member_check_is800",
+                "governing": False, "combo": gc3, "element": t})
+    return out
+
+
+STRENGTH_ROW = ("IS 800 9.3 interaction / member resistance", "IS 800 axial resistance")
+
+
+def element_strength(res):
+    """Engine checks 2 (the IN_Ex21 bottom chord): the largest IS 800 strength ratio of one element result -- the 9.3
+    interaction / member resistance, 7 / 6 axial for a pin-ended member, the value _check_rows puts on the strength row
+    -- over its PEB stations when it has them.  {dc, combo, clause, cite, axial_only, where}; None when the element is
+    not evaluated.  The Table 3 slenderness ratio is not strength."""
+    r_ = res or {}
+    if not r_.get("found") or r_.get("dc") is None:
+        return None
+    sw = r_.get("strength_worst")
+    if isinstance(sw, dict) and isinstance(sw.get("interaction_dc"), (int, float)):
+        return {"dc": float(sw["interaction_dc"]), "combo": sw.get("interaction_governing_combo"),
+                "clause": sw.get("clause"), "cite": sw.get("interaction_cite") or sw.get("clause"),
+                "axial_only": sw.get("axial_only"), "where": sw.get("where")}
+    d = r_.get("interaction_dc", r_.get("dc"))
+    if not isinstance(d, (int, float)):
+        return None
+    return {"dc": float(d), "combo": r_.get("interaction_governing_combo", r_.get("governing_combo")),
+            "clause": r_.get("clause"), "cite": r_.get("interaction_cite") or r_.get("cite") or r_.get("clause"),
+            "axial_only": r_.get("axial_only"), "where": r_.get("station_governs")}
+
+
+def group_worst_elements(tags, elem_results):
+    """Engine checks 2: a member group's worst strength element and its worst Table 3 element, each with its own
+    combination, ratio and clause -- {'strength_worst': {...} or None, 'table3_worst': {...} or None}.  The group D/C
+    is the larger of the two ratios (each element's D/C is the larger of its own)."""
+    st = t3 = None
+    for t in tags:
+        r_ = elem_results.get(t) or {}
+        s = element_strength(r_)
+        if s is not None and (st is None or s["dc"] > st["dc"] + 1e-12):
+            st = dict(s, element=t)
+        x = r_.get("table3_slenderness")
+        if isinstance(x, dict) and isinstance(x.get("dc"), (int, float)) and (t3 is None or x["dc"] > t3["dc"] + 1e-12):
+            t3 = {"element": t, "dc": x["dc"], "value": x.get("value"), "limit": x.get("limit"),
+                  "combo": x.get("governing_combo"), "clause": x.get("clause"), "cite": x.get("cite")}
+    rec = lambda d: None if d is None else {
+        "element": "e%s" % d["element"], "dc": round(float(d["dc"]), 4), "combination": d.get("combo"),
+        "clause": d.get("clause"), "cite": d.get("cite"),
+        **({"where": d["where"]} if d.get("where") else {}),
+        **({"value": d.get("value"), "limit": d.get("limit")} if "limit" in d else {})}
+    return {"strength_worst": rec(st), "table3_worst": rec(t3), "_strength": st}
+
+
+def group_strength_row(rows, worst):
+    """Engine checks 2 (IN_Ex21: the bottom chord's strength line was the strength ratio of e44, the element whose
+    Table 3 ratio governs the group, well below the chord elements that carry the wind-uplift compression): the
+    strength line of a member GROUP shows the element (and PEB station) with the largest strength ratio, with its own
+    combination and clause.  Kept when the governing element's line is already the largest; the group D/C is
+    unchanged (it is the larger of the group's worst strength and worst Table 3 ratios)."""
+    st = (worst or {}).get("_strength")
+    i = next((k for k, r in enumerate(rows) if str(r.get("name") or "").startswith(STRENGTH_ROW)), None)
+    if st is None or i is None or not isinstance(rows[i].get("dc"), (int, float)) or \
+            rows[i]["dc"] >= st["dc"] - 1e-12:
+        return rows
+    what = ("IS 800 axial resistance (6 tension / 7 compression, pin-ended member)" if st.get("axial_only")
+            else "IS 800 9.3 interaction / member resistance")
+    at = st.get("where")
+    at = (", %s" % at) if at and str(at).startswith("station") else ""
+    out = list(rows)
+    out[i] = {"name": "%s (element e%s%s, combination %s; the largest in the group)" % (what, st["element"], at,
+                                                                                       st.get("combo")),
+              "value": st["dc"], "limit": 1.0, "dc": st["dc"], "ok": bool(st["dc"] <= 1.0), "clause": st.get("clause"),
+              "cite": st.get("cite"), "source": "india_is800.member_check_is800", "governing": False,
+              "combo": st.get("combo"), "element": st["element"]}
+    return out
+
+
+def group_check_rows(res, tags, elem_results, t_gov):
+    """The check lines of a member GROUP whose D/C is governed by element t_gov (result res): the strength line from
+    the group's worst strength element (group_strength_row), the Table 3 line from its worst Table 3 element
+    (group_table3_row).  Returns (rows, group_worst_elements record)."""
+    rows = group_table3_row(_check_rows(res), tags, elem_results, t_gov)
+    wst = group_worst_elements(tags, elem_results)
+    return group_strength_row(rows, wst), wst
 
 
 def sfrs_beam_tags(reg, info0):
@@ -827,6 +1050,22 @@ def sfrs_beam_tags(reg, info0):
             # node (no column) is a gravity member, not a moment-frame beam (WP6-fix, IN_Ex12 gym 17 m girder)
             if rigid in info0.get("moment_nodes", set()) and rigid in col_nodes:
                 out.add(t)
+    return out
+
+
+def capacity_check_entry(c):
+    """pkg['capacity_design']['checks'] entry of one Section 12 row.  Review R2-1: a row not judged for want of an
+    earthquake record says why (reason), and under no_seismic carries not_applicable -- the design status does not
+    count it as open (india_seismic_gates._screen_findings)."""
+    out = {"value": c.get("value"), "limit": c.get("limit"), "dc": c.get("dc"), "ok": c.get("ok"), "pass": c.get("ok"),
+           "clause": c.get("clause"), "cite": c.get("cite"), "found": c.get("ok") is not None}
+    if c.get("sense"):
+        out["sense"] = c["sense"]
+    if c.get("ok") is None and "not_applicable" in c:
+        if c.get("reason"):
+            out["reason"] = c["reason"]
+        if c.get("not_applicable"):
+            out["not_applicable"] = True
     return out
 
 
@@ -960,6 +1199,8 @@ def section12_model_data(cfg, reg, length, role_of, env, per_case_tags, cases, i
         for f in fl:
             f["family"] = fam.get(f["combo"], "table4")
             f["tags"] = tagof.get(f["combo"], [])
+            # D-T11 (Section 12 gates, 2026-11-06): the gates are judged in the earthquake combinations only
+            f["lateral_kind"] = kindof.get(f["combo"])
             if kindof.get(f["combo"]) == "EQ" and f["family"] == "table4" and "P_LAT_N" in f:
                 f["P_EL_N"] = f["P_LAT_N"]        # EL share of the IS 800 Table 4 EQ combination (IS 18168 12.3.2.2)
         if kind == "brace":
@@ -970,6 +1211,8 @@ def section12_model_data(cfg, reg, length, role_of, env, per_case_tags, cases, i
             fl += ts
         forces[mid] = fl
     md = {"members": members, "forces": forces,
+          # review R2-1: a job with no earthquake family -- its gates and Ca rows are not applicable (not open)
+          "no_seismic": bool(cfg.get("no_seismic")),
           "combos_12_2_3_present": any("is800_12_2_3" in v for v in tagof.values()),
           "combos_is18168_5_5_present": any("is18168_5_5" in v for v in tagof.values())}
     # declared connections / bases (india_connection_design)
@@ -1000,6 +1243,114 @@ def section12_model_data(cfg, reg, length, role_of, env, per_case_tags, cases, i
     # EBF links (IS 18168:2023 11 / 12.3): declared by the custom_build as info['links'] (WP6)
     md["links"] = ebf_links_model_data(cfg, info0, reg, members, forces, run)
     return md
+
+
+def section12_cfg(cfg):
+    """The cfg that india_is800_s12.section12_checks (and the other Section 12 helpers) receive from design_india."""
+    import india_seismic_gates as G
+    s12_cfg = dict(cfg.get("section12_inputs") or {}, zone=G.zone_of(cfg), I=G.importance_of(cfg),
+                   height_m=G.building_height_m(cfg), brace_config=cfg.get("brace_config"),
+                   apply_is18168=cfg.get("apply_is18168"), eor_weld_exception=cfg.get("eor_weld_exception"),
+                   is18168_table2=cfg.get("is18168_table2"))
+    s12_cfg.update({k: cfg[k] for k in ("occupancy", "scwb_pu_basis", "beam_lateral_bracing") if k in cfg})  # H52 / H46; first wave 6.2
+    if cfg.get("truss_connections"):        # MSME (2026-10): the knee checks (12.10.2.1 / 12.10.2.4) read the specs
+        s12_cfg["truss_connections"] = cfg["truss_connections"]
+    if cfg.get("peb_rules"):                                        # PEB-LEVERS: base_shear_key switch (base_checks)
+        s12_cfg["peb_rules"] = cfg["peb_rules"]
+    return s12_cfg
+
+
+def column_line(n1, n2, grid_lines=None):
+    """MSME (2026-10): a column's grid line (i, j) from its end that lies on the grid (info['present']).  A column
+    piece that starts at an off-grid node -- the upper piece of a gable post, from the truss bottom-chord node to the
+    top chord -- is read from its other end.  Before, the off-grid node decoded to a line that is not a column line
+    (a truss-node line, which is also a moment line), so the post's upper piece was taken as a frame column.
+    Without grid information the first node is used, as before."""
+    ln1 = ((n1 % 100000) // 100, n1 % 100)
+    if not grid_lines or ln1 in grid_lines:
+        return ln1
+    ln2 = ((n2 % 100000) // 100, n2 % 100)
+    return ln2 if ln2 in grid_lines else ln1
+
+
+I8_GAMMA_M0 = 1.10                      # IS 800 Table 5 gamma_m0 (the knee records' gross-yield fallback)
+
+
+def I8_fy(p, grade="E250"):
+    """fy of a rolled section by its thickness band (IS 2062), for the column Mp the D-T10 note compares with."""
+    import india_is800 as _I8
+    t = max(float(p.get("tf") or 0.0), float(p.get("tw") or 0.0))
+    return float(_I8.is2062_properties(grade, t).get("fy_MPa") or _I8.fy_is2062("E250", t))   # finding 6
+
+
+def _truss_knee_records(cfg, info0, reg, length, elem_results):
+    """MSME (2026-10): the knee records declared by the custom_build (info['truss_knees'] = [{id, heel_node,
+    knee_node, chord_node, brace_tag, truss, span_mm, trib_mm}]) with the node coordinates, the knee brace's design
+    strength N_d = min(Pd, Td) from its member check, and the 1.2DL + 0.5LL end reaction of the truss (roof dead load
+    incl. collateral and PV, roof imposed load, over the truss tributary width and span, + half the truss self-weight)."""
+    import roof_geometry as RG
+    import static_model as SM
+    pls = RG.planes(cfg) if RG.has_planes(cfg) else []
+    D_, _L0, Lr_, S_ = RG.plane_pressures(cfg, pls[0]) if pls else (float(cfg.get("D_roof") or 0.0), 0.0,
+                                                                     float(cfg.get("Lr") or 0.0), 0.0)
+    D_ += E.roof_nonpermanent_kNm2(cfg)
+    tinfo = info0.get("truss") or {}
+    out = []
+    for k_ in info0.get("truss_knees") or []:
+        r = dict(k_)
+        r["coords"] = {n: tuple(ops.nodeCoord(n)) for n in (k_["heel_node"], k_["knee_node"], k_["chord_node"])}
+        t = k_["brace_tag"]
+        r["brace_section"] = reg[t][1]
+        r["brace_role"] = "truss_%s" % (tinfo.get(t) or {}).get("group", "knee_brace")
+        res_t = elem_results.get(t) or {}
+        caps = res_t.get("capacities") or {}
+        # Steltic design ruling D-T10 -- owner ruling 2026-11-01 (1.2 x what the knee brace can deliver); lead reading
+        # 2026-11-01: N_del = Ag fy CHARACTERISTIC, per IS 800 12.7.3.1(a), max over tension and compression (the
+        # characteristic buckling strength Pd gamma_m0 <= Ag fy, so Ag fy governs); the design values Tdg / Tdn / Tdb
+        # are kept for the brace-yields-first ductility-order check (both sides design values)
+        Pd = (caps.get("compression") or {}).get("Pd_N")
+        ls = (caps.get("tension") or {}).get("limit_states") or {}
+        fy_ = res_t.get("fy_MPa") or (res_t.get("material") or {}).get("fy_MPa")
+        A_ = E.Ipack(r["brace_section"])[0]
+        Tdg = ((ls.get("6.2 yield") or {}).get("T_N")
+               or (A_ * float(fy_) / I8_GAMMA_M0 if fy_ else None))
+        Ty = A_ * float(fy_) if fy_ else (Tdg * I8_GAMMA_M0 if Tdg else None)
+        Pc = Pd * I8_GAMMA_M0 if Pd else None
+        r["Pd_N"], r["Pd_char_N"], r["Ty_N"], r["Tdg_N"] = Pd, Pc, Ty, Tdg
+        r["Tdn_N"] = (ls.get("6.3.3 rupture") or ls.get("6.3.1 rupture") or {}).get("T_N")
+        r["Tdb_N"] = (ls.get("6.4 block shear") or {}).get("T_N")
+        vals = [v for v in (Pc, Ty) if v]
+        r["member_capacity"] = max(vals) if vals else None
+        r["N_del_basis"] = ("N_del = max(Ag fy %s, Pd gamma_m0 %s) characteristic (D-T10, IS 800 12.7.3.1(a) basis)"
+                            % ("-" if Ty is None else "%.1f kN" % (Ty / 1e3),
+                               "-" if Pc is None else "%.1f kN" % (Pc / 1e3)))
+        # re-check 2: the members at the knee-brace node on the bottom chord (the vertical and the chord)
+        cn_ = k_["chord_node"]
+        at_cn = [tt for tt, v in reg.items() if cn_ in (v[2], v[3])]
+        vt = [tt for tt in at_cn if (tinfo.get(tt) or {}).get("group") == "vertical"]
+        ch = [tt for tt in at_cn if (tinfo.get(tt) or {}).get("group") == "bottom_chord"]
+        r["vertical_section"] = reg[vt[0]][1] if vt else None
+        r["chord_section"] = reg[ch[0]][1] if ch else None
+        # the column at the knee (the piece from the knee station up to the heel) and its plastic moment Zp fy
+        kn_ = k_["knee_node"]
+        col_t = [tt for tt, v in reg.items() if v[0] == "col" and kn_ in (v[2], v[3])]
+        up = [tt for tt in col_t if reg[tt][2] == kn_] or col_t
+        if up:
+            csec = reg[up[0]][1]
+            r["column_section"] = csec
+            try:
+                pc_ = S.props(csec)
+                r["column_Mp_Nmm"] = float(pc_["Zx"]) * float(I8_fy(pc_))
+            except Exception:
+                r["column_Mp_Nmm"] = None
+        sw = sum(SM.STEEL_UNIT_WEIGHT_N_PER_MM3 * E.Ipack(reg[tt][1])[0] * length[tt] for tt, v in tinfo.items()
+                 if v.get("truss") == k_.get("truss") and tt in reg)
+        span, trib = float(k_.get("span_mm") or 0.0), float(k_.get("trib_mm") or 0.0)
+        r["V_gravity_N"] = (1.2 * D_ + 0.5 * max(Lr_, S_)) * trib / 1000.0 * span / 2.0 + 1.2 * sw / 2.0
+        r["V_gravity_basis"] = ("1.2DL + 0.5LL end reaction: (1.2 x %.3f + 0.5 x %.3f) kN/m2 x %.0f mm x %.0f mm / 2 + "
+                                "1.2 x half the truss self-weight %.1f kN" % (D_, max(Lr_, S_), trib, span, sw / 2e3))
+        out.append(r)
+    return out
 
 
 def ebf_link_tags(cfg, info0):
@@ -1098,6 +1449,10 @@ def design_india(name, cfg, outdir):
         cases = combos(cfg)
         flex_note = ("IS 1893 Table 5(ii): three-dimensional dynamic analysis -> RSA adopted for the rigid case too "
                      "(cfg['analyses'] += ['RSA'])")
+    # review 2026-11 (MSME): the IS 800 Table 3 row choice reads each combination's own record (wind / earthquake
+    # terms), not its label text -- member-wind labels such as WMX+ (IN_Ex6) carry no 'W_' / 'WL'
+    import india_is800 as _I8r
+    _I8r.register_combinations(cases)
     rsa_el = None
     if _has_rsa(cases):
         rsa = run.get("rsa") or E.rsa_analysis(cfg)
@@ -1157,6 +1512,9 @@ def design_india(name, cfg, outdir):
     lateral_lines = brace_lines | moment_lines
 
     link_tags = ebf_link_tags(cfg, info0)                     # H39: EBF shear links get their own role / group
+    truss_info = info0.get("truss") or {}                     # MSME (2026-10): angle truss members (truss_design)
+    knee_lines = {((k_["heel_node"] % 100000) // 100, k_["heel_node"] % 100) for k_ in (info0.get("truss_knees") or [])}
+    lateral_lines = lateral_lines | knee_lines                # knee-braced truss portals are moment frames
 
     col_rel = info0.get("col_rel") or {}
     try:
@@ -1172,14 +1530,22 @@ def design_india(name, cfg, outdir):
             n_ = reg.get(t_, (None, None, 0, 0))[3]
             pinned_top_lines.add(((n_ % 100000) // 100, n_ % 100))
 
+    grid_lines = set()
+    for _v in ((info0.get("present") or {}).values()):
+        grid_lines |= set(_v)
+
+    _col_line = lambda n1, n2: column_line(n1, n2, grid_lines)
+
     def _role(kind, n1, n2, t=None):
+        if t in truss_info:
+            return "truss_%s" % truss_info[t]["group"]
         if kind == "brace":
             return "brace"
         if kind == "beam" and t in link_tags:
             return "link"
         if kind == "beam":
             return "roof" if (n1 // 100000) >= NFlev else "floor"
-        ln_ = ((n1 % 100000) // 100, n1 % 100)
+        ln_ = _col_line(n1, n2)
         if ln_ in pinned_top_lines and ln_ not in brace_lines:
             return "gravity_col"
         return "lateral_col" if ln_ in lateral_lines else "gravity_col"
@@ -1218,7 +1584,8 @@ def design_india(name, cfg, outdir):
         for t in sorted(reg):
             kind, sec, n1, n2 = reg[t]; e = envt[t]
             row_ = [t, kind, role_of[t], sec, round(length[t], 1), round(e["comp"] / 1e3, 2),
-                    round(e["tens"] / 1e3, 2), round(e["Mz"] / _mdiv, 3), round(e["My"] / _mdiv, 3),
+                    round(e["tens"] / 1e3, 2), round(_member_moment(e, "Mz") / _mdiv, 3),
+                    round(_member_moment(e, "My") / _mdiv, 3),
                     round(e["V"] / 1e3, 2), e["combo"]]
             if _pebcols:
                 d0_, d1_, pl_, kg_, pm_ = PO.schedule_extra(t, sec, length[t])
@@ -1239,6 +1606,37 @@ def design_india(name, cfg, outdir):
            "note": "Demands from the India analysis (IS 800 Table 4 / IS 1893 combinations); member checks "
                    "from india_is800.member_check_is800 per combination with concurrent forces.",
            "members": [], "connections": []}
+    if (sinfo or {}).get("wind_post_Ka"):
+        # engine checks (2026-11): the IS 875-3 7.2.2.1 (b) Ka of each wind post (gable wind column), per pattern
+        pkg["wind_post_Ka"] = sinfo["wind_post_Ka"]
+    elif (sinfo or {}).get("wind_post_note"):
+        # review finding 9 (2026-11-06): no wind post was found -- the package says why
+        pkg["wind_post_Ka"] = []
+        pkg["wind_post_Ka_note"] = sinfo["wind_post_note"]
+    if (sinfo or {}).get("member_wind_wall"):
+        # engine checks (2026-11): the member-wind wall scan per pattern -- column pieces under the roof (not on a wall)
+        # and pieces above an eave split that keep their own wall's tributary width (static_model.WALL_SCAN_BASIS);
+        # side walls (lead ruling, open point 1): the Table 5 surface and Cpe of every loaded member, the side-wall
+        # pressure record and the envelope residuals (every wall area reaches a member)
+        _mww = sinfo["member_wind_wall"]
+        import static_model as _SMw
+        pkg["member_wind_wall_scan"] = {
+            "basis": next((v.get("basis") for v in _mww.values() if v.get("basis")), None),
+            "side_wall_basis": _SMw.SIDE_WALL_CITE, "envelope_residual_basis": _SMw.ENVELOPE_RESIDUAL_BASIS,
+            # review R2-4: a hand-built pattern whose own Cpe match neither Table 5 wind angle
+            "warnings": sorted({"%s: %s" % (k, (v.get("side_walls") or {}).get("warning")) for k, v in _mww.items()
+                                if (v.get("side_walls") or {}).get("warning")}),
+            "patterns": {str(k): {"sheltered": v.get("sheltered") or [], "own_wall_width": v.get("own_wall_width") or [],
+                                  "side_walls": v.get("side_walls"), "side_sheltered": v.get("side_sheltered") or [],
+                                  "side_own_wall_width": v.get("side_own_wall_width") or [],
+                                  "stepped_facade": v.get("stepped_facade") or [],
+                                  "side_stepped_facade": v.get("side_stepped_facade") or [],
+                                  # review R3-3: pieces whose wall strip is split by height (no node at a step)
+                                  "height_bands": v.get("height_bands") or [],
+                                  "side_height_bands": v.get("side_height_bands") or [],
+                                  "envelope_residual": v.get("envelope_residual") or [],
+                                  "members": v.get("members") or []}
+                         for k, v in sorted(_mww.items(), key=lambda kv: str(kv[0]))}}
     elem_results = {}
     # PEB-LEVERS: the switches of cfg['peb_rules'] used by the member checks (peb_levers): the moment-gradient C1 map
     # (ltb_c1 'gradient'), tension-rod braces (bracing 'tension_rods') and the element-input dump of peb_autosize
@@ -1279,15 +1677,22 @@ def design_india(name, cfg, outdir):
         t0, res = worst
         e = envt[t0]
         g = {q: max(envt[t][q] for t in tags) for q in ("comp", "tens", "Mz", "My", "V")}
+        g.update({q: max(_member_moment(envt[t], q) for t in tags) for q in ("Mz", "My")})   # + column span moments
         inp = {"kind": kind, "role": role, "section": sec, "n_elements": len(tags), "governing_element": t0,
                "length_mm": round(max(length[t] for t in tags), 1),
                "P_comp_N": round(g["comp"], 1), "P_tens_N": round(g["tens"], 1), "Mz_Nmm": round(g["Mz"], 1),
                "My_Nmm": round(g["My"], 1), "V_N": round(g["V"], 1), "governing_combo": e["combo"],
                "combo_forces_file": "design/member_combo_forces.json",
                "grade": _member_input_record(cfg, t0, kind, sec, 0, 0, 0, role).get("grade")}
-        rows = _check_rows(res)
+        gsp = {q: max(float(envt[t].get(q + "_span") or 0.0) for t in tags) for q in ("Mz", "My")}
+        if gsp["Mz"] or gsp["My"]:              # span-moment fix: the in-span extremes, shown apart
+            inp.update(Mz_span_Nmm=round(gsp["Mz"], 1), My_span_Nmm=round(gsp["My"], 1))
+        # engine checks 2: the strength line from the group's worst strength element, which need not be the element
+        # that governs the D/C, the Table 3 line from its worst Table 3 element; both recorded apart
+        rows, wst = group_check_rows(res, tags, elem_results, t0)
         dc = res.get("dc")
         pkg["members"].append({"id": "%s-%s" % (role, sec), "inputs": inp, "checks": rows,
+                               "strength_worst": wst["strength_worst"], "table3_worst": wst["table3_worst"],
                                "limit_state": "IS 800:2007 7-9 (member_check_is800)", "cited": res.get("clause"),
                                "capacity": res.get("capacities") and {k: (v if not isinstance(v, dict) else
                                                                           {kk: vv for kk, vv in v.items() if isinstance(vv, (int, float, str, bool))})
@@ -1328,13 +1733,10 @@ def design_india(name, cfg, outdir):
                                "ts_records": ts_rec, "ts_labels": {k: v for k, v in ts_labels.items() if k in ("X", "Y")}},
                               cases, info0, run=run)
     mem_by_id = {m["id"]: m for m in md["members"]}
-    s12_cfg = dict(cfg.get("section12_inputs") or {}, zone=G.zone_of(cfg), I=G.importance_of(cfg),
-                   height_m=G.building_height_m(cfg), brace_config=cfg.get("brace_config"),
-                   apply_is18168=cfg.get("apply_is18168"), eor_weld_exception=cfg.get("eor_weld_exception"),
-                   is18168_table2=cfg.get("is18168_table2"))
-    s12_cfg.update({k: cfg[k] for k in ("occupancy", "scwb_pu_basis", "beam_lateral_bracing") if k in cfg})  # H52 / H46; first wave 6.2
-    if cfg.get("peb_rules"):                                        # PEB-LEVERS: base_shear_key switch (base_checks)
-        s12_cfg["peb_rules"] = cfg["peb_rules"]
+    if info0.get("truss_knees"):
+        # MSME (2026-10): knee-braced truss portals (truss_design.knee_checks, IS 800 12.10.2.1 / 12.10.2.4)
+        md["truss_knees"] = _truss_knee_records(cfg, info0, reg, length, elem_results)
+    s12_cfg = section12_cfg(cfg)
     joint_conn = {}
     try:
         import india_is800_s12 as S12
@@ -1381,7 +1783,9 @@ def design_india(name, cfg, outdir):
                 if cn:
                     j["connection"] = cn
                     joint_conn[bm["section"]] = cn
-                    for k in ("continuity_plates", "continuity_plate_t_mm", "doubler_t_mm"):   # t for the OMF 12.10.2.5 check
+                    # t for the OMF 12.10.2.5 check; the doubler grade / fy for the 12.11.2.3 panel zone (2026-11)
+                    for k in ("continuity_plates", "continuity_plate_t_mm", "doubler_t_mm", "doubler_grade",
+                              "doubler_fy_MPa"):
                         if k in cn:
                             j[k] = cn[k]
     except Exception as ex:
@@ -1391,11 +1795,7 @@ def design_india(name, cfg, outdir):
         s12 = S12.section12_checks(cfg.get("system"), md, s12_cfg)
         pkg["capacity_design"] = {"system": cfg.get("system"), "R": G.declared_R(cfg), "section12": _jsonable(s12),
                                   "checks": {c.get("id", "c%d" % i) + ("@" + str(c.get("member")) if c.get("member") else ""):
-                                             dict({"value": c.get("value"), "limit": c.get("limit"), "dc": c.get("dc"),
-                                                   "ok": c.get("ok"), "pass": c.get("ok"), "clause": c.get("clause"),
-                                                   "cite": c.get("cite"), "found": c.get("ok") is not None},
-                                                  **({"sense": c["sense"]} if c.get("sense") else {}))
-                                             for i, c in enumerate(s12.get("checks") or [])}}
+                                             capacity_check_entry(c) for i, c in enumerate(s12.get("checks") or [])}}
     except ImportError as ex:
         s12 = {"checks": []}
         pkg["capacity_design"] = {"system": cfg.get("system"), "R": G.declared_R(cfg), "checks": {},
@@ -1489,6 +1889,13 @@ def design_india(name, cfg, outdir):
 
     def _conn_group(key, tags):
         kind, sec, role = key
+        if role.startswith("truss_"):
+            # MSME (2026-10): angle truss member ends bolted to the gussets (truss_design)
+            import truss_design as _TD
+            pkg["connections"].append(_TD.end_connection_record(
+                cfg, role, sec, tags, envt, elem_results, length,
+                sls_force_N=max(_conn_force_sls(t, "brace") for t in tags), sfrs=bool(info0.get("truss_knees"))))
+            return
         g = {q: max(envt[t][q] for t in tags) for q in ("comp", "tens", "Mz", "My", "V")}
         conn_max = 0.0
         for t in tags:
@@ -1588,7 +1995,9 @@ def design_india(name, cfg, outdir):
                 rel_ = info0.get("beam_rel") or {}
                 if any((rel_.get(t) or ("none",))[0] in ("I", "J") for t in sfrs_tags):
                     Vpin, pfx_ = _vp_demand(tags, g["V"], dem, notes)
-                    r = CD.beam_shear_connection_checks(cfg, {"section": sec, "role": "beam"}, Vpin)
+                    r = CD.beam_shear_connection_checks(cfg, {"section": sec, "role": "beam"}, Vpin,
+                                                        V_shear_N=dem.get("V_concurrent_N") if pfx_ else None,
+                                                        N_axial_N=dem.get("P_end_N") if pfx_ else None)
                     if r is None:
                         checks.append(_row("IS 800 10 shear connection (pinned end)", {
                             "ok": None, "clause": "IS 800:2007 10.3 / 8.4.1 / 6.4.1",
@@ -1600,7 +2009,9 @@ def design_india(name, cfg, outdir):
                 # braced-bay / gravity beam: shear connection under the governing V; a beam end carrying axial force
                 # (collector / chord / flexible deck) is checked for the V + N resultant per combination (GOLD-5)
                 Vd, pfx_ = _vp_demand(tags, g["V"], dem, notes)
-                r = CD.beam_shear_connection_checks(cfg, {"section": sec, "role": "beam"}, Vd)
+                r = CD.beam_shear_connection_checks(cfg, {"section": sec, "role": "beam"}, Vd,
+                                                    V_shear_N=dem.get("V_concurrent_N") if pfx_ else None,
+                                                    N_axial_N=dem.get("P_end_N") if pfx_ else None)
                 if r is None:
                     checks.append(_row("IS 800 10 shear connection", {"ok": None, "clause": "IS 800:2007 10.3 / 8.4.1 / 6.4.1",
                                                                        "reason": "cfg['connections']['beam_shear'] not declared for %s" % sec}))
@@ -1716,6 +2127,14 @@ def design_india(name, cfg, outdir):
                     Hc_u = hc if Hc_u is None else min(Hc_u, hc)
                 spl = CD.column_splice(cfg, m0, p0, fy0, recs_u, sfrs=(role == "lateral_col"), tags_of=tagof,
                                        seismic_cfg=s12_cfg, tie_force_N=tie_N, Hc_mm=Hc_u, Zx_lower_mm3=Zlow)
+                # SECT review (2026-11-07): a 'none' splice means the column is continuous over its length -- it holds
+                # for a column that starts at the base and is the same section all the way down.  A piece of this
+                # section that sits on another section (or on no column) has a splice at that change, which must be
+                # designed: an open item, not a pass.
+                if spl is not None and spl.get("none"):
+                    open_ = none_splice_open_row(sec, reg, upper)
+                    if open_ is not None:
+                        spl = {"checks": {open_.pop("name"): open_}}
                 if spl is None:
                     checks.append(_row("IS 800 12.5.2 column splice", {"ok": None, "clause": "IS 800:2007 12.5.2 / 10",
                                                                         "reason": "cfg['connections']['column_splice'] not declared for %s" % sec}))
@@ -2280,6 +2699,11 @@ def secondary_strut_checks(cfg, s_):
     mem = {"id": s_.get("id"), "section": sec, "grade": s_.get("grade") or cfg.get("steel_grade"), "role": "column",
            "L_mm": L, "Kz": float(s_.get("Kz") or 1.0), "Ky": float(s_.get("Ky") or 1.0), "LLT_sag_mm": llt, "LLT_hog_mm": llt,
            "process": s_.get("process")}
+    # MSME (2026-10): an angle strut (roof bracing) -- pin-ended, axial only: the single-angle end condition (7.5.1.2) and
+    # the end-connection tension inputs (6.3.3 / 6.4.1) pass through to the axial check
+    for k_ in ("angle_connection", "tension_inputs", "axial_only"):
+        if s_.get(k_) is not None:
+            mem[k_] = s_[k_]
     cf = [{"combo": d["combo"], "P_N": abs(float(d["P_N"])), "Mz_i_Nmm": float(d.get("M_Nmm") or 0.0), "Mz_j_Nmm": 0.0,
            "Mz_mid_Nmm": 0.0, "My_i_Nmm": 0.0, "My_j_Nmm": 0.0, "Vy_N": abs(float(d.get("V_N") or 0.0)), "Vz_N": 0.0}
           for d in (s_.get("demands") or [])]                     # PEB (2026-10): optional V_N (e.g. a crane bracket)

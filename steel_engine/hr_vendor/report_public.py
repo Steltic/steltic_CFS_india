@@ -34,6 +34,10 @@ RULINGS = {
     "D-T6": "complete-penetration welds for the connection welds",
     "D-T7": "joints designed for 1.2 Mp",
     "D-T9": "reading of the IS 18168 6.5 flange splice-plate rule, open",
+    "D-T10": "knee-braced truss portal: the knee designed for 1.2 times the moment the knee brace can deliver in "
+             "either direction, taken as its characteristic gross-section yield (as IS 800 12.7.3.1(a) does for brace "
+             "connections), so that the brace yields before the knee and heel connections fail, with HSFG 8.8 bolts "
+             "and complete-penetration welds at the column",
     "D8": "floor area taken as the proxy for the number of occupants",
 }
 RULING_PREFIX = "Steltic design ruling"
@@ -388,13 +392,16 @@ LEAK_PATTERNS = {
                 r"solar_pv|D_roof_pv|wind_defl_[XY])\b|\bcfg\[|\bcfg\s+\w|\b(?:wind_summary|column_base|load_plan)\.\w+",
     "internal word": r"\bgold\b|\bowner rulings?\b|\bowner decision\b|\bbrief ruling\b|\bspec\s+WP\d|\(was None\)",
     "bare ruling": r"(?<![\w-])(?:D-T\d+|D8)(?![\w-])",
+    # third wave (2026-11): a dict / record printed raw ({"X": 0.002, "Y": 0.002}, {'id': ...}): quoted key + colon
+    "raw dict": r"\{\s*['\"][^'\"{}]{1,40}['\"]\s*:\s*[^{}]{1,160}\}",
 }
 _LEAK_RE = {k: re.compile(v) for k, v in LEAK_PATTERNS.items()}
 
 
 def leaks(text, kinds=None):
     """[(kind, match)] of everything the public-text pass would refuse in plain text (HTML tags are skipped)."""
-    s = re.sub(r"<[^>]+>", " | ", str(text or ""))           # a tag boundary reads as a cell boundary
+    s = re.sub(r"(?is)<(style|script)\b.*?</\1>", " ", str(text or ""))   # page style / scripts are not text
+    s = re.sub(r"<[^>]+>", " | ", s)                         # a tag boundary reads as a cell boundary
     s = html.unescape(s)
     out = []
     for k, rx in _LEAK_RE.items():

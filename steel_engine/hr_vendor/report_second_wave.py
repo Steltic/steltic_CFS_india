@@ -133,10 +133,13 @@ def headline(pkg):
         mid, sec = m.get("id"), (m.get("inputs") or {}).get("section") or m.get("section")
         if st is not None and (out["strength"] is None or st > out["strength"]["dc"]):
             out["strength"] = {"dc": round(st, 4), "member": mid, "section": sec,
-                               "check": re.sub(r"\s*\((?:governing )?combination .*$", "",
+                               "check": re.sub(r"\s*\((?:element .*?, )?(?:governing )?combination .*$", "",
                                                str((sc or {}).get("name") or "member check")).strip(),
                                "combination": _combo_of(sc) if sc else (m.get("inputs") or {}).get("governing_combo"),
                                "clause": (sc or {}).get("clause") or "IS 800:2007 7.1.2, 8.2, 8.4, 9.3"}
+            if (sc or {}).get("element") is not None:
+                # engine checks 2: the group's worst strength element, when it is not the D/C-governing one
+                out["strength"]["element"] = "e%s" % sc["element"]
         if sl is not None and (out["slenderness"] is None or sl > out["slenderness"]["ratio"]):
             out["slenderness"] = {"ratio": round(sl, 4), "KL_r": round(float(slc["value"]), 1) if _num(slc.get("value")) else None,
                                   "limit": slc.get("limit"), "member": mid, "section": sec,
@@ -176,8 +179,9 @@ def headline_sentence(h):
     st, sl = (h or {}).get("strength"), (h or {}).get("slenderness")
     parts = []
     if st:
-        parts.append("worst member strength ratio %s (%s, %s%s)" % (
-            _f(st["dc"]), st["member"], st.get("check") or "IS 800 member check",
+        parts.append("worst member strength ratio %s (%s%s, %s%s)" % (
+            _f(st["dc"]), st["member"], (" element %s" % st["element"]) if st.get("element") else "",
+            st.get("check") or "IS 800 member check",
             (", " + st["combination"]) if st.get("combination") else ""))
     if sl:
         parts.append("worst member slenderness KL/r %s against the IS 800 Table 3 limit of %s (ratio %s, %s)" % (
@@ -703,6 +707,28 @@ def framing_html(name, cfg=None):
             % (_e(fr["title"]), _e(fr.get("what") or fr.get("blurb")), _e(fr.get("practice") or "")))
 
 
+def context_html(cfg):
+    """Third wave (2026-10, handoff P8): the practice context, the section families (cfg['section_families']
+    {statement, cite}: the IS 808 / IS 1161 families and the brace-material basis) and the fire-resistance basis a
+    job declares (cfg['practice_context'] text; cfg['fire_resistance'] {statement, cite}), after the framing box."""
+    cfg = cfg or {}
+    out = []
+    pc = cfg.get("practice_context")
+    if pc:
+        out.append("<div class='chk'><div class='chk-h'>Practice context</div><p>%s</p></div>" % _e(PUB.strict_text(pc)))
+    sf = cfg.get("section_families")       # third wave (2026-11): the section families and the brace basis
+    if isinstance(sf, dict) and sf.get("statement"):
+        out.append("<div class='chk'><div class='chk-h'>Section families</div><p>%s</p>%s</div>"
+                   % (_e(PUB.strict_text(sf["statement"])),
+                      ("<p class='cnote'>%s</p>" % _e(PUB.strict_text(sf["cite"]))) if sf.get("cite") else ""))
+    fr = cfg.get("fire_resistance")
+    if isinstance(fr, dict) and fr.get("statement"):
+        out.append("<div class='chk'><div class='chk-h'>Fire resistance</div><p>%s</p>%s</div>"
+                   % (_e(PUB.strict_text(fr["statement"])),
+                      ("<p class='cnote'>%s</p>" % _e(PUB.strict_text(fr["cite"]))) if fr.get("cite") else ""))
+    return "".join(out)
+
+
 def titles():
     """{job_id: {title, blurb}} for the site build (briefs/titles_wave2.json)."""
     return {k: {"title": v["title"], "blurb": v["blurb"]} for k, v in FRAMING.items()}
@@ -742,6 +768,13 @@ def _difference_bases(cc):
     return None, None
 
 
+def _sgn(x, nd=2):
+    """A signed figure for a bracket: '+0.33', '−0.26' (true minus), '0.00'."""
+    x = float(x)
+    v = _f(abs(x), nd)
+    return ("+" + v) if x > 0 else ("\u2212" + v) if x < 0 else v
+
+
 def difference_text(cc):
     """Check fixes (2026-10-23, finding 7): the cost-of-compliance difference with its base said in words, both ways
     ('x % more steel than the ordinary frame; the ordinary frame uses y % less than the compliant design')."""
@@ -752,6 +785,15 @@ def difference_text(cc):
     d = float(d)
     comp, ordi = _difference_bases(cc)
     btw = (" (%s)" % _pt(df["between"])) if df.get("between") else ""
+    rng = df.get("range_kg_m2")
+    if isinstance(rng, (list, tuple)) and len(rng) == 2 and all(_num(x) for x in rng):
+        # a bracket, not a signed figure (PEB final review, 2026-11-07): no lighter compliant-or-ordinary design was
+        # found, so the cost lies between the two bounds
+        lo, hi = sorted(float(x) for x in rng)
+        out = "<p><b>Difference:</b> between %s and %s kg/m²%s.</p>" % (_sgn(lo), _sgn(hi), btw)
+        if df.get("caveat"):
+            out += "<p>%s</p>" % _pt(df["caveat"])
+        return out
     if comp and ordi:
         p_ord = float(df["percent"]) if _num(df.get("percent")) else 100.0 * d / ordi
         p_comp = 100.0 * d / comp
@@ -903,6 +945,26 @@ def ridge_restraint_html(cfg, pkg):
 
 
 # ============================================================================================ H8 leftovers
+def value_words(val):
+    """A recorded value in words (third wave, 2026-11): a per-direction / per-key record {"X": 0.002, "Y": 0.002}
+    reads "0.002 (X) and 0.002 (Y)", a list "a, b and c", numbers in %g form -- never a raw dict or list."""
+    def num(v):
+        if isinstance(v, bool):
+            return "yes" if v else "no"
+        if isinstance(v, float):
+            return "%g" % v
+        return str(v)
+
+    def join(parts):
+        parts = [p for p in parts if p != ""]
+        return parts[0] if len(parts) == 1 else (", ".join(parts[:-1]) + " and " + parts[-1]) if parts else ""
+    if isinstance(val, dict):
+        return join(["%s (%s)" % (value_words(v), str(k).replace("_", " ")) for k, v in val.items()])
+    if isinstance(val, (list, tuple)):
+        return join([value_words(v) for v in val])
+    return num(val)
+
+
 def assumptions_html(cfg, pkg=None):
     """The design engineer's assumptions recorded in the job (cfg['eor_assumptions'] and found:false retrieval rows
     carrying {value, source, verify}): printed for the checking engineer to confirm."""
@@ -912,7 +974,7 @@ def assumptions_html(cfg, pkg=None):
             continue
         item = a.get("item") or a.get("query") or ""
         val = a.get("value")
-        rows.append([_e(plain(str(item))), _e(plain(json.dumps(val) if isinstance(val, (dict, list)) else str(val))),
+        rows.append([_e(plain(str(item))), _e(plain(value_words(val))),
                      _e(plain(str(a.get("source") or ""))), _e(normalise_citations(str(a.get("cite") or ""))),
                      "yes" if a.get("verify") else "&mdash;"])
     for r in _plan(cfg, pkg).get("retrieval") or []:
