@@ -101,4 +101,3 @@ ground by its own X-bracing.
 ## India openBIM output
 
 The optional top-level `openbim_layout` key supplies the physical layout to the native CFS design runner. After calculation it resolves the selected CFS and HR member records and writes the bound exchange file at `design/openbim_handoff.json`. For the layout fields and post-analysis export, see the [openBIM handoff guide](../docs/openbim.md).
-
