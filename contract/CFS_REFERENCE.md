@@ -97,3 +97,7 @@ ground by its own X-bracing.
 * Wind / EL rows: 0.75 f effective widths and allowable × 4/3 (IS 801 5.2.1.1, 6.1.2); the section is never less than that
   required for DL + IL alone.
 * EOR / test inputs are declared, cited, marked VERIFY and listed in `EOR_inputs.json`; they never silently become code values.
+
+## India openBIM output
+
+The optional top-level `openbim_layout` key supplies the physical layout to the native CFS design runner. After calculation it resolves the selected CFS and HR member records and writes the bound exchange file at `design/openbim_handoff.json`. For the layout fields and post-analysis export, see the [openBIM handoff guide](../docs/openbim.md).
