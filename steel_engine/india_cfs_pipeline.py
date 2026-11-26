@@ -274,4 +274,7 @@ def design_and_report(name, cfg, outdir=None, do_report=True):
             for e in eor:
                 f.write("- %s: %s (%s)\n" % (e.get("item"), e.get("value"), e.get("source")))
     print("[%s] status %s (%d reasons)" % (name, st["status"], st["n_reasons"]))
+    if cfg.get("openbim_layout") is not None:
+        from openbim_handoff import write_handoff
+        out["openbim_handoff"] = str(write_handoff(root, cfg["openbim_layout"]))
     return out
