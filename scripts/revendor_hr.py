@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import datetime
-import hashlib
 import os
 import re
 import subprocess
@@ -57,7 +56,7 @@ def plan(hr_root, sha):
     writes, added, same = {}, [], 0
     for rel, data in sorted(ref.items()):
         p = os.path.join(VENDOR, rel)
-        if rel in have and os.path.isfile(p) and hashlib.sha256(data).hexdigest() == CV.sha256(p):
+        if rel in have and os.path.isfile(p) and CV.matches_committed(p, data):
             same += 1
             continue
         writes[rel] = data

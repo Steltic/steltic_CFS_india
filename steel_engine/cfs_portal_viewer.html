@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>__TITLE__ &middot; CFS portal elevation</title>
+<style>
+  :root{color-scheme:light;color:#20303b;background:#f3f5f6;font:16px system-ui,sans-serif}
+  *{box-sizing:border-box}body{max-width:1100px;margin:0 auto;padding:clamp(14px,3vw,36px)}
+  h1{font-size:clamp(24px,4vw,36px);margin:0 0 4px}h2{font-size:18px;margin:0 0 7px}
+  header{margin-bottom:20px}p{line-height:1.5;margin:0 0 10px}a{color:#135a87}
+  section{border:1px solid #c8d2d7;border-radius:8px;background:#fff;margin:14px 0;padding:clamp(12px,2vw,22px)}
+  svg{width:100%;height:auto;display:block;background:#f7f9fa;margin-top:8px}
+  svg text{fill:#384b57;font:13px system-ui,sans-serif}.elem line{stroke:#697780;stroke-width:3.4}
+  .col line{stroke:#2d6088}.raf line{stroke:#9c402c}.knee line{stroke:#247057}.mezz line{stroke:#84672c}
+  .elem.active line{stroke:#132a38;stroke-width:7}.elem{cursor:pointer}svg rect{fill:#20282d}
+  .controls,dl{display:flex;flex-wrap:wrap;gap:12px 24px;margin:12px 0 0}
+  label{display:grid;gap:5px;font-weight:600}select{font:inherit;background:white;color:#20303b;border:1px solid #879ba6;border-radius:4px;padding:5px 8px}
+  dt{font-size:13px;color:#53646e}dd{margin:3px 0 0;font-variant-numeric:tabular-nums}
+  .cfs-scroll{overflow:auto}table{width:100%;border-collapse:collapse;font-size:14px}
+  td,th{border-bottom:1px solid #d5dfe3;text-align:left;padding:6px 9px;white-space:nowrap}
+  th{background:#eaf0f3}td:last-child,td:nth-last-child(2){font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<header><h1>__TITLE__</h1><p>All-CFS portal &middot; transverse analytical elevation</p></header>
+<section><h2>Frame geometry</h2><p>__FRAME_INFO__</p>__SVG__</section>
+__CONTROLS__
+<section><h2>Cold-formed member schedule</h2>__CAPTION____SCHEDULE__</section>
+<script id="portal-actions" type="application/json">__DATA__</script>
+<script>
+  const loadCase = document.getElementById("combination");
+  if (loadCase) {
+    const member = document.getElementById("member");
+    const results = JSON.parse(document.getElementById("portal-actions").textContent);
+    const lines = document.querySelectorAll("g.elem");
+    function selectMember() {
+      const actions = results[loadCase.value]?.[member.value] || [];
+      for (const [i, key, divisor, unit] of [[0, "axial", 1000, "kN"], [1, "shear", 1000, "kN"], [2, "moment", 1000000, "kN·m"]]) {
+        const value = actions[i];
+        document.getElementById(key).textContent = Number.isFinite(value) ? (value / divisor).toFixed(2) + " " + unit : "not evaluated";
+      }
+      for (const group of lines) group.classList.toggle("active", group.dataset.label === member.value);
+    }
+    for (const group of lines) group.addEventListener("click", () => { member.value = group.dataset.label; selectMember(); });
+    loadCase.addEventListener("change", selectMember);
+    member.addEventListener("change", selectMember);
+    selectMember();
+  }
+</script>
+</body>
+</html>

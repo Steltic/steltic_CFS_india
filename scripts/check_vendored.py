@@ -17,6 +17,8 @@ copied from is recorded in steel_engine/hr_vendor/VENDORED_FROM.md.
 from __future__ import annotations
 import hashlib
 import os
+from pathlib import Path
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -49,6 +51,20 @@ def sha256(path):
     return h.hexdigest()
 
 
+def matches_committed(path, source):
+    """Compare stored bytes, accounting for Git's configured checkout line endings."""
+    checkout = Path(path).read_bytes()
+    if checkout == source:
+        return True
+    if b"\x00" in checkout or checkout.replace(b"\r\n", b"\n") != source:
+        return False
+    relative = Path(os.path.relpath(path, CFS_ROOT)).as_posix()
+    command = ["git", "-C", CFS_ROOT, "hash-object"]
+    clean = subprocess.run(command + ["--path=" + relative, "--stdin"], input=checkout, capture_output=True)
+    original = subprocess.run(command + ["--no-filters", "--stdin"], input=source, capture_output=True)
+    return clean.returncode == original.returncode == 0 and clean.stdout == original.stdout
+
+
 def vendored_files():
     out = []
     for root, dirs, files in os.walk(VENDOR):
@@ -57,7 +73,7 @@ def vendored_files():
             if fn in SKIP or fn.endswith((".pyc",)):
                 continue
             p = os.path.join(root, fn)
-            out.append(os.path.relpath(p, VENDOR))
+            out.append(Path(os.path.relpath(p, VENDOR)).as_posix())
     return sorted(out)
 
 
@@ -73,7 +89,6 @@ def pinned_commit():
 
 
 def _git(*args):
-    import subprocess
     return subprocess.run(["git", "-C", HR_ROOT] + list(args), capture_output=True)
 
 
@@ -105,7 +120,7 @@ def compare(commit=None):
         if ref is not None:
             if rel not in ref:
                 missing.append(rel)
-            elif hashlib.sha256(ref[rel]).hexdigest() == sha256(a):
+            elif matches_committed(a, ref[rel]):
                 same.append(rel)
             else:
                 diff.append(rel)

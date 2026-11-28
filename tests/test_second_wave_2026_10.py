@@ -81,13 +81,13 @@ def test_C1_vendor_pinned_to_hr_main():
     report-only public-text pass, report_public.py).  Third wave (2026-11-07): re-vendored from steltic_india main
     f0a83dd (PRs #29-#36); the 15 CFS golds are identical at 6 decimals before and after."""
     pin = open(os.path.join(ROOT, "steel_engine", "hr_vendor", "VENDORED_FROM.md")).read()
-    assert "Commit: **f0a83dd9804333d62ac37621dc2850a60c72ebf7**" in pin
+    assert "Commit: **6a0af8dc152f8e86e42ac0daa004190b6ad5265b**" in pin
     assert "bca5377" in pin                                 # the check-fixes re-sync stays recorded in the history
     assert "c7c9cc9" in pin                                 # the main re-sync stays recorded in the history
-    for f in ("report_second_wave.py", "peb_levers.py", "peb_autosize.py", "report_public.py"):
+    for f in ("report_second_wave.py", "peb_levers.py", "peb_autosize.py", "report_public.py", "viewer_native.py"):
         assert os.path.exists(os.path.join(ROOT, "steel_engine", "hr_vendor", f))
     import india_cfs_env
-    assert india_cfs_env.vendored_commit().startswith("f0a83dd")
+    assert india_cfs_env.vendored_commit().startswith("6a0af8d")
 
 
 # ================================================================================================ fixtures
