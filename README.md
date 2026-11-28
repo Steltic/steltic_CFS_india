@@ -90,6 +90,16 @@ py -3.12 -m venv .venv
 pip install -e .
 ```
 
+## Rebuild the native web viewer
+
+The hybrid viewer shows the analytical hot-rolled frame in SI units. Its **Cold-formed member schedule** button displays the selected IS 801 sections, ply counts and group strength ratios from the same job. The all-CFS viewer shows the transverse portal elevation and the recorded member actions for each load combination. The calculation report identifies the design assumptions and open checks.
+
+To rebuild viewers from a saved design, run the following from this repository. The output directory receives `viewer_3d.html` and, for a hybrid job, `lateral/<frame-name>/viewer_3d.html`. Keep the original job intact and stage the new files alongside their matching reports.
+
+```shell
+python steel_engine/india_cfs_viewer.py SAVED_CFS_JOB --output WEBSITE_CASE_DIRECTORY
+```
+
 ## Critical difference from USA steltic_cfs: loads are retrieved
 
 | | USA `steltic_cfs` | India `steltic_CFS_india` |

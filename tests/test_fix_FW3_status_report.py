@@ -74,7 +74,14 @@ def test_runner_writes_job_cfg_py(tmp_path):
 
 def test_vendored_modules_win_through_a_symlinked_repo(tmp_path):
     link = tmp_path / "eng_link"
-    os.symlink(ENG, link)
+    try:
+        os.symlink(ENG, link, target_is_directory=True)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) != 1314:
+            raise
+        # A directory junction still exercises real-path resolution without Developer Mode.
+        from _winapi import CreateJunction
+        CreateJunction(os.path.abspath(ENG), str(link))
     code = ("import sys; sys.path.insert(0, %r); "
             "src = open(%r).read().split('def _callables')[0]; "
             "exec(compile(src, %r, 'exec'), {'__file__': %r, '__name__': 'x'}); "

@@ -423,7 +423,7 @@ def _write_job_cfg_py(root, spec_path):
     """2026-10 first wave (frame-report reconcile item 'cfg.py not found'): every lateral sub-job gets a cfg.py that
     rebuilds its HR cfg from the spec, so the saved OpenSees model is reproducible and editable."""
     name = os.path.basename(os.path.normpath(root))
-    rel = os.path.relpath(os.path.abspath(spec_path), root)
+    rel = os.path.relpath(os.path.abspath(spec_path), root).replace(os.sep, "/")
     with open(os.path.join(root, "cfg.py"), "w", encoding="utf-8") as f:
         f.write(CFG_PY % {"name": name, "spec_rel": rel, "runner": os.path.abspath(__file__)})
 
